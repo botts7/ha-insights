@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from ..insight import Insight, InsightKind
+from ..observers.state_event_buffer import StateEventBuffer
 
 if TYPE_CHECKING:
     from homeassistant.core import Event, HomeAssistant
@@ -24,13 +25,13 @@ class DetectorContext:
 
     Carries everything a detector needs without forcing it to know about HA
     internals directly. Stable shape from v0.1; new optional fields will be
-    appended as later steps add capabilities (event buffer slice, recorder
-    helper, redactor, etc.).
+    appended as later steps add capabilities (recorder helper, redactor, etc.).
     """
 
     hass: HomeAssistant
     detector_config: dict[str, Any] = field(default_factory=dict)
     area_filter: frozenset[str] = field(default_factory=frozenset)
+    event_buffer: StateEventBuffer | None = None
 
 
 class Detector(ABC):
