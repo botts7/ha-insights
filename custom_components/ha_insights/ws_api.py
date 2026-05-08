@@ -98,7 +98,7 @@ def ws_hello(
     {
         vol.Required("type"): "home_insights/list",
         vol.Optional("include_dismissed", default=False): bool,
-        vol.Optional("include_applied", default=True): bool,
+        vol.Optional("include_applied", default=False): bool,
     }
 )
 @websocket_api.async_response
