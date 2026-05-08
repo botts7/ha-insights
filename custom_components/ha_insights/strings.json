@@ -1,0 +1,13 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Set up HA Insights",
+        "description": "HA Insights observes your home state to suggest automations. The full privacy wizard (Off / Local / Cloud) lands in a later release."
+      }
+    },
+    "abort": {
+      "already_configured": "HA Insights is already set up."
+    }
+  }
+}

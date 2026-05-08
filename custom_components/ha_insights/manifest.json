@@ -1,0 +1,11 @@
+{
+  "domain": "ha_insights",
+  "name": "HA Insights",
+  "codeowners": ["@botts7"],
+  "config_flow": true,
+  "documentation": "https://github.com/botts7/ha-insights",
+  "iot_class": "calculated",
+  "issue_tracker": "https://github.com/botts7/ha-insights/issues",
+  "requirements": [],
+  "version": "0.1.0-dev"
+}
