@@ -63,7 +63,9 @@ async def test_hello_handshake(hass: HomeAssistant, hass_ws_client, setup_integr
     assert set(result["supported_methods"]) == set(SUPPORTED_METHODS)
 
 
-async def test_hello_accepts_card_version(hass: HomeAssistant, hass_ws_client, setup_integration) -> None:
+async def test_hello_accepts_card_version(
+    hass: HomeAssistant, hass_ws_client, setup_integration
+) -> None:
     client = await hass_ws_client(hass)
     await client.send_json_auto_id(
         {"type": "home_insights/hello", "card_version": "0.1.0-dev"}
