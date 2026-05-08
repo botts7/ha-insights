@@ -8,8 +8,6 @@ Heavy mocking — we don't actually call any LLM. The point is:
 """
 from __future__ import annotations
 
-# Import so unittest.mock.patch can resolve the attribute at the dotted path.
-import homeassistant.components.conversation  # noqa: F401
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from pathlib import Path
