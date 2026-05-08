@@ -35,6 +35,7 @@ SUPPORTED_METHODS = (
     "apply",
     "scan_now",
     "purge_all",
+    "explain",
 )
 
 
@@ -49,6 +50,7 @@ def async_register(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_apply)
     websocket_api.async_register_command(hass, ws_scan_now)
     websocket_api.async_register_command(hass, ws_purge_all)
+    websocket_api.async_register_command(hass, ws_explain)
     websocket_api.async_register_command(hass, ws_dev_inject_event)
 
 
@@ -123,6 +125,78 @@ async def ws_list(
     connection.send_result(
         msg["id"],
         {"insights": [i.to_dict() for i in insights]},
+    )
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "home_insights/explain",
+        vol.Required("insight_id"): str,
+        vol.Optional("agent_id"): vol.Any(str, None),
+    }
+)
+@websocket_api.async_response
+async def ws_explain(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """User-initiated LLM explanation. Redactor + agent + dereference + audit."""
+    from .llm import RedactionMode, Redactor, explain_insight, record_call
+
+    store = _get_store(hass)
+    if store is None:
+        connection.send_error(msg["id"], "not_set_up", "Store not initialized")
+        return
+
+    insight = await store.get_insight(msg["insight_id"])
+    if insight is None:
+        connection.send_error(
+            msg["id"], "not_found", f"No insight {msg['insight_id']!r}"
+        )
+        return
+
+    agent_id = msg.get("agent_id")
+    redactor = Redactor(store, mode=RedactionMode.AGGRESSIVE)
+    result = await explain_insight(
+        hass, agent_id=agent_id, insight=insight, redactor=redactor
+    )
+
+    await record_call(
+        store,
+        insight_id=insight.id,
+        agent=str(agent_id) if agent_id else "default",
+        agent_locality="cloud",  # tightened in v0.2 phase 2 with locality detection
+        redaction_mode=str(redactor.mode),
+        bytes_sent=result.bytes_sent,
+        bytes_received=result.bytes_received,
+        success=result.success,
+    )
+
+    if not result.success:
+        connection.send_error(
+            msg["id"],
+            "explain_failed",
+            result.error or "Conversation agent returned no speech",
+        )
+        return
+
+    # Persist the explanation onto the insight + notify subscribers
+    await store._c.execute(  # noqa: SLF001
+        "UPDATE insights SET explanation = ? WHERE id = ?",
+        (result.explanation, insight.id),
+    )
+    await store._c.commit()  # noqa: SLF001
+    refreshed = await store.get_insight(insight.id)
+    store._notify("explained", refreshed)  # noqa: SLF001
+
+    connection.send_result(
+        msg["id"],
+        {
+            "explanation": result.explanation,
+            "bytes_sent": result.bytes_sent,
+            "bytes_received": result.bytes_received,
+        },
     )
 
 

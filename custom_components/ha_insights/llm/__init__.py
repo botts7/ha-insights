@@ -12,6 +12,8 @@ Modules:
 """
 from __future__ import annotations
 
+from .agent_client import ExplanationResult, build_explain_prompt, explain_insight
+from .privacy_log import record_call
 from .redactor import (
     ALWAYS_REDACT_ATTRIBUTES,
     RedactionMap,
@@ -21,7 +23,11 @@ from .redactor import (
 
 __all__ = [
     "ALWAYS_REDACT_ATTRIBUTES",
+    "ExplanationResult",
     "RedactionMap",
     "RedactionMode",
     "Redactor",
+    "build_explain_prompt",
+    "explain_insight",
+    "record_call",
 ]
