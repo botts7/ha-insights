@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -186,3 +186,61 @@ async def test_use_before_open_raises(tmp_path: Path) -> None:
     db = InsightStore(tmp_path / "unopened.db")
     with pytest.raises(RuntimeError, match="not open"):
         await db.list_insights()
+
+
+# --- Snooze filter ---
+
+
+async def test_list_excludes_snoozed_by_default(store: InsightStore) -> None:
+    a = _make_insight(insight_id="a", fingerprint={"k": 1})
+    b = _make_insight(insight_id="b", fingerprint={"k": 2})
+    await store.add_insight(a)
+    await store.add_insight(b)
+    future = datetime.now(tz=UTC) + timedelta(days=7)
+    await store.snooze_insight("a", until=future)
+
+    listing = await store.list_insights()
+    assert {i.id for i in listing} == {"b"}
+
+
+async def test_list_includes_expired_snoozed(store: InsightStore) -> None:
+    """Snoozed insights past their snoozed_until are visible again."""
+    a = _make_insight(insight_id="a", fingerprint={"k": 1})
+    await store.add_insight(a)
+    past = datetime.now(tz=UTC) - timedelta(days=1)
+    await store.snooze_insight("a", until=past)
+
+    listing = await store.list_insights()
+    assert {i.id for i in listing} == {"a"}
+
+
+async def test_list_with_include_snoozed(store: InsightStore) -> None:
+    a = _make_insight(insight_id="a", fingerprint={"k": 1})
+    await store.add_insight(a)
+    future = datetime.now(tz=UTC) + timedelta(days=7)
+    await store.snooze_insight("a", until=future)
+
+    listing = await store.list_insights(include_snoozed=True)
+    assert {i.id for i in listing} == {"a"}
+
+
+# --- Purge ---
+
+
+async def test_purge_observations_clears_insights(store: InsightStore) -> None:
+    await store.add_insight(_make_insight(insight_id="a", fingerprint={"k": 1}))
+    await store.add_insight(_make_insight(insight_id="b", fingerprint={"k": 2}))
+
+    counts = await store.purge_observations()
+    assert counts["insights_deleted"] == 2
+
+    assert await store.list_insights() == []
+
+
+async def test_purge_observations_preserves_pseudonyms(store: InsightStore) -> None:
+    """Pseudonyms must survive purge so cross-restart references stay stable."""
+    p1 = await store.get_or_create_pseudonym("light.kitchen")
+    await store.add_insight(_make_insight())
+    await store.purge_observations()
+    p2 = await store.get_or_create_pseudonym("light.kitchen")
+    assert p1 == p2

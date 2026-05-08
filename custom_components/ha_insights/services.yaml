@@ -1,0 +1,13 @@
+purge_observations:
+  name: Purge observations
+  description: >
+    Clear all observed state events, insights, and outbound-call audit entries.
+    Pseudonym map and applied-history snapshots are preserved by design so
+    undo paths and stable LLM references still work after a purge.
+
+scan_now:
+  name: Scan now
+  description: >
+    Run all registered detectors immediately against the current state buffer.
+    New insights land in the store; subscribed cards see them via the live
+    update event stream.

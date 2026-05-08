@@ -135,16 +135,21 @@ class InsightStore:
         self,
         *,
         include_dismissed: bool = False,
-        include_applied: bool = True,
+        include_applied: bool = False,
+        include_snoozed: bool = False,
     ) -> list[Insight]:
         clauses: list[str] = []
+        params: list[float] = []
         if not include_dismissed:
             clauses.append("dismissed_at IS NULL")
         if not include_applied:
             clauses.append("applied_at IS NULL")
+        if not include_snoozed:
+            clauses.append("(snoozed_until IS NULL OR snoozed_until <= ?)")
+            params.append(datetime.now(tz=UTC).timestamp())
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         async with self._c.execute(
-            f"SELECT * FROM insights {where} ORDER BY created_at DESC"
+            f"SELECT * FROM insights {where} ORDER BY created_at DESC", params
         ) as cur:
             rows = await cur.fetchall()
         return [self._row_to_insight(r) for r in rows]
@@ -217,6 +222,27 @@ class InsightStore:
         )
         await self._c.commit()
         self._notify("applied", await self.get_insight(insight_id))
+
+    async def purge_observations(self) -> dict[str, int]:
+        """Wipe insights + outbound_calls audit log.
+
+        Per docs/ARCHITECTURE.md: pseudonym_map and applied_history are
+        preserved so post-purge undo + cross-restart pseudonyms still work.
+        """
+        async with self._c.execute("SELECT COUNT(*) FROM insights") as cur:
+            row = await cur.fetchone()
+            insights_before = int(row[0]) if row else 0
+        async with self._c.execute("SELECT COUNT(*) FROM outbound_calls") as cur:
+            row = await cur.fetchone()
+            calls_before = int(row[0]) if row else 0
+
+        await self._c.execute("DELETE FROM insights")
+        await self._c.execute("DELETE FROM outbound_calls")
+        await self._c.commit()
+        return {
+            "insights_deleted": insights_before,
+            "outbound_calls_deleted": calls_before,
+        }
 
     async def get_applied_history(
         self, insight_id: str

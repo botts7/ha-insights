@@ -169,3 +169,16 @@ def test_rename_entity_preserves_other_fields() -> None:
 def test_len_zero_initially() -> None:
     buf = StateEventBuffer()
     assert len(buf) == 0
+
+
+def test_clear_empties_buffer() -> None:
+    buf = StateEventBuffer()
+    buf.add(_ev(entity_id="light.a"))
+    buf.add(_ev(entity_id="light.b"))
+    removed = buf.clear()
+    assert removed == 2
+    assert len(buf) == 0
+
+
+def test_clear_returns_zero_on_empty_buffer() -> None:
+    assert StateEventBuffer().clear() == 0

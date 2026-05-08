@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EVENT_STATE_CHANGED
-from homeassistant.core import Event, HomeAssistant, State, callback
+from homeassistant.core import Event, HomeAssistant, ServiceCall, State, callback
 from homeassistant.helpers import entity_registry as er
 
 from . import ws_api
@@ -16,6 +16,7 @@ from .store import InsightStore
 PLATFORMS: list[str] = []
 
 _WS_REGISTERED_FLAG = "_ws_registered"
+_SERVICES_REGISTERED_FLAG = "_services_registered"
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -86,7 +87,45 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         ws_api.async_register(hass)
         hass.data[DOMAIN][_WS_REGISTERED_FLAG] = True
 
+    if not hass.data[DOMAIN].get(_SERVICES_REGISTERED_FLAG):
+        _async_register_services(hass)
+        hass.data[DOMAIN][_SERVICES_REGISTERED_FLAG] = True
+
     return True
+
+
+@callback
+def _async_register_services(hass: HomeAssistant) -> None:
+    """Register the user-callable services."""
+
+    async def _purge_observations(_call: ServiceCall) -> None:
+        for entry_data in hass.data.get(DOMAIN, {}).values():
+            if not isinstance(entry_data, dict):
+                continue
+            buffer_ = entry_data.get("buffer")
+            store = entry_data.get("store")
+            if buffer_ is not None:
+                buffer_.clear()
+            if store is not None:
+                await store.purge_observations()
+
+    async def _scan_now(_call: ServiceCall) -> None:
+        from .detectors import DETECTORS, DetectorContext
+
+        for entry_data in hass.data.get(DOMAIN, {}).values():
+            if not isinstance(entry_data, dict):
+                continue
+            buffer_ = entry_data.get("buffer")
+            store = entry_data.get("store")
+            if buffer_ is None or store is None:
+                continue
+            ctx = DetectorContext(hass=hass, event_buffer=buffer_)
+            for detector_cls in DETECTORS.values():
+                for insight in await detector_cls().scan(ctx):
+                    await store.add_insight(insight)
+
+    hass.services.async_register(DOMAIN, "purge_observations", _purge_observations)
+    hass.services.async_register(DOMAIN, "scan_now", _scan_now)
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

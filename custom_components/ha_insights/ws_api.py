@@ -34,6 +34,7 @@ SUPPORTED_METHODS = (
     "snooze",
     "apply",
     "scan_now",
+    "purge_all",
 )
 
 
@@ -47,6 +48,7 @@ def async_register(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_snooze)
     websocket_api.async_register_command(hass, ws_apply)
     websocket_api.async_register_command(hass, ws_scan_now)
+    websocket_api.async_register_command(hass, ws_purge_all)
     websocket_api.async_register_command(hass, ws_dev_inject_event)
 
 
@@ -99,6 +101,7 @@ def ws_hello(
         vol.Required("type"): "home_insights/list",
         vol.Optional("include_dismissed", default=False): bool,
         vol.Optional("include_applied", default=False): bool,
+        vol.Optional("include_snoozed", default=False): bool,
     }
 )
 @websocket_api.async_response
@@ -115,10 +118,37 @@ async def ws_list(
     insights = await store.list_insights(
         include_dismissed=msg["include_dismissed"],
         include_applied=msg["include_applied"],
+        include_snoozed=msg["include_snoozed"],
     )
     connection.send_result(
         msg["id"],
         {"insights": [i.to_dict() for i in insights]},
+    )
+
+
+@websocket_api.websocket_command(
+    {vol.Required("type"): "home_insights/purge_all"}
+)
+@websocket_api.async_response
+async def ws_purge_all(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Privacy nuke: clear in-memory buffer + insights table + outbound-call log.
+
+    Pseudonym map and applied-history snapshots are preserved by design.
+    """
+    store = _get_store(hass)
+    buffer_ = _get_buffer(hass)
+    if store is None or buffer_ is None:
+        connection.send_error(msg["id"], "not_set_up", "Store/buffer not initialized")
+        return
+    events_dropped = buffer_.clear()
+    counts = await store.purge_observations()
+    connection.send_result(
+        msg["id"],
+        {"events_dropped": events_dropped, **counts},
     )
 
 

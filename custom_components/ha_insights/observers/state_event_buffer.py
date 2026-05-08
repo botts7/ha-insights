@@ -130,5 +130,11 @@ class StateEventBuffer:
         self._events = rebuilt
         return count
 
+    def clear(self) -> int:
+        """Drop every event in the buffer. Returns count removed."""
+        count = len(self._events)
+        self._events.clear()
+        return count
+
     def __len__(self) -> int:
         return len(self._events)
