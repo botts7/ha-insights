@@ -3,7 +3,17 @@
     "step": {
       "user": {
         "title": "Set up HA Insights",
-        "description": "HA Insights observes your home state to suggest automations. The full privacy wizard (Off / Local / Cloud) lands in a later release."
+        "description": "HA Insights observes your home state to suggest automations. Pick how (or whether) the LLM enrichment surface works. You can change this later.",
+        "data": {
+          "llm_mode": "LLM mode"
+        }
+      },
+      "cloud_consent": {
+        "title": "Cloud LLM — confirm data flow",
+        "description": "Cloud LLMs (Anthropic, OpenAI, Google) live outside your home network. With pseudonymization on by default, real entity names and area names never leave; numeric values are bucketed; sensitive attributes (GPS, MAC, tokens, passwords) are always stripped. Every outbound call is recorded in the privacy log sensor.\n\nLocal LLM is recommended if available. Continue with cloud anyway?",
+        "data": {
+          "cloud_consent": "I understand and want to enable cloud LLM enrichment"
+        }
       }
     },
     "abort": {
