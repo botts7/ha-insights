@@ -47,7 +47,6 @@ async def setup_integration(hass: HomeAssistant) -> MockConfigEntry:
         title="HA Insights",
     )
     entry.add_to_hass(hass)
-    # Register the automation domain so reload works.
     await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
     # Set up automation component for the storage helper + reload service.
@@ -55,6 +54,16 @@ async def setup_integration(hass: HomeAssistant) -> MockConfigEntry:
 
     await async_setup_component(hass, "automation", {})
     await hass.async_block_till_done()
+    # The real automation.reload service re-reads configuration.yaml; the
+    # pytest-homeassistant testing_config doesn't ship one, so swap in a
+    # no-op for tests. In production reload happens normally.
+    from homeassistant.core import ServiceCall
+
+    async def _noop_reload(_call: ServiceCall) -> None:
+        return None
+
+    hass.services.async_remove("automation", "reload")
+    hass.services.async_register("automation", "reload", _noop_reload)
     return entry
 
 
