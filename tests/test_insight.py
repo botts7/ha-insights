@@ -1,6 +1,7 @@
 """Tests for the Insight contract."""
 from __future__ import annotations
 
+from dataclasses import FrozenInstanceError
 from datetime import UTC, datetime
 from typing import Any
 
@@ -37,7 +38,7 @@ def test_insight_constructs_with_minimum_fields() -> None:
 
 def test_insight_is_frozen() -> None:
     insight = Insight(**_valid_kwargs())
-    with pytest.raises(Exception):  # noqa: PT011 — FrozenInstanceError or AttributeError
+    with pytest.raises(FrozenInstanceError):
         insight.confidence = 0.5  # type: ignore[misc]
 
 

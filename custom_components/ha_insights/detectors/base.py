@@ -28,7 +28,7 @@ class DetectorContext:
     helper, redactor, etc.).
     """
 
-    hass: "HomeAssistant"
+    hass: HomeAssistant
     detector_config: dict[str, Any] = field(default_factory=dict)
     area_filter: frozenset[str] = field(default_factory=frozenset)
 
@@ -55,7 +55,7 @@ class Detector(ABC):
         same insights. Dedup happens at the store level via Insight.id.
         """
 
-    def applies_to_event(self, event: "Event") -> bool:
+    def applies_to_event(self, event: Event) -> bool:
         """Whether this detector cares about a given state-change event.
 
         Default: yes. Override to opt out of fan-out for events your detector
