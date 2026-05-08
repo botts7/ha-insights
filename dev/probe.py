@@ -101,12 +101,22 @@ def generate_weekday_events(
 
 
 async def fetch_automation_via_rest(port: int, token: str, automation_id: str) -> dict | None:
-    """Read the automation back via HA's REST config endpoint to verify apply."""
-    url = f"http://{HA_HOST}:{port}/api/states/automation.{automation_id.split('_', 1)[-1]}"
+    """Find an automation entity whose attributes.id matches automation_id.
+
+    HA derives the entity_id from the alias (slugified), not from our id, so
+    we list all automation.* states and match on attributes.id.
+    """
+    url = f"http://{HA_HOST}:{port}/api/states"
     headers = {"Authorization": f"Bearer {token}"}
     async with aiohttp.ClientSession() as s, s.get(url, headers=headers) as r:
-        if r.status == 200:
-            return await r.json()
+        if r.status != 200:
+            return None
+        states = await r.json()
+    for entity in states:
+        if not entity.get("entity_id", "").startswith("automation."):
+            continue
+        if entity.get("attributes", {}).get("id") == automation_id:
+            return entity
     return None
 
 
