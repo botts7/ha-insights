@@ -49,7 +49,7 @@ def find_conflicts(
 def _automations_overlap(
     a: dict[str, Any], b: dict[str, Any], time_window_min: int
 ) -> bool:
-    """True if both automations have a time trigger close in time AND target overlapping entities."""
+    """Time-trigger overlap on the same target entity (within window)."""
     a_triggers = _as_list(a.get("trigger"))
     b_triggers = _as_list(b.get("trigger"))
 
