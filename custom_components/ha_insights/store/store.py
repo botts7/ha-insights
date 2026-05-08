@@ -1,14 +1,15 @@
 """Async SQLite-backed store for HA Insights.
 
 Insights, pseudonym map, outbound-call audit, applied history. v0.1
-exposes only the surfaces needed for steps 5-9 (insight CRUD + pseudonym
-map). Outbound-calls and applied-history surface at later steps.
+exposes insight CRUD + pseudonym map + a simple listener bus so the WS
+API can stream change events to subscribed cards.
 """
 from __future__ import annotations
 
 import json
 import secrets
 import string
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -17,13 +18,18 @@ import aiosqlite
 from ..insight import Insight, InsightKind
 from .schema import MIGRATIONS
 
+# Listener signature: (event_type, insight). event_type is one of:
+#   "added", "dismissed", "snoozed". insight is None for purge events.
+StoreListener = Callable[[str, Insight | None], None]
+
 
 class InsightStore:
-    """Async SQLite store with idempotent migrations."""
+    """Async SQLite store with idempotent migrations + change-event bus."""
 
     def __init__(self, path: Path | str) -> None:
         self._path = Path(path)
         self._conn: aiosqlite.Connection | None = None
+        self._listeners: list[StoreListener] = []
 
     async def open(self) -> None:
         """Open the database; apply pending migrations."""
@@ -42,6 +48,23 @@ class InsightStore:
             msg = "Store is not open; call open() first"
             raise RuntimeError(msg)
         return self._conn
+
+    # --- Listener bus ---
+
+    def add_listener(self, callback: StoreListener) -> Callable[[], None]:
+        """Register a listener; returns an unsubscribe callable."""
+        self._listeners.append(callback)
+
+        def remove() -> None:
+            if callback in self._listeners:
+                self._listeners.remove(callback)
+
+        return remove
+
+    def _notify(self, event_type: str, insight: Insight | None) -> None:
+        # Iterate over a copy so a listener that unsubscribes itself is safe.
+        for cb in list(self._listeners):
+            cb(event_type, insight)
 
     async def _migrate(self) -> None:
         """Apply migrations in order; idempotent."""
@@ -99,6 +122,7 @@ class InsightStore:
             ),
         )
         await self._c.commit()
+        self._notify("added", insight)
 
     async def get_insight(self, insight_id: str) -> Insight | None:
         async with self._c.execute(
@@ -134,7 +158,10 @@ class InsightStore:
             (ts, insight_id),
         )
         await self._c.commit()
-        return cur.rowcount > 0
+        if cur.rowcount > 0:
+            self._notify("dismissed", await self.get_insight(insight_id))
+            return True
+        return False
 
     async def snooze_insight(self, insight_id: str, *, until: datetime) -> bool:
         cur = await self._c.execute(
@@ -142,7 +169,10 @@ class InsightStore:
             (until.timestamp(), insight_id),
         )
         await self._c.commit()
-        return cur.rowcount > 0
+        if cur.rowcount > 0:
+            self._notify("snoozed", await self.get_insight(insight_id))
+            return True
+        return False
 
     @staticmethod
     def _row_to_insight(row: aiosqlite.Row) -> Insight:

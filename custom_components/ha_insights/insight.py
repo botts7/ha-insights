@@ -61,6 +61,26 @@ class Insight:
                 f"got {self.payload_format!r}"
             )
 
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize to a JSON-safe dict for WS / storage round-trip."""
+        return {
+            "id": self.id,
+            "kind": self.kind.value,
+            "detector": self.detector,
+            "area_id": self.area_id,
+            "title": self.title,
+            "confidence": self.confidence,
+            "fingerprint": self.fingerprint,
+            "payload": self.payload,
+            "payload_format": self.payload_format,
+            "created_at": self.created_at.isoformat(),
+            "snoozed_until": (
+                self.snoozed_until.isoformat() if self.snoozed_until else None
+            ),
+            "explanation": self.explanation,
+            "conflicts_with": list(self.conflicts_with),
+        }
+
     @classmethod
     def compute_id(cls, kind: InsightKind, fingerprint: dict[str, Any]) -> str:
         """Stable id from (kind, fingerprint).
