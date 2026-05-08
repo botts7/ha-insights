@@ -120,7 +120,7 @@ class InsightStore:
             clauses.append("applied_at IS NULL")
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         async with self._c.execute(
-            f"SELECT * FROM insights {where} ORDER BY created_at DESC"  # noqa: S608
+            f"SELECT * FROM insights {where} ORDER BY created_at DESC"
         ) as cur:
             rows = await cur.fetchall()
         return [self._row_to_insight(r) for r in rows]
