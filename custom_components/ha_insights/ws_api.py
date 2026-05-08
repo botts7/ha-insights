@@ -33,6 +33,7 @@ SUPPORTED_METHODS = (
     "dismiss",
     "snooze",
     "apply",
+    "scan_now",
 )
 
 
@@ -45,6 +46,8 @@ def async_register(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_dismiss)
     websocket_api.async_register_command(hass, ws_snooze)
     websocket_api.async_register_command(hass, ws_apply)
+    websocket_api.async_register_command(hass, ws_scan_now)
+    websocket_api.async_register_command(hass, ws_dev_inject_event)
 
 
 def _get_store(hass: HomeAssistant) -> InsightStore | None:
@@ -53,6 +56,15 @@ def _get_store(hass: HomeAssistant) -> InsightStore | None:
     for value in data.values():
         if isinstance(value, dict) and "store" in value:
             return value["store"]
+    return None
+
+
+def _get_buffer(hass: HomeAssistant):
+    """Resolve the active StateEventBuffer; None if integration not set up."""
+    data = hass.data.get(DOMAIN, {})
+    for value in data.values():
+        if isinstance(value, dict) and "buffer" in value:
+            return value["buffer"]
     return None
 
 
@@ -252,3 +264,91 @@ async def ws_snooze(
         )
         return
     connection.send_result(msg["id"])
+
+
+@websocket_api.websocket_command(
+    {vol.Required("type"): "home_insights/scan_now"}
+)
+@websocket_api.async_response
+async def ws_scan_now(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Run all registered detectors immediately. Returns count of new insights."""
+    from .detectors import DETECTORS, DetectorContext
+
+    store = _get_store(hass)
+    buffer_ = _get_buffer(hass)
+    if store is None or buffer_ is None:
+        connection.send_error(msg["id"], "not_set_up", "Store/buffer not initialized")
+        return
+
+    ctx = DetectorContext(hass=hass, event_buffer=buffer_)
+    new_count = 0
+    detector_names: list[str] = []
+    for name, detector_cls in DETECTORS.items():
+        detector = detector_cls()
+        insights = await detector.scan(ctx)
+        for insight in insights:
+            await store.add_insight(insight)
+            new_count += 1
+        detector_names.append(name)
+
+    connection.send_result(
+        msg["id"],
+        {
+            "detectors_run": detector_names,
+            "insights_emitted": new_count,
+        },
+    )
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "home_insights/_dev/inject_event",
+        vol.Required("entity_id"): str,
+        vol.Required("domain"): str,
+        vol.Optional("area_id"): vol.Any(str, None),
+        vol.Required("timestamp"): str,
+        vol.Optional("old_state"): vol.Any(str, None),
+        vol.Required("new_state"): str,
+    }
+)
+@callback
+def ws_dev_inject_event(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """DEV ONLY — push a synthetic state event into the buffer with a chosen timestamp.
+
+    Used by dev/seed.py to backfill the rolling buffer for ScheduleDetector
+    testing without needing access to HA's recorder. Not part of the stable
+    public API; the underscore prefix marks it as dev-only.
+    """
+    from .observers.state_event_buffer import StateEvent
+
+    buffer_ = _get_buffer(hass)
+    if buffer_ is None:
+        connection.send_error(msg["id"], "not_set_up", "Buffer not initialized")
+        return
+
+    try:
+        ts = datetime.fromisoformat(msg["timestamp"])
+    except ValueError:
+        connection.send_error(
+            msg["id"], "invalid_time", "timestamp must be ISO 8601 format"
+        )
+        return
+
+    event = StateEvent(
+        timestamp=ts,
+        entity_id=msg["entity_id"],
+        domain=msg["domain"],
+        area_id=msg.get("area_id"),
+        old_state=msg.get("old_state"),
+        new_state=msg["new_state"],
+    )
+    accepted = buffer_.add(event)
+    connection.send_result(msg["id"], {"accepted": accepted})
