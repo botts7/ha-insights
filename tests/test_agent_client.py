@@ -111,6 +111,7 @@ async def test_explain_routes_redacted_payload(store: InsightStore) -> None:
     with patch(
         "homeassistant.components.conversation.async_converse",
         new=AsyncMock(side_effect=fake_converse),
+        create=True,
     ):
         result = await explain_insight(
             hass, agent_id="ollama", insight=insight, redactor=redactor
@@ -139,6 +140,7 @@ async def test_explain_dereferences_response(store: InsightStore) -> None:
     with patch(
         "homeassistant.components.conversation.async_converse",
         new=AsyncMock(return_value=_mock_conversation_result(fake_speech)),
+        create=True,
     ):
         result = await explain_insight(
             hass, agent_id="ollama", insight=insight, redactor=redactor
@@ -162,6 +164,7 @@ async def test_explain_records_byte_counts(store: InsightStore) -> None:
     with patch(
         "homeassistant.components.conversation.async_converse",
         new=AsyncMock(return_value=_mock_conversation_result(speech)),
+        create=True,
     ):
         result = await explain_insight(
             hass, agent_id="ollama", insight=insight, redactor=redactor
@@ -181,6 +184,7 @@ async def test_explain_handles_conversation_failure(store: InsightStore) -> None
     with patch(
         "homeassistant.components.conversation.async_converse",
         new=AsyncMock(side_effect=RuntimeError("agent down")),
+        create=True,
     ):
         result = await explain_insight(
             hass, agent_id="ollama", insight=insight, redactor=redactor
@@ -202,6 +206,7 @@ async def test_explain_handles_empty_speech(store: InsightStore) -> None:
     with patch(
         "homeassistant.components.conversation.async_converse",
         new=AsyncMock(return_value=empty),
+        create=True,
     ):
         result = await explain_insight(
             hass, agent_id="ollama", insight=insight, redactor=redactor
