@@ -31,7 +31,7 @@ async def record_call(
     payload_json = (
         json.dumps(redacted_payload, sort_keys=True) if redacted_payload else None
     )
-    await store._c.execute(  # noqa: SLF001 - intentional cross-module write to the same store
+    await store._c.execute(  # intentional cross-module write to the same store
         """
         INSERT INTO outbound_calls (
             timestamp, insight_id, agent, agent_locality, redaction_mode,
@@ -50,4 +50,4 @@ async def record_call(
             payload_json,
         ),
     )
-    await store._c.commit()  # noqa: SLF001
+    await store._c.commit()

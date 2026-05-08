@@ -14,7 +14,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from .redactor import RedactionMap, RedactionMode, Redactor
+from .redactor import RedactionMap, Redactor
 
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
@@ -148,7 +148,7 @@ async def explain_insight(
             language=None,
             agent_id=agent_id,
         )
-    except Exception as err:  # noqa: BLE001 — surface any conversation failure to the user
+    except Exception as err:  # surface any conversation failure to the user
         return ExplanationResult(
             explanation=None,
             redaction_map=redaction_map,

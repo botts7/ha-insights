@@ -71,7 +71,7 @@ def _mock_conversation_result(speech: str) -> SimpleNamespace:
 def test_build_prompt_includes_ha_version() -> None:
     insight = _make_insight()
     redacted_payload = insight.payload
-    system, user = build_explain_prompt(insight, redacted_payload, "2025.4.2")
+    system, _ = build_explain_prompt(insight, redacted_payload, "2025.4.2")
     assert "2025.4.2" in system
     assert "2025.4+" in system  # major-version reference
 

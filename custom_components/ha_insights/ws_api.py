@@ -182,13 +182,13 @@ async def ws_explain(
         return
 
     # Persist the explanation onto the insight + notify subscribers
-    await store._c.execute(  # noqa: SLF001
+    await store._c.execute(
         "UPDATE insights SET explanation = ? WHERE id = ?",
         (result.explanation, insight.id),
     )
-    await store._c.commit()  # noqa: SLF001
+    await store._c.commit()
     refreshed = await store.get_insight(insight.id)
-    store._notify("explained", refreshed)  # noqa: SLF001
+    store._notify("explained", refreshed)
 
     connection.send_result(
         msg["id"],
