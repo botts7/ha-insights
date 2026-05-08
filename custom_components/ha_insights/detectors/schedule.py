@@ -93,7 +93,10 @@ class ScheduleDetector(Detector):
         if len(events) < self.MIN_OCCURRENCES:
             return None
 
-        weekday_minute = [(ev.timestamp.weekday(), self._minute_of_day(ev.timestamp)) for ev in events]
+        weekday_minute = [
+            (ev.timestamp.weekday(), self._minute_of_day(ev.timestamp))
+            for ev in events
+        ]
         weekday_set = self._classify_weekdays([d for d, _ in weekday_minute])
         if weekday_set is None:
             return None
@@ -119,7 +122,7 @@ class ScheduleDetector(Detector):
         )
 
         avg_h = int(avg_min // 60)
-        avg_m_int = int(round(avg_min % 60))
+        avg_m_int = round(avg_min % 60)
         if avg_m_int == 60:
             avg_h += 1
             avg_m_int = 0
@@ -129,7 +132,7 @@ class ScheduleDetector(Detector):
             "entity_id": entity_id,
             "new_state": new_state,
             "weekday_set": sorted(weekday_set),
-            "time_bucket": int(round(avg_min / 5)) * 5,
+            "time_bucket": round(avg_min / 5) * 5,
         }
 
         weekday_label = self._weekday_label(weekday_set)
