@@ -17,7 +17,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up HA Insights from a config entry."""
     hass.data.setdefault(DOMAIN, {})
 
-    storage_path = hass.config.path(f".storage/{DOMAIN}.db")
+    # Live at <config>/ha_insights.db (top-level avoids needing to mkdir
+    # .storage/ in fresh tmp configs and keeps our SQLite separate from HA's
+    # own JSON storage which uses .storage/).
+    storage_path = hass.config.path(f"{DOMAIN}.db")
     store = InsightStore(storage_path)
     await store.open()
 
