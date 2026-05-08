@@ -3,7 +3,7 @@ services:
     image: ghcr.io/home-assistant/home-assistant:2025.4
     container_name: ha-insights-dev
     ports:
-      - "8123:8123"
+      - "${HA_PORT:-8125}:8123"
     volumes:
       - ./config:/config
       - ../custom_components/ha_insights:/config/custom_components/ha_insights

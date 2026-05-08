@@ -10,10 +10,10 @@ Spin a dockerized Home Assistant instance with the HA Insights integration mount
 
 ## Quick start
 
-Optional: copy `.env.example` to `.env` and set `TZ=` to your timezone (defaults to UTC). `.env` is gitignored.
+Optional: copy `.env.example` to `.env` and set `TZ=` (timezone, defaults to UTC) or `HA_PORT=` (host port, defaults to 8125 — chosen to avoid clashing with HA's default 8123 or any other HA dev/test container you may already be running). `.env` is gitignored.
 
 ```bash
-./up.sh                  # Boots HA at http://localhost:8123
+./up.sh                  # Boots HA at http://localhost:8125 (or $HA_PORT)
 # First time: open browser, complete onboarding, create a long-lived
 # token, save it to dev/token.txt
 python probe.py          # End-to-end pipeline assertion

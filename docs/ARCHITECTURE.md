@@ -536,7 +536,7 @@ HA Insights claims to detect routines from observed state — that claim must be
 
 ### `dev/docker-compose.yml`
 
-Boots `ghcr.io/home-assistant/home-assistant:2025.4` with our integration mounted at `/config/custom_components/ha_insights`. Exposes WS at `localhost:8123`. Long-lived access token pre-created via `configuration.yaml` + token file injection. Tear-down wipes state cleanly.
+Boots `ghcr.io/home-assistant/home-assistant:2025.4` with our integration mounted at `/config/custom_components/ha_insights`. Exposes WS at `localhost:8125 (default; override via `HA_PORT` env var)`. Long-lived access token pre-created via `configuration.yaml` + token file injection. Tear-down wipes state cleanly.
 
 ### `dev/seed.py`
 
@@ -598,7 +598,7 @@ Each step's "verify" is the gate that must pass before commit. Agent advances au
 
 1. **G0** ← human: trademark + name availability + license confirmed
 2. **Repo bootstrap × 2** (manifests, hacs.json, CI skeletons) → *verify:* hassfest + HACS validate green
-3. **`dev/` harness up** (docker-compose, seed/probe stubs) → *verify:* HA reachable at `localhost:8123`, probe.py runs
+3. **`dev/` harness up** (docker-compose, seed/probe stubs) → *verify:* HA reachable at `localhost:8125 (default; override via `HA_PORT` env var)`, probe.py runs
 4. **G1** ← human: harness review
 5. **`Insight` + `InsightKind` + `Detector` ABC + registry** — **freezes community shape** → *verify:* import + ABC unit tests
 6. **`state_event_buffer`** + entity-rename handler → *verify:* synthetic event stream test, rename doesn't break fingerprints
@@ -607,7 +607,7 @@ Each step's "verify" is the gate that must pass before commit. Agent advances au
 9. **`ScheduleDetector` MVP** + Blueprint emission → *verify:* `probe.py` with 14-day synthetic routine produces expected insight + Blueprint
 10. **Conflict scanner + two-layer validator** → *verify:* `probe.py` with pre-existing automation suppresses duplicate
 11. **WS API** (hello/list/subscribe + handshake) → *verify:* `probe.py` asserts handshake response shape
-12. **Card MVP** (list + handshake + downgrade banner) → *verify:* vitest + manual smoke at `localhost:8123`
+12. **Card MVP** (list + handshake + downgrade banner) → *verify:* vitest + manual smoke at `localhost:8125 (default; override via `HA_PORT` env var)`
 13. **`apply/automation_writer` + `blueprint_writer` + drift detector** → *verify:* `probe.py` applies, asserts automation exists, edits, asserts drift detected
 14. **Card detail modal** (preview + apply) → *verify:* manual click-through against probe-seeded HA
 15. **G2** ← human: full demo path works end-to-end
