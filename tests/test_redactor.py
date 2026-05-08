@@ -189,7 +189,7 @@ async def test_pseudonyms_stable_across_calls(store: InsightStore) -> None:
 async def test_distinct_entities_distinct_pseudonyms(store: InsightStore) -> None:
     redactor = Redactor(store, mode=RedactionMode.AGGRESSIVE)
     text = "light.kitchen and light.bedroom"
-    redacted, redaction_map = await redactor.redact_text(text)
+    _, redaction_map = await redactor.redact_text(text)
     assert len(redaction_map.entity_to_pseudonym) == 2
     pseudonyms = set(redaction_map.entity_to_pseudonym.values())
     assert len(pseudonyms) == 2  # distinct
@@ -202,7 +202,7 @@ async def test_redaction_map_dereferences_response(store: InsightStore) -> None:
     """LLM responses mentioning pseudonyms can be deref'd back to real ids."""
     redactor = Redactor(store, mode=RedactionMode.AGGRESSIVE)
     text = "light.kitchen turns on at 06:47"
-    redacted, redaction_map = await redactor.redact_text(text)
+    _, redaction_map = await redactor.redact_text(text)
     pseudonym = next(iter(redaction_map.entity_to_pseudonym.values()))
 
     # Simulated LLM response that mentions the pseudonym
