@@ -32,6 +32,7 @@ SUPPORTED_METHODS = (
     "subscribe",
     "dismiss",
     "snooze",
+    "apply",
 )
 
 
@@ -43,6 +44,7 @@ def async_register(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_subscribe)
     websocket_api.async_register_command(hass, ws_dismiss)
     websocket_api.async_register_command(hass, ws_snooze)
+    websocket_api.async_register_command(hass, ws_apply)
 
 
 def _get_store(hass: HomeAssistant) -> InsightStore | None:
@@ -164,6 +166,58 @@ async def ws_dismiss(
         )
         return
     connection.send_result(msg["id"])
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "home_insights/apply",
+        vol.Required("insight_id"): str,
+    }
+)
+@websocket_api.async_response
+async def ws_apply(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Apply an insight: validate, write the automation, record snapshot."""
+    from .apply import AutomationWriter, hash_config, validate_automation
+
+    store = _get_store(hass)
+    if store is None:
+        connection.send_error(msg["id"], "not_set_up", "Store not initialized")
+        return
+    insight = await store.get_insight(msg["insight_id"])
+    if insight is None:
+        connection.send_error(
+            msg["id"], "not_found", f"No insight {msg['insight_id']!r}"
+        )
+        return
+    if insight.payload_format != "automation":
+        connection.send_error(
+            msg["id"],
+            "unsupported_format",
+            f"payload_format {insight.payload_format!r} not yet supported",
+        )
+        return
+
+    errors = validate_automation(insight.payload)
+    if errors:
+        connection.send_error(msg["id"], "invalid_payload", "; ".join(errors))
+        return
+
+    writer = AutomationWriter(hass)
+    auto_id = await writer.write(insight.payload)
+    snapshot = await writer.read(auto_id) or insight.payload
+
+    await store.record_applied(
+        insight.id,
+        artifact_kind="automation",
+        artifact_id=auto_id,
+        snapshot=snapshot,
+        snapshot_hash=hash_config(snapshot),
+    )
+    connection.send_result(msg["id"], {"automation_id": auto_id})
 
 
 @websocket_api.websocket_command(

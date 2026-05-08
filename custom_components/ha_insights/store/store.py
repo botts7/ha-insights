@@ -174,6 +174,69 @@ class InsightStore:
             return True
         return False
 
+    # --- Applied history ---
+
+    async def record_applied(
+        self,
+        insight_id: str,
+        *,
+        artifact_kind: str,
+        artifact_id: str,
+        snapshot: dict[str, object],
+        snapshot_hash: str,
+        undo_window_days: int = 7,
+    ) -> None:
+        """Record an apply: stores snapshot + hash, marks insight as applied."""
+        from datetime import timedelta
+
+        now_dt = datetime.now(tz=UTC)
+        now_ts = now_dt.timestamp()
+        expires_ts = (now_dt + timedelta(days=undo_window_days)).timestamp()
+
+        await self._c.execute(
+            """
+            INSERT OR REPLACE INTO applied_history (
+                insight_id, artifact_kind, artifact_id,
+                snapshot_json, snapshot_hash,
+                applied_at, undo_window_expires_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                insight_id,
+                artifact_kind,
+                artifact_id,
+                json.dumps(snapshot, sort_keys=True),
+                snapshot_hash,
+                now_ts,
+                expires_ts,
+            ),
+        )
+        await self._c.execute(
+            "UPDATE insights SET applied_at = ?, applied_artifact_id = ? WHERE id = ?",
+            (now_ts, artifact_id, insight_id),
+        )
+        await self._c.commit()
+        self._notify("applied", await self.get_insight(insight_id))
+
+    async def get_applied_history(
+        self, insight_id: str
+    ) -> dict[str, object] | None:
+        async with self._c.execute(
+            "SELECT * FROM applied_history WHERE insight_id = ?", (insight_id,)
+        ) as cur:
+            row = await cur.fetchone()
+        if row is None:
+            return None
+        return {
+            "insight_id": row["insight_id"],
+            "artifact_kind": row["artifact_kind"],
+            "artifact_id": row["artifact_id"],
+            "snapshot": json.loads(row["snapshot_json"]),
+            "snapshot_hash": row["snapshot_hash"],
+            "applied_at": row["applied_at"],
+            "undo_window_expires_at": row["undo_window_expires_at"],
+        }
+
     @staticmethod
     def _row_to_insight(row: aiosqlite.Row) -> Insight:
         snoozed = row["snoozed_until"]
