@@ -28,8 +28,16 @@ if TYPE_CHECKING:
 
 _REFINE_PROMPT_TMPL = (
     "Refine this Home Assistant automation. Add a debounce, condition, or "
-    "mode change as appropriate. Be brief.\n\n"
-    "Output exactly two sections (no markdown fences, no extra commentary):\n"
+    "mode change as appropriate. Be terse — keep the YAML minimal.\n\n"
+    "Budget discipline (CRITICAL):\n"
+    "- Keep the entire response under 250 tokens.\n"
+    "- If you cannot produce a complete valid YAML refinement within that\n"
+    "  budget, output exactly this single line and NOTHING ELSE:\n"
+    "    INSUFFICIENT_BUDGET\n"
+    "- Do NOT start emitting YAML you cannot finish. A truncated YAML is\n"
+    "  worse than admitting the budget is too tight.\n\n"
+    "Otherwise, output exactly two sections (no markdown fences, no extra\n"
+    "commentary):\n"
     "RATIONALE: <one short sentence>\n"
     "YAML:\n"
     "alias: ...\n"
@@ -38,12 +46,19 @@ _REFINE_PROMPT_TMPL = (
     "mode: ...\n\n"
     "Constraints (strict):\n"
     "- Use ONLY these entity_ids: {entity_list}\n"
-    "- Output must be complete valid YAML (close all quotes/brackets)\n"
-    "- Keep the response under 200 tokens total\n\n"
+    "- Output must be complete valid YAML (close all quotes/brackets)\n\n"
     "Current automation:\n"
     "{current_yaml}\n\n"
     "Considerations: {considerations}\n"
 )
+
+
+# Sentinel the LLM emits when it can't fit a complete refinement in budget.
+# We instruct it explicitly above; reliable enough on Gemini Pro / Flash,
+# Claude, GPT-4, Llama 3.x. Cheaper rule-based agents won't emit it but
+# they also can't refine, so the existing rule-based fallback path catches
+# them earlier.
+INSUFFICIENT_BUDGET_MARKER = "INSUFFICIENT_BUDGET"
 
 
 @dataclass(frozen=True)
@@ -110,6 +125,16 @@ def parse_refine_response(text: str) -> tuple[str | None, dict[str, Any] | None,
     """Return (rationale, payload, error). Exactly one of (payload, error) is set."""
     if not text:
         return None, None, "empty response"
+
+    # Honor the LLM's explicit budget surrender before trying to parse.
+    early_lines = [line.strip() for line in text.strip().splitlines()[:5]]
+    if INSUFFICIENT_BUDGET_MARKER in early_lines:
+        return None, None, (
+            "LLM said it can't produce a complete refinement within its "
+            "current token budget. Increase max_output_tokens in your LLM "
+            "Conversation integration's config (try 4096+), or switch to a "
+            "non-thinking model that uses tokens more efficiently."
+        )
 
     rationale_match = re.search(r"RATIONALE:\s*(.+?)(?=\n\s*YAML:|\Z)", text, re.DOTALL)
     yaml_match = re.search(r"YAML:\s*(.+)", text, re.DOTALL)
