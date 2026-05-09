@@ -34,6 +34,8 @@ CONF_DIGEST_HOUR = "digest_hour"
 # "auto-pick" (Assist default first, then registry order). Otherwise this
 # entity_id is tried first; failover still kicks in on its failure.
 CONF_PREFERRED_AGENT_ID = "preferred_agent_id"
+CONF_REFINE_COST_THRESHOLD_USD = "refine_cost_threshold_usd"
+DEFAULT_REFINE_COST_THRESHOLD_USD = 0.05
 DEFAULT_LOOKBACK_DAYS = 14
 LOOKBACK_DAYS_RANGE = (0, 30)  # 0 disables backfill entirely
 DEFAULT_NOTIFY_ON_INSIGHT = True
@@ -99,6 +101,25 @@ def get_notify_settings(entry: ConfigEntry) -> tuple[bool, float]:
         threshold = DEFAULT_NOTIFY_THRESHOLD
     threshold = max(0.0, min(1.0, threshold))
     return bool(enabled_raw), threshold
+
+
+def get_refine_cost_threshold(entry: ConfigEntry) -> float:
+    """Resolve the per-Refine USD cost threshold above which the card
+    prompts for confirmation. Clamped to [0, 10] — 0 means always confirm
+    (cloud), 10 means effectively never. Local agents always cost $0 so
+    the threshold never triggers there.
+    """
+    raw = entry.options.get(
+        CONF_REFINE_COST_THRESHOLD_USD,
+        entry.data.get(
+            CONF_REFINE_COST_THRESHOLD_USD, DEFAULT_REFINE_COST_THRESHOLD_USD
+        ),
+    )
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return DEFAULT_REFINE_COST_THRESHOLD_USD
+    return max(0.0, min(10.0, value))
 
 
 def get_preferred_agent_id(entry: ConfigEntry) -> str | None:
@@ -299,6 +320,7 @@ class HaInsightsOptionsFlow(OptionsFlow):
         self._digest_enabled: bool = DEFAULT_DIGEST_ENABLED
         self._digest_hour: int = DEFAULT_DIGEST_HOUR
         self._preferred_agent_id: str | None = None
+        self._refine_cost_threshold: float = DEFAULT_REFINE_COST_THRESHOLD_USD
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
@@ -313,6 +335,7 @@ class HaInsightsOptionsFlow(OptionsFlow):
             self.config_entry
         )
         current_preferred = get_preferred_agent_id(self.config_entry) or ""
+        current_refine_threshold = get_refine_cost_threshold(self.config_entry)
 
         if user_input is not None:
             self._mode = LlmMode(user_input[CONF_LLM_MODE])
@@ -337,6 +360,11 @@ class HaInsightsOptionsFlow(OptionsFlow):
                 if isinstance(preferred_raw, str)
                 else None
             )
+            self._refine_cost_threshold = float(
+                user_input.get(
+                    CONF_REFINE_COST_THRESHOLD_USD, current_refine_threshold
+                )
+            )
             if self._mode is LlmMode.CLOUD and current_mode != LlmMode.CLOUD.value:
                 # Only require fresh consent if switching INTO cloud
                 return await self.async_step_cloud_consent()
@@ -350,6 +378,7 @@ class HaInsightsOptionsFlow(OptionsFlow):
                     CONF_DIGEST_ENABLED: self._digest_enabled,
                     CONF_DIGEST_HOUR: self._digest_hour,
                     CONF_PREFERRED_AGENT_ID: self._preferred_agent_id or "",
+                    CONF_REFINE_COST_THRESHOLD_USD: self._refine_cost_threshold,
                 },
             )
 
@@ -384,6 +413,16 @@ class HaInsightsOptionsFlow(OptionsFlow):
                 vol.Optional(
                     CONF_PREFERRED_AGENT_ID, default=current_preferred
                 ): _conversation_agent_selector(self.hass),
+                # Per-Refine cost threshold. Estimates over this trigger a
+                # confirm dialog in the card. Local agents always cost $0
+                # so the threshold never blocks them. 0 = always confirm,
+                # 10 = effectively never.
+                vol.Optional(
+                    CONF_REFINE_COST_THRESHOLD_USD,
+                    default=current_refine_threshold,
+                ): vol.All(
+                    vol.Coerce(float), vol.Range(min=0.0, max=10.0)
+                ),
             }
         )
         return self.async_show_form(step_id="init", data_schema=schema)
@@ -404,6 +443,7 @@ class HaInsightsOptionsFlow(OptionsFlow):
                         CONF_DIGEST_ENABLED: self._digest_enabled,
                         CONF_DIGEST_HOUR: self._digest_hour,
                         CONF_PREFERRED_AGENT_ID: self._preferred_agent_id or "",
+                        CONF_REFINE_COST_THRESHOLD_USD: self._refine_cost_threshold,
                     },
                 )
             self._mode = None

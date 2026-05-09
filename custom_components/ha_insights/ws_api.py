@@ -64,6 +64,7 @@ def async_register(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_audit_log)
     websocket_api.async_register_command(hass, ws_undo)
     websocket_api.async_register_command(hass, ws_hypothesize)
+    websocket_api.async_register_command(hass, ws_refine_cost_estimate)
     websocket_api.async_register_command(hass, ws_dev_inject_event)
 
 
@@ -901,6 +902,136 @@ async def ws_scan_now(
             "insights_emitted": new_count,
         },
     )
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "home_insights/refine_cost_estimate",
+        vol.Required("insight_id"): str,
+        vol.Optional("feedback"): vol.Any(str, None),
+        vol.Optional("agent_id"): vol.Any(str, None),
+    }
+)
+@websocket_api.async_response
+async def ws_refine_cost_estimate(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Server-side pre-flight: estimate token + USD cost of a Refine call.
+
+    Runs the same redaction + prompt-build pipeline as ws_refine but stops
+    before the LLM. Returns {tokens_in, tokens_out, cost_usd, agent_id,
+    threshold_usd, requires_confirm} so the card can decide whether to
+    show a "are you sure?" dialog before burning tokens.
+
+    Output bytes are estimated from a typical refined-automation length
+    (~800 bytes / ~200 tokens). The figure is rough by definition — we
+    don't know the agent's actual response until we make the call — but
+    it's the cheapest way to prevent expensive misclicks on Opus-tier
+    models without round-tripping a real call.
+    """
+    from .config_flow import get_blocked_entities, get_refine_cost_threshold
+    from .llm import RedactionMode, Redactor, build_refine_prompt
+    from .llm.agent_client import _list_agent_candidates
+    from .llm.cost import estimate_cost
+
+    store = _get_store(hass)
+    if store is None:
+        connection.send_error(msg["id"], "not_set_up", "Store not initialized")
+        return
+    insight = await store.get_insight(msg["insight_id"])
+    if insight is None:
+        connection.send_error(
+            msg["id"], "not_found", f"No insight {msg['insight_id']!r}"
+        )
+        return
+    if insight.payload_format != "automation":
+        connection.send_error(
+            msg["id"],
+            "unsupported_format",
+            "cost estimate only supports payload_format='automation'",
+        )
+        return
+
+    # Pre-build the prompt the same way refine_insight would, so the byte
+    # count is realistic.
+    blocked = _resolve_blocked_entities(hass, get_blocked_entities)
+    redactor = Redactor(
+        store, mode=RedactionMode.AGGRESSIVE, blocked_entities=blocked
+    )
+    redacted_payload, _ = await redactor.redact_insight_payload(insight.payload)
+
+    redacted_explanation: str | None = None
+    if insight.explanation:
+        redacted_explanation, _ = await redactor.redact_text(insight.explanation)
+    redacted_feedback: str | None = None
+    feedback = msg.get("feedback")
+    if feedback:
+        redacted_feedback, _ = await redactor.redact_text(feedback)
+
+    prompt = build_refine_prompt(
+        redacted_payload,
+        prior_explanation=redacted_explanation,
+        feedback=redacted_feedback,
+    )
+    bytes_sent = len(prompt.encode("utf-8"))
+    # Heuristic: a refined automation YAML response is ~800 bytes (~200 tokens).
+    # If the model emits a long RATIONALE block first the figure is light;
+    # if it abbreviates aggressively the figure is high. Mid-band estimate.
+    bytes_received_est = 800
+
+    requested = msg.get("agent_id")
+    preferred = _resolve_preferred_agent_id(hass)
+    candidates = _list_agent_candidates(
+        hass, requested=requested, preferred=preferred
+    )
+    # The agent the cost will most likely fall on: the first non-None candidate.
+    target_agent = next((c for c in candidates if c is not None), None)
+
+    cost = estimate_cost(
+        agent_id=target_agent,
+        bytes_sent=bytes_sent,
+        bytes_received=bytes_received_est,
+    )
+
+    threshold = _resolve_refine_cost_threshold(hass)
+    requires_confirm = (
+        target_agent is not None
+        and float(cost["cost_usd"]) > threshold
+        and cost["source"] != "local_free"
+    )
+
+    connection.send_result(
+        msg["id"],
+        {
+            "agent_id": target_agent,
+            "tokens_in": cost["tokens_in"],
+            "tokens_out": cost["tokens_out"],
+            "cost_usd": cost["cost_usd"],
+            "cost_source": cost["source"],
+            "threshold_usd": threshold,
+            "requires_confirm": requires_confirm,
+        },
+    )
+
+
+def _resolve_refine_cost_threshold(hass: HomeAssistant) -> float:
+    """Pick the lowest threshold across active config entries.
+
+    Lowest wins so a "be cautious" entry isn't bypassed by a more
+    permissive one in a multi-entry future.
+    """
+    from .config_flow import (
+        DEFAULT_REFINE_COST_THRESHOLD_USD,
+        get_refine_cost_threshold,
+    )
+
+    thresholds = [
+        get_refine_cost_threshold(entry)
+        for entry in hass.config_entries.async_entries(DOMAIN)
+    ]
+    return min(thresholds) if thresholds else DEFAULT_REFINE_COST_THRESHOLD_USD
 
 
 @websocket_api.websocket_command(
