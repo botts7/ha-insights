@@ -28,10 +28,15 @@ CONF_LOOKBACK_DAYS = "lookback_days"
 CONF_LLM_BLOCK_ENTITIES = "llm_block_entities"
 CONF_NOTIFY_ON_INSIGHT = "notify_on_insight"
 CONF_NOTIFY_THRESHOLD = "notify_threshold"
+CONF_DIGEST_ENABLED = "digest_enabled"
+CONF_DIGEST_HOUR = "digest_hour"
 DEFAULT_LOOKBACK_DAYS = 14
 LOOKBACK_DAYS_RANGE = (0, 30)  # 0 disables backfill entirely
 DEFAULT_NOTIFY_ON_INSIGHT = True
 DEFAULT_NOTIFY_THRESHOLD = 0.8
+DEFAULT_DIGEST_ENABLED = True
+DEFAULT_DIGEST_HOUR = 9
+DIGEST_HOUR_RANGE = (0, 23)
 
 
 class LlmMode(StrEnum):
@@ -90,6 +95,29 @@ def get_notify_settings(entry: ConfigEntry) -> tuple[bool, float]:
         threshold = DEFAULT_NOTIFY_THRESHOLD
     threshold = max(0.0, min(1.0, threshold))
     return bool(enabled_raw), threshold
+
+
+def get_digest_settings(entry: ConfigEntry) -> tuple[bool, int]:
+    """Resolve daily-digest settings: (enabled, hour).
+
+    Hour clamped to [0, 23]; enabled defaults to True. Users opt out via
+    OptionsFlow. Hour is interpreted in HA's configured timezone.
+    """
+    enabled_raw = entry.options.get(
+        CONF_DIGEST_ENABLED,
+        entry.data.get(CONF_DIGEST_ENABLED, DEFAULT_DIGEST_ENABLED),
+    )
+    hour_raw = entry.options.get(
+        CONF_DIGEST_HOUR,
+        entry.data.get(CONF_DIGEST_HOUR, DEFAULT_DIGEST_HOUR),
+    )
+    try:
+        hour = int(hour_raw)
+    except (TypeError, ValueError):
+        hour = DEFAULT_DIGEST_HOUR
+    lo, hi = DIGEST_HOUR_RANGE
+    hour = max(lo, min(hi, hour))
+    return bool(enabled_raw), hour
 
 
 def get_blocked_entities(entry: ConfigEntry) -> frozenset[str]:
@@ -168,6 +196,8 @@ class HaInsightsConfigFlow(ConfigFlow, domain=DOMAIN):
                 CONF_LOOKBACK_DAYS: DEFAULT_LOOKBACK_DAYS,
                 CONF_NOTIFY_ON_INSIGHT: DEFAULT_NOTIFY_ON_INSIGHT,
                 CONF_NOTIFY_THRESHOLD: DEFAULT_NOTIFY_THRESHOLD,
+                CONF_DIGEST_ENABLED: DEFAULT_DIGEST_ENABLED,
+                CONF_DIGEST_HOUR: DEFAULT_DIGEST_HOUR,
             },
         )
 
@@ -184,6 +214,8 @@ class HaInsightsOptionsFlow(OptionsFlow):
         self._lookback: int = DEFAULT_LOOKBACK_DAYS
         self._notify_on: bool = DEFAULT_NOTIFY_ON_INSIGHT
         self._notify_threshold: float = DEFAULT_NOTIFY_THRESHOLD
+        self._digest_enabled: bool = DEFAULT_DIGEST_ENABLED
+        self._digest_hour: int = DEFAULT_DIGEST_HOUR
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
@@ -192,6 +224,9 @@ class HaInsightsOptionsFlow(OptionsFlow):
         current_mode = get_active_mode(self.config_entry)
         current_lookback = get_lookback_days(self.config_entry)
         current_notify_on, current_notify_threshold = get_notify_settings(
+            self.config_entry
+        )
+        current_digest_on, current_digest_hour = get_digest_settings(
             self.config_entry
         )
 
@@ -204,6 +239,12 @@ class HaInsightsOptionsFlow(OptionsFlow):
             self._notify_threshold = float(
                 user_input.get(CONF_NOTIFY_THRESHOLD, current_notify_threshold)
             )
+            self._digest_enabled = bool(
+                user_input.get(CONF_DIGEST_ENABLED, current_digest_on)
+            )
+            self._digest_hour = int(
+                user_input.get(CONF_DIGEST_HOUR, current_digest_hour)
+            )
             if self._mode is LlmMode.CLOUD and current_mode != LlmMode.CLOUD.value:
                 # Only require fresh consent if switching INTO cloud
                 return await self.async_step_cloud_consent()
@@ -214,6 +255,8 @@ class HaInsightsOptionsFlow(OptionsFlow):
                     CONF_LOOKBACK_DAYS: self._lookback,
                     CONF_NOTIFY_ON_INSIGHT: self._notify_on,
                     CONF_NOTIFY_THRESHOLD: self._notify_threshold,
+                    CONF_DIGEST_ENABLED: self._digest_enabled,
+                    CONF_DIGEST_HOUR: self._digest_hour,
                 },
             )
 
@@ -233,6 +276,15 @@ class HaInsightsOptionsFlow(OptionsFlow):
                 vol.Optional(
                     CONF_NOTIFY_THRESHOLD, default=current_notify_threshold
                 ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=1.0)),
+                vol.Optional(
+                    CONF_DIGEST_ENABLED, default=current_digest_on
+                ): bool,
+                vol.Optional(
+                    CONF_DIGEST_HOUR, default=current_digest_hour
+                ): vol.All(
+                    vol.Coerce(int),
+                    vol.Range(min=DIGEST_HOUR_RANGE[0], max=DIGEST_HOUR_RANGE[1]),
+                ),
             }
         )
         return self.async_show_form(step_id="init", data_schema=schema)
@@ -250,6 +302,8 @@ class HaInsightsOptionsFlow(OptionsFlow):
                         CONF_LOOKBACK_DAYS: self._lookback,
                         CONF_NOTIFY_ON_INSIGHT: self._notify_on,
                         CONF_NOTIFY_THRESHOLD: self._notify_threshold,
+                        CONF_DIGEST_ENABLED: self._digest_enabled,
+                        CONF_DIGEST_HOUR: self._digest_hour,
                     },
                 )
             self._mode = None

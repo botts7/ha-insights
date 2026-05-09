@@ -12,8 +12,13 @@ from homeassistant.core import Event, HomeAssistant, ServiceCall, State, callbac
 from homeassistant.helpers import entity_registry as er
 
 from . import ws_api
-from .config_flow import get_lookback_days, get_notify_settings
+from .config_flow import (
+    get_digest_settings,
+    get_lookback_days,
+    get_notify_settings,
+)
 from .const import DOMAIN
+from .notifications.digest import schedule_digest
 from .observers.history_backfill import backfill as backfill_history
 from .observers.state_event_buffer import StateEvent, StateEventBuffer
 from .store import InsightStore
@@ -110,12 +115,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     unsub_store = store.add_listener(_on_store_event)
 
+    # Daily digest: scheduled callback at the configured local hour. Skipped
+    # entirely when the user disables it. The callable returned by
+    # async_track_time_change is the unsub.
+    digest_enabled, digest_hour = get_digest_settings(entry)
+    unsub_digest = (
+        schedule_digest(hass, store, hour=digest_hour) if digest_enabled else None
+    )
+
     hass.data[DOMAIN][entry.entry_id] = {
         "store": store,
         "buffer": buffer_,
         "unsub_state": unsub_state,
         "unsub_registry": unsub_registry,
         "unsub_store": unsub_store,
+        "unsub_digest": unsub_digest,
         "last_backfill": None,
         "backfill_running": False,
     }
@@ -329,6 +343,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         data["unsub_registry"]()
     if "unsub_store" in data:
         data["unsub_store"]()
+    if data.get("unsub_digest") is not None:
+        data["unsub_digest"]()
     if "store" in data:
         await data["store"].close()
     # Unregister the panel only when the LAST entry unloads (other entries
