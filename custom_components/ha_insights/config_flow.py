@@ -161,23 +161,66 @@ def get_blocked_entities(entry: ConfigEntry) -> frozenset[str]:
     return frozenset(items)
 
 
-def _conversation_agent_selector() -> Any:
+def _conversation_agent_selector(hass: Any) -> Any:
     """Schema field for the preferred conversation agent.
 
-    Uses a plain string field rather than EntitySelector. The selector
-    flavors that filter by domain="conversation" don't serialize cleanly
-    when wrapped in vol.Any (which we need so empty "" is a valid sentinel
-    for "auto-pick") — HA's form renderer returns a 500 trying to render
-    the schema. The string field accepts any value, and the runtime
-    candidate-list logic ignores anything that doesn't resolve to a real
-    agent, so a typo just falls through to the failover chain.
+    Builds a SelectSelector dropdown populated from the entity registry
+    at form-show time. Each conversation.* entity becomes an option,
+    plus a leading "Auto-pick" empty-value entry. SelectSelector
+    serializes cleanly (unlike EntitySelector wrapped in vol.Any),
+    avoiding the 500 we hit on the first attempt.
 
-    UX cost: the user has to type the entity_id (e.g.
-    "conversation.gemini_2_5_flash") instead of picking from a dropdown.
-    Look it up under Settings -> Devices & Services -> Entities and
-    filter to domain "conversation".
+    Falls back to a plain str field if the selector / entity_registry
+    APIs aren't importable for some reason — keeps the feature
+    functional even if HA's helper module shape drifts.
     """
-    return str
+    try:
+        from homeassistant.helpers import entity_registry as er
+        from homeassistant.helpers import selector
+
+        registry = er.async_get(hass)
+        options: list[Any] = [
+            selector.SelectOptionDict(
+                value="",
+                label="Auto-pick (Assist default + failover)",
+            )
+        ]
+        seen: set[str] = set()
+        for reg_entry in sorted(
+            registry.entities.values(), key=lambda e: e.entity_id
+        ):
+            if not reg_entry.entity_id.startswith("conversation."):
+                continue
+            # Skip the rule-based built-in — it's not a useful LLM choice
+            if reg_entry.platform in {"homeassistant", "conversation"}:
+                continue
+            if reg_entry.entity_id in seen:
+                continue
+            seen.add(reg_entry.entity_id)
+            label = (
+                reg_entry.name
+                or reg_entry.original_name
+                or reg_entry.entity_id
+            )
+            display = (
+                f"{label} ({reg_entry.entity_id})"
+                if label != reg_entry.entity_id
+                else reg_entry.entity_id
+            )
+            options.append(
+                selector.SelectOptionDict(
+                    value=reg_entry.entity_id, label=display
+                )
+            )
+        return selector.SelectSelector(
+            selector.SelectSelectorConfig(
+                options=options,
+                mode=selector.SelectSelectorMode.DROPDOWN,
+                custom_value=True,  # allow typing an entity_id not in the list
+            )
+        )
+    except Exception:  # pragma: no cover — defensive fallback
+        return str
 
 
 class HaInsightsConfigFlow(ConfigFlow, domain=DOMAIN):
@@ -335,13 +378,12 @@ class HaInsightsOptionsFlow(OptionsFlow):
                     vol.Coerce(int),
                     vol.Range(min=DIGEST_HOUR_RANGE[0], max=DIGEST_HOUR_RANGE[1]),
                 ),
-                # Preferred agent — plain text entity_id (e.g.
-                # "conversation.gemini_2_5_flash"). Empty string => auto-pick
-                # (Assist default + failover). See _conversation_agent_selector
-                # for why we don't use EntitySelector here.
+                # Preferred agent — dropdown of conversation.* entities
+                # built from the registry. Empty value => auto-pick
+                # (Assist default + failover).
                 vol.Optional(
                     CONF_PREFERRED_AGENT_ID, default=current_preferred
-                ): _conversation_agent_selector(),
+                ): _conversation_agent_selector(self.hass),
             }
         )
         return self.async_show_form(step_id="init", data_schema=schema)
