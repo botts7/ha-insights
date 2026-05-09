@@ -244,6 +244,57 @@ class InsightStore:
             "outbound_calls_deleted": calls_before,
         }
 
+    async def get_outbound_call_summary(
+        self, *, since: datetime
+    ) -> dict[str, object | None]:
+        """Aggregated stats over outbound_calls since the given time.
+
+        Returns a dict with call_count, bytes_sent_total, bytes_received_total,
+        last_call_timestamp (datetime|None), last_agent (str|None).
+        Empty / no-call windows return zeros and Nones.
+        """
+        since_ts = since.timestamp()
+        async with self._c.execute(
+            """
+            SELECT
+                COUNT(*) AS call_count,
+                COALESCE(SUM(bytes_sent), 0) AS bytes_sent_total,
+                COALESCE(SUM(bytes_received), 0) AS bytes_received_total,
+                MAX(timestamp) AS last_call_timestamp
+            FROM outbound_calls
+            WHERE timestamp >= ?
+            """,
+            (since_ts,),
+        ) as cur:
+            row = await cur.fetchone()
+
+        last_agent: str | None = None
+        last_ts_value = row["last_call_timestamp"] if row else None
+        if last_ts_value is not None:
+            async with self._c.execute(
+                """
+                SELECT agent FROM outbound_calls
+                WHERE timestamp = ?
+                ORDER BY id DESC LIMIT 1
+                """,
+                (last_ts_value,),
+            ) as cur:
+                latest = await cur.fetchone()
+                if latest is not None:
+                    last_agent = latest["agent"]
+
+        return {
+            "call_count": int(row["call_count"]) if row else 0,
+            "bytes_sent_total": int(row["bytes_sent_total"]) if row else 0,
+            "bytes_received_total": int(row["bytes_received_total"]) if row else 0,
+            "last_call_timestamp": (
+                datetime.fromtimestamp(last_ts_value, tz=UTC)
+                if last_ts_value is not None
+                else None
+            ),
+            "last_agent": last_agent,
+        }
+
     async def get_applied_history(
         self, insight_id: str
     ) -> dict[str, object] | None:

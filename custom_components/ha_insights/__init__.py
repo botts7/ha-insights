@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import EVENT_STATE_CHANGED
+from homeassistant.const import EVENT_STATE_CHANGED, Platform
 from homeassistant.core import Event, HomeAssistant, ServiceCall, State, callback
 from homeassistant.helpers import entity_registry as er
 
@@ -13,7 +13,7 @@ from .const import DOMAIN
 from .observers.state_event_buffer import StateEvent, StateEventBuffer
 from .store import InsightStore
 
-PLATFORMS: list[str] = []
+PLATFORMS: list[Platform] = [Platform.SENSOR]
 
 _WS_REGISTERED_FLAG = "_ws_registered"
 _SERVICES_REGISTERED_FLAG = "_services_registered"
@@ -91,6 +91,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         _async_register_services(hass)
         hass.data[DOMAIN][_SERVICES_REGISTERED_FLAG] = True
 
+    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
 
 
@@ -130,6 +131,9 @@ def _async_register_services(hass: HomeAssistant) -> None:
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry — closes the store and event listeners."""
+    unloaded = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    if not unloaded:
+        return False
     data = hass.data[DOMAIN].pop(entry.entry_id, None)
     if data is None:
         return True
