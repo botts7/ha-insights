@@ -22,21 +22,13 @@ if TYPE_CHECKING:
     from ..insight import Insight
 
 
-_SYSTEM_PROMPT_TMPL = (
-    "You are explaining a detected home automation routine to a Home Assistant user.\n"
-    "Home Assistant version: {ha_version}\n"
-    "Use only documented HA core features that exist in {ha_version_major}+.\n"
-    "Do not reference specific integrations not present in the payload.\n"
-    "Keep your explanation under 200 words. Plain prose, no code."
-)
-
 _USER_PROMPT_TMPL = (
-    "Explain this routine the user has been following:\n\n"
-    "Title: {title}\n"
-    "Confidence: {confidence:.0%}\n"
-    "Action that would be automated:\n"
+    "I'd like you to explain a Home Assistant routine I've been following.\n\n"
+    "{title}\n\n"
+    "This automation would:\n"
     "{payload_summary}\n\n"
-    "Explain when this happens and why it might be worth automating."
+    "In one or two short paragraphs, explain why this routine might be worth "
+    "automating and any caveats. Plain prose, no code, under 150 words."
 )
 
 
@@ -53,20 +45,24 @@ class ExplanationResult:
 
 
 def build_explain_prompt(
-    insight: Insight, redacted_payload: dict, ha_version: str
-) -> tuple[str, str]:
-    """Build (system_prompt, user_prompt) for the LLM."""
+    insight: Insight, redacted_payload: dict, _ha_version: str = ""
+) -> str:
+    """Build a single self-contained user prompt for HA's Conversation API.
+
+    HA's `conversation.async_converse` takes one `text` argument — there's no
+    separate system-prompt slot. Each Conversation integration (Ollama,
+    Anthropic, etc.) configures its own system prompt at the integration
+    level. We just send a natural user-style question that any reasonable
+    LLM can answer; rule-based agents will fail gracefully.
+
+    The `_ha_version` parameter is kept for backwards-compatible test
+    signatures but no longer used.
+    """
     payload_summary = _summarize_payload(redacted_payload)
-    system = _SYSTEM_PROMPT_TMPL.format(
-        ha_version=ha_version,
-        ha_version_major=ha_version.rsplit(".", 1)[0] if "." in ha_version else ha_version,
-    )
-    user = _USER_PROMPT_TMPL.format(
+    return _USER_PROMPT_TMPL.format(
         title=insight.title,
-        confidence=insight.confidence,
         payload_summary=payload_summary,
     )
-    return system, user
 
 
 def _summarize_payload(payload: dict) -> str:
@@ -132,17 +128,13 @@ async def explain_insight(
         created_at=insight.created_at,
     )
 
-    ha_version = getattr(hass.config, "version", "unknown")
-    system_prompt, user_prompt = build_explain_prompt(
-        redacted_insight, redacted_payload, str(ha_version)
-    )
-    full_prompt = system_prompt + "\n\n" + user_prompt
-    bytes_sent = len(full_prompt.encode("utf-8"))
+    user_prompt = build_explain_prompt(redacted_insight, redacted_payload)
+    bytes_sent = len(user_prompt.encode("utf-8"))
 
     try:
         result = await ha_conversation.async_converse(
             hass,
-            text=full_prompt,
+            text=user_prompt,
             conversation_id=None,
             context=None,
             language=None,

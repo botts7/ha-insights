@@ -68,26 +68,25 @@ def _mock_conversation_result(speech: str) -> SimpleNamespace:
 # --- Prompt building ---
 
 
-def test_build_prompt_includes_ha_version() -> None:
-    insight = _make_insight()
-    redacted_payload = insight.payload
-    system, _ = build_explain_prompt(insight, redacted_payload, "2025.4.2")
-    assert "2025.4.2" in system
-    assert "2025.4+" in system  # major-version reference
-
-
 def test_build_prompt_summarizes_action() -> None:
     insight = _make_insight()
-    _, user = build_explain_prompt(insight, insight.payload, "2025.4.2")
-    assert "06:47:00" in user
-    assert "light.turn_on" in user
-    assert "light.kitchen" in user
+    prompt = build_explain_prompt(insight, insight.payload)
+    assert "06:47:00" in prompt
+    assert "light.turn_on" in prompt
+    assert "light.kitchen" in prompt
 
 
-def test_build_prompt_includes_confidence() -> None:
-    insight = _make_insight(confidence=0.85)
-    _, user = build_explain_prompt(insight, insight.payload, "2025.4.2")
-    assert "85%" in user
+def test_build_prompt_includes_title() -> None:
+    insight = _make_insight()
+    prompt = build_explain_prompt(insight, insight.payload)
+    assert insight.title in prompt
+
+
+def test_build_prompt_returns_string() -> None:
+    """v0.2: Conversation API takes one user-prompt string, no system slot."""
+    insight = _make_insight()
+    prompt = build_explain_prompt(insight, insight.payload)
+    assert isinstance(prompt, str)
 
 
 # --- explain_insight ---
