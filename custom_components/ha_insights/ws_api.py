@@ -931,7 +931,7 @@ async def ws_refine_cost_estimate(
     it's the cheapest way to prevent expensive misclicks on Opus-tier
     models without round-tripping a real call.
     """
-    from .config_flow import get_blocked_entities, get_refine_cost_threshold
+    from .config_flow import get_blocked_entities
     from .llm import RedactionMode, Redactor, build_refine_prompt
     from .llm.agent_client import _list_agent_candidates
     from .llm.cost import estimate_cost
