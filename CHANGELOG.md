@@ -4,6 +4,14 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+### Added
+
+- **`CooccurrenceDetector`** — finds "entity B follows entity A within N seconds" patterns over the rolling state buffer. Common case: porch light comes on shortly after front door opens. Walks the buffer with a 30s sliding window, requires ≥5 occurrences with timing stddev ≤12s and ≥60% leader-follower consistency, emits an `AUTOMATION_PROPOSAL` insight with a state-trigger automation payload. Same default-blocked-domain rules as `ScheduleDetector`.
+
+### Deferred to a later release
+
+- HA Blueprint emission (current raw-automation apply works end-to-end; blueprint storage path is a non-trivial refactor without obvious user benefit).
+
 ## [0.2.0] — 2026-05-09
 
 LLM Explain feature shipped — privacy-first LLM enrichment via HA's Conversation API. Live-verified end-to-end against Google Gemini.
