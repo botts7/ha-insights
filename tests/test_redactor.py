@@ -57,7 +57,7 @@ async def test_blocked_entity_in_target_dict(store: InsightStore) -> None:
 
 
 async def test_blocked_entity_filtered_from_list(store: InsightStore) -> None:
-    """A list of entity_ids has blocked entries filtered out."""
+    """A list of entity_ids has blocked entries filtered out before pseudonymization."""
     redactor = Redactor(
         store,
         mode=RedactionMode.AGGRESSIVE,
@@ -69,9 +69,12 @@ async def test_blocked_entity_filtered_from_list(store: InsightStore) -> None:
         }
     }
     cleaned, redaction_map = await redactor.redact_insight_payload(payload)
-    assert "lock.front_door" not in cleaned["target"]["entity_id"]
-    assert "light.kitchen" in cleaned["target"]["entity_id"]
-    assert "switch.fan" in cleaned["target"]["entity_id"]
+    cleaned_list = cleaned["target"]["entity_id"]
+    # Blocked entity entirely removed (not pseudonymized, not present)
+    assert "lock.front_door" not in cleaned_list
+    # The two unblocked entries survived (pseudonymized in AGGRESSIVE mode)
+    assert any(item.startswith("light.entity_") for item in cleaned_list)
+    assert any(item.startswith("switch.entity_") for item in cleaned_list)
     assert "lock.front_door" in redaction_map.entities_blocked
 
 

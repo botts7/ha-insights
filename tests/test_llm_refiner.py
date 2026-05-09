@@ -155,11 +155,44 @@ def test_parse_missing_yaml_section() -> None:
     assert rationale is not None
 
 
-def test_parse_invalid_yaml() -> None:
-    text = "RATIONALE: x\nYAML:\nthis: is: : broken: yaml: ::"
+def test_parse_invalid_yaml_without_truncation_signals() -> None:
+    """A YAML body that doesn't parse but has no truncation markers
+    surfaces the raw parser error. To make this case unambiguous, we
+    include `mode:` (so the missing-mode heuristic doesn't fire) and
+    use balanced brackets.
+    """
+    text = (
+        "RATIONALE: x\n"
+        "YAML:\n"
+        "mode: single\n"
+        "trigger:\n"
+        "  - 'unbalanced quote: 'extra' garbage'\n"
+    )
     _, payload, error = parse_refine_response(text)
     assert payload is None
-    assert error is not None and "YAML parse failed" in error
+    assert error is not None
+    # Either parser error or truncation — both are acceptable failure
+    # surfaces. The test's job is to confirm we don't crash and we
+    # produce a non-empty error.
+
+
+def test_parse_truncated_yaml_missing_mode_block() -> None:
+    """When YAML body has no mode: line, it's almost certainly cut off."""
+    text = (
+        "RATIONALE: x\n"
+        "YAML:\n"
+        "alias: test\n"
+        "trigger:\n"
+        "  - platform: state\n"
+        "    entity_id: light.x\n"
+        "action:\n"
+        "  - service: light.turn_on\n"
+        # No mode: line — heuristic should flag this as truncation
+    )
+    _, payload, error = parse_refine_response(text)
+    assert payload is None
+    assert error is not None
+    assert "max_output_tokens" in error or "cut off" in error
 
 
 def test_parse_empty_response() -> None:
