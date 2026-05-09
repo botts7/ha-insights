@@ -336,9 +336,11 @@ class HaInsightsOptionsFlow(OptionsFlow):
                 ),
                 # Preferred agent — entity selector filtered to conversation.*.
                 # Empty string => auto-pick (Assist default + failover).
+                # vol.Any covers the empty-string case; the selector won't
+                # validate "" against a real conversation entity.
                 vol.Optional(
                     CONF_PREFERRED_AGENT_ID, default=current_preferred
-                ): _conversation_agent_selector(),
+                ): vol.Any("", _conversation_agent_selector()),
             }
         )
         return self.async_show_form(step_id="init", data_schema=schema)
