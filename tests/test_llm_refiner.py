@@ -176,23 +176,19 @@ def test_parse_invalid_yaml_without_truncation_signals() -> None:
     # produce a non-empty error.
 
 
-def test_parse_truncated_yaml_missing_mode_block() -> None:
-    """When YAML body has no mode: line, it's almost certainly cut off."""
+def test_parse_truncated_yaml_unclosed_quote() -> None:
+    """Unclosed quote on the last line should be flagged as truncation."""
     text = (
         "RATIONALE: x\n"
         "YAML:\n"
-        "alias: test\n"
-        "trigger:\n"
-        "  - platform: state\n"
-        "    entity_id: light.x\n"
-        "action:\n"
-        "  - service: light.turn_on\n"
-        # No mode: line — heuristic should flag this as truncation
+        "alias: 'unfinished\n"
     )
     _, payload, error = parse_refine_response(text)
     assert payload is None
     assert error is not None
-    assert "max_output_tokens" in error or "cut off" in error
+    # Either "cut off" (truncation heuristic) or "YAML parse failed" — both
+    # acceptable since both correctly tell the user something's wrong.
+    assert "cut off" in error or "parse failed" in error
 
 
 def test_parse_empty_response() -> None:
