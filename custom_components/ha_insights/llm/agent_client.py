@@ -48,7 +48,12 @@ _USER_PROMPT_HYPOTHESIZE_TMPL = (
 
 @dataclass(frozen=True)
 class ExplanationResult:
-    """Outcome of an Explain call."""
+    """Outcome of an Explain call.
+
+    `chosen_agent_id` is the agent that actually responded — relevant when
+    failover walked the candidate list before landing on a working agent.
+    Callers should audit-log against this, not the originally-requested id.
+    """
 
     explanation: str | None
     redaction_map: RedactionMap
@@ -56,6 +61,7 @@ class ExplanationResult:
     bytes_received: int
     success: bool
     error: str | None = None
+    chosen_agent_id: str | None = None
 
 
 def build_hypothesize_prompt(insight: Insight, redacted_payload: dict) -> str:
@@ -131,6 +137,100 @@ def _summarize_payload(payload: dict) -> str:
     return "\n".join(lines) if lines else "  (no readable summary)"
 
 
+def _get_assist_default_agent_id(hass: HomeAssistant) -> str | None:
+    """Best-effort lookup of HA's currently-configured default conversation agent.
+
+    HA exposes the default through several APIs that have shifted shape across
+    versions. We try the modern surface first, fall back to older forms, and
+    return None if nothing matches. Pure read — never raises.
+    """
+    try:
+        from homeassistant.components import conversation as ha_conv
+    except Exception:
+        return None
+    # 2024.x+: conversation.async_get_default_agent(hass) returns the agent
+    # object (or sometimes the entity_id directly on newer betas).
+    candidate_attr = getattr(ha_conv, "async_get_default_agent", None)
+    if callable(candidate_attr):
+        try:
+            agent = candidate_attr(hass)
+        except Exception:
+            agent = None
+        if isinstance(agent, str):
+            return agent
+        entity_id = getattr(agent, "entity_id", None) if agent is not None else None
+        if isinstance(entity_id, str):
+            return entity_id
+    # Older API path: conversation.get_agent_manager(hass).default_agent
+    get_mgr = getattr(ha_conv, "get_agent_manager", None) or getattr(
+        ha_conv, "_get_agent_manager", None
+    )
+    if callable(get_mgr):
+        try:
+            manager = get_mgr(hass)
+        except Exception:
+            manager = None
+        default = getattr(manager, "default_agent", None) if manager else None
+        if isinstance(default, str):
+            return default
+        entity_id = getattr(default, "entity_id", None) if default is not None else None
+        if isinstance(entity_id, str):
+            return entity_id
+    return None
+
+
+def _list_agent_candidates(
+    hass: HomeAssistant, *, requested: str | None
+) -> list[str | None]:
+    """Build the prioritized list of agents to try.
+
+    Order:
+      1. If `requested` is explicit, single-shot — respect the user's pin.
+      2. Assist's configured default agent (skipping the rule-based built-in).
+         This is the "what the user picked in the Voice/Assist UI" answer.
+      3. All other non-builtin conversation.* entities, in registry order.
+      4. None (HA's fallback) if nothing else is installed.
+
+    Returns at minimum [None] so the caller never has an empty list.
+    """
+    if requested is not None:
+        return [requested]
+
+    seen: set[str] = set()
+    candidates: list[str | None] = []
+
+    assist_default = _get_assist_default_agent_id(hass)
+    if (
+        isinstance(assist_default, str)
+        and assist_default != "conversation.home_assistant"
+    ):
+        candidates.append(assist_default)
+        seen.add(assist_default)
+
+    try:
+        from homeassistant.helpers import entity_registry as er
+
+        registry = er.async_get(hass)
+        for entry in registry.entities.values():
+            if not entry.entity_id.startswith("conversation."):
+                continue
+            if entry.platform in {"homeassistant", "conversation"}:
+                continue
+            if entry.entity_id in seen:
+                continue
+            candidates.append(entry.entity_id)
+            seen.add(entry.entity_id)
+    except Exception:  # pragma: no cover — defensive
+        pass
+
+    if not candidates:
+        # Nothing better installed — let HA route to whatever it deems default
+        # (typically the rule-based built-in, which gracefully says "I don't
+        # know"). Single attempt; no failover to try.
+        candidates.append(None)
+    return candidates
+
+
 def _pick_llm_agent_id(hass: HomeAssistant, requested: str | None) -> str | None:
     """Pick an LLM-backed Conversation agent.
 
@@ -180,13 +280,13 @@ async def explain_insight(
       - "explain": "why is this routine worth automating?" (default)
       - "hypothesize": "what plausible causes could explain this anomaly?"
 
-    On any failure, returns a result with `success=False`. Caller is
-    responsible for recording the audit log entry and updating the insight.
+    Auto-pick path (agent_id=None) walks the candidate list — Assist's
+    configured default first, then other installed LLM agents — returning
+    the first success. If the user pinned an explicit agent, no failover.
+    On any failure, returns the last attempt's result with `success=False`.
+    Caller is responsible for recording the audit log entry against
+    `result.chosen_agent_id`.
     """
-    from homeassistant.components import conversation as ha_conversation
-
-    chosen_agent_id = _pick_llm_agent_id(hass, agent_id)
-
     redacted_payload, redaction_map = await redactor.redact_insight_payload(
         insight.payload
     )
@@ -210,6 +310,36 @@ async def explain_insight(
         user_prompt = build_explain_prompt(redacted_insight, redacted_payload)
     bytes_sent = len(user_prompt.encode("utf-8"))
 
+    candidates = _list_agent_candidates(hass, requested=agent_id)
+    last_result: ExplanationResult | None = None
+    for candidate in candidates:
+        last_result = await _explain_one_attempt(
+            hass,
+            chosen_agent_id=candidate,
+            user_prompt=user_prompt,
+            bytes_sent=bytes_sent,
+            redaction_map=redaction_map,
+        )
+        if last_result.success:
+            return last_result
+    # All attempts failed — return the last (most recent) failure verbatim.
+    # _list_agent_candidates always returns at least [None] so last_result
+    # is guaranteed populated.
+    assert last_result is not None
+    return last_result
+
+
+async def _explain_one_attempt(
+    hass: HomeAssistant,
+    *,
+    chosen_agent_id: str | None,
+    user_prompt: str,
+    bytes_sent: int,
+    redaction_map: RedactionMap,
+) -> ExplanationResult:
+    """Single-shot Conversation API call with redacted prompt + deref response."""
+    from homeassistant.components import conversation as ha_conversation
+
     try:
         result = await ha_conversation.async_converse(
             hass,
@@ -227,6 +357,7 @@ async def explain_insight(
             bytes_received=0,
             success=False,
             error=str(err),
+            chosen_agent_id=chosen_agent_id,
         )
 
     response_type = _extract_response_type(result)
@@ -260,6 +391,7 @@ async def explain_insight(
             bytes_received=len(speech.encode("utf-8")) if speech else 0,
             success=False,
             error=error_msg,
+            chosen_agent_id=chosen_agent_id,
         )
 
     if speech is None:
@@ -270,6 +402,7 @@ async def explain_insight(
             bytes_received=0,
             success=False,
             error="agent returned no speech",
+            chosen_agent_id=chosen_agent_id,
         )
 
     dereffed = redaction_map.dereference(speech)
@@ -279,6 +412,7 @@ async def explain_insight(
         bytes_sent=bytes_sent,
         bytes_received=len(speech.encode("utf-8")),
         success=True,
+        chosen_agent_id=chosen_agent_id,
     )
 
 

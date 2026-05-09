@@ -204,11 +204,14 @@ async def ws_explain(
         hass, agent_id=agent_id, insight=insight, redactor=redactor
     )
 
+    # Audit against the agent that actually responded (failover may have
+    # walked the candidate list before landing on a working one).
+    audit_agent = result.chosen_agent_id or agent_id
     await record_call(
         store,
         insight_id=insight.id,
-        agent=str(agent_id) if agent_id else "default",
-        agent_locality=derive_agent_locality(agent_id),
+        agent=str(audit_agent) if audit_agent else "default",
+        agent_locality=derive_agent_locality(audit_agent),
         redaction_mode=str(redactor.mode),
         bytes_sent=result.bytes_sent,
         bytes_received=result.bytes_received,
@@ -306,11 +309,12 @@ async def ws_hypothesize(
         prompt_kind="hypothesize",
     )
 
+    audit_agent = result.chosen_agent_id or agent_id
     await record_call(
         store,
         insight_id=insight.id,
-        agent=str(agent_id) if agent_id else "default",
-        agent_locality=derive_agent_locality(agent_id),
+        agent=str(audit_agent) if audit_agent else "default",
+        agent_locality=derive_agent_locality(audit_agent),
         redaction_mode=str(redactor.mode),
         bytes_sent=result.bytes_sent,
         bytes_received=result.bytes_received,
