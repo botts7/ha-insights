@@ -29,6 +29,17 @@ The integration's `custom_components/ha_insights/` is volume-mounted at `/config
 
 `dev/config/` and `dev/token.txt` are gitignored. Wiped by `reset.sh`.
 
-## Why this exists at v0.1
+## Why this harness exists
 
-Per the charter (§Testing harness & autonomous dev loop): HA Insights claims to detect routines from observed state — that claim must be demonstrable end-to-end before any insight code is trusted. This harness lets a developer (or autonomous agent) seed a fresh HA, run the full pipeline, and assert the result, in under 2 minutes.
+HA Insights claims to detect routines from observed state — that claim must be demonstrable end-to-end before any detector or pipeline change is trusted. This harness lets a developer (or autonomous agent) seed a fresh HA, run the full pipeline, and assert the result, in under 2 minutes.
+
+## Probe scripts
+
+| Script | Purpose |
+|---|---|
+| `probe.py` | End-to-end happy path: seed → scan → list → apply → verify automation written |
+| `seed.py` | CLI seeder for arbitrary entity / state / time-of-day patterns |
+| `_demo_seed.py` | Quick weekday-routine demo against `light.dashboard_demo` |
+| `_cooccurrence_seed.py` | Door-then-light pairs to exercise CooccurrenceDetector |
+| `_refine_probe.py` | Drives `home_insights/refine` against the live LLM, prints raw response (use with `--detector cooccurrence` to pick a specific insight) |
+| `_backfill_probe.py` | Calls `ha_insights.backfill` service and prints status |

@@ -16,7 +16,7 @@
 
 **Branding:** "HA Insights" (short) / "HA Insights for Home Assistant" (long). The `ha-` prefix follows established HACS community-integration naming convention. We don't claim Nabu Casa affiliation, don't use HA-branded logos/images (per HACS docs), and the "for Home Assistant" qualifier in the long-form name signals third-party status. "Home Assistant" remains a Nabu Casa trademark — Apache 2.0 doesn't grant trademark rights to the exact mark, but we don't use the exact mark either, so this is not a concern.
 
-**Position vs HA's built-in LLM features:** HA's hassist (Conversation + LLM) is *reactive* — user asks, LLM answers and can act. HA Insights is *proactive* — observes patterns over time, surfaces suggestions. Same agents, complementary surfaces.
+**Position vs HA's built-in LLM features:** HA's Assist (Conversation + LLM) is *reactive* — user asks, LLM answers and can act. HA Insights is *proactive* — observes patterns over time, surfaces suggestions. Same agents, complementary surfaces.
 
 **Coupling rule:** card depends on integration's WebSocket API only. Integration ships zero JS. WS API is semver-stable from v0.1.
 
@@ -205,7 +205,7 @@ Detects "user does X every weekday at ~T."
 7. Title: template ("On weekdays at 6:47 AM, light.kitchen turns on (12/12 days)").
 8. Explanation: empty until user clicks Explain → LLM call with redaction.
 
-**Edge cases:** manual override during routine (confidence decays), DST boundaries (clock-time grouping + DST notice), entities without friendly_name (fall back to entity_id), multi-state entities (on/off only in v0.1).
+**Edge cases:** manual override during routine (confidence decays), DST boundaries (clock-time grouping + DST notice), entities without friendly_name (fall back to entity_id), multi-state entities (on/off only in current ScheduleDetector — full enum support is a future enhancement).
 
 ---
 

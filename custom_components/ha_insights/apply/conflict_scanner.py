@@ -1,13 +1,15 @@
 """Conflict scanner — detect overlap with existing automations before apply.
 
-v0.1 algorithm:
+Current algorithm:
   - Time-trigger overlap on the same target entity = conflict
   - Time window: +/- 10 minutes by default
   - Entity match: same entity_id in both action targets
 
-Non-time triggers (state, numeric_state, etc.) are not checked at v0.1
-since ScheduleDetector only emits time-triggered automations. Coverage
-expands as new detectors land.
+State-trigger and numeric-trigger overlap detection is on the roadmap;
+today's CooccurrenceDetector / LongTailDetector / StreakDetector outputs
+emit state triggers that this scanner doesn't yet check against existing
+automations. Confidence reasoning + the "What gets sent?" preview help
+users catch overlaps that the scanner doesn't.
 """
 from __future__ import annotations
 

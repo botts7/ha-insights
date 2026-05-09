@@ -199,7 +199,10 @@ async def ws_explain(
         store,
         insight_id=insight.id,
         agent=str(agent_id) if agent_id else "default",
-        agent_locality="cloud",  # tightened in v0.2 phase 2 with locality detection
+        # TODO: derive agent_locality from the chosen agent_id rather than
+        # hard-coding "cloud" — local Conversation integrations (Ollama,
+        # Piper) should record "local" so the audit log differentiates.
+        agent_locality="cloud",
         redaction_mode=str(redactor.mode),
         bytes_sent=result.bytes_sent,
         bytes_received=result.bytes_received,

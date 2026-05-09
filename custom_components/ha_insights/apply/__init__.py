@@ -1,10 +1,12 @@
 """Apply pipeline — validation, conflict detection, write to HA, drift handling.
 
-v0.1 surfaces:
-  - validate_automation: Layer 1 schema check (offline)
+Public surfaces:
+  - validate_automation: Layer 1 schema check (offline shape validation)
   - find_conflicts: pre-flight overlap detection vs existing automations
+  - AutomationWriter: writes automations.yaml + triggers automation.reload
+  - hash_config / detect_drift: snapshot + comparison for the (planned) undo flow
 
-Layer 2 WS validate + automation_writer + drift detector land at step 13.
+Layer 2 (online HA WS validate / template-evaluate) is on the roadmap.
 """
 from __future__ import annotations
 

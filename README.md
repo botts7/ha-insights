@@ -75,9 +75,9 @@ The integration auto-picks the first installed LLM agent. Override per-call with
 - [`docs/ws-api.md`](docs/ws-api.md) — stable WebSocket API contract
 - [`docs/writing-a-detector.md`](docs/writing-a-detector.md) — community detector contribution guide
 
-## Position vs HA's built-in `hassist`
+## Position vs HA's built-in **Assist**
 
-Home Assistant's Conversation + LLM (`hassist`) is **reactive** — user asks, LLM answers and can act. HA Insights is **proactive** — observes patterns over time, surfaces suggestions, optionally refines with the same LLM. Same agents, complementary surfaces.
+Home Assistant's [Assist](https://www.home-assistant.io/voice_control/) (Conversation + LLM) is **reactive** — user asks, LLM answers and can act. HA Insights is **proactive** — observes patterns over time, surfaces suggestions, optionally refines them with the same LLM agent you've configured for Assist. Same agents, complementary surfaces.
 
 ## Branding
 

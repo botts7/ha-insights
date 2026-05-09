@@ -17,14 +17,24 @@ class InsightKind(StrEnum):
     """Discrete kinds of insight a detector can emit.
 
     New kinds may be added across versions; existing kinds never change semantics.
+
+    Currently emitted by built-in detectors:
+        AUTOMATION_PROPOSAL — ScheduleDetector, CooccurrenceDetector,
+                              LongTailDetector, StreakDetector
+        ANOMALY             — OrphanDeviceDetector
+
+    Reserved for future detector kinds (no built-in detector emits these yet,
+    but the value is part of the stable schema for community detectors and
+    future built-ins):
+        CARD_PROPOSAL, GROUP_PROPOSAL, DASHBOARD_CLEANUP, SCENE_PROPOSAL
     """
 
-    AUTOMATION_PROPOSAL = "automation_proposal"   # v0.1 — ScheduleDetector hero
-    CARD_PROPOSAL = "card_proposal"               # v0.2
-    GROUP_PROPOSAL = "group_proposal"             # v0.3
-    ANOMALY = "anomaly"                           # v0.4
-    DASHBOARD_CLEANUP = "dashboard_cleanup"       # v0.3
-    SCENE_PROPOSAL = "scene_proposal"             # v0.3+
+    AUTOMATION_PROPOSAL = "automation_proposal"
+    CARD_PROPOSAL = "card_proposal"
+    GROUP_PROPOSAL = "group_proposal"
+    ANOMALY = "anomaly"
+    DASHBOARD_CLEANUP = "dashboard_cleanup"
+    SCENE_PROPOSAL = "scene_proposal"
 
 
 _VALID_PAYLOAD_FORMATS = frozenset({"blueprint", "automation", "card", "group", "scene"})

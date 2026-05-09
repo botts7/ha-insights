@@ -1,10 +1,10 @@
-"""ScheduleDetector — the v0.1 hero feature.
+"""ScheduleDetector — strong time-of-day routines.
 
 Detects routines like 'you do X every weekday at ~T' from the StateEventBuffer
 and emits AUTOMATION_PROPOSAL insights with a ready-to-apply HA automation
 payload. Runs heuristically on the rolling buffer; no recorder required.
 
-Algorithm (per docs/ARCHITECTURE.md section 'v0.1 hero: ScheduleDetector'):
+Algorithm:
   1. Pull last LOOKBACK_DAYS of state changes
   2. Group by (entity_id, new_state); keep enum-like states only
   3. For each group: classify weekday set (weekdays / weekends / daily),
@@ -13,8 +13,8 @@ Algorithm (per docs/ARCHITECTURE.md section 'v0.1 hero: ScheduleDetector'):
   4. Confidence = min(1, n/14) * weekday_consistency * (1 - stddev/15)
   5. Emit Insight with automation YAML payload
 
-Blueprint emission (v0.2): payload_format would become 'blueprint' with
-parameterized inputs. v0.1 ships raw automation for simplicity.
+Blueprint emission as an alternative payload_format is on the roadmap but
+not yet built; raw automation YAML is what's emitted today.
 """
 from __future__ import annotations
 
