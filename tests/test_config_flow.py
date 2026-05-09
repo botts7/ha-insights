@@ -3,11 +3,15 @@ from __future__ import annotations
 
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
+from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.ha_insights.config_flow import (
     CONF_CLOUD_CONSENT,
     CONF_LLM_MODE,
+    CONF_LOOKBACK_DAYS,
+    DEFAULT_LOOKBACK_DAYS,
     LlmMode,
+    get_lookback_days,
 )
 from custom_components.ha_insights.const import DOMAIN
 
@@ -31,6 +35,7 @@ async def test_off_mode_creates_entry_immediately(hass: HomeAssistant) -> None:
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert result["data"][CONF_LLM_MODE] == LlmMode.OFF.value
     assert result["title"] == "HA Insights"
+    assert result["data"][CONF_LOOKBACK_DAYS] == DEFAULT_LOOKBACK_DAYS
 
 
 async def test_local_mode_creates_entry_immediately(hass: HomeAssistant) -> None:
@@ -87,6 +92,59 @@ async def test_cloud_consent_no_returns_to_mode_picker(hass: HomeAssistant) -> N
     )
     assert result["type"] is FlowResultType.FORM
     assert result["step_id"] == "user"
+
+
+def test_get_lookback_days_default() -> None:
+    entry = MockConfigEntry(domain=DOMAIN, data={CONF_LLM_MODE: LlmMode.OFF.value})
+    assert get_lookback_days(entry) == DEFAULT_LOOKBACK_DAYS
+
+
+def test_get_lookback_days_clamps_high() -> None:
+    entry = MockConfigEntry(domain=DOMAIN, data={CONF_LOOKBACK_DAYS: 999})
+    assert get_lookback_days(entry) == 30
+
+
+def test_get_lookback_days_clamps_low() -> None:
+    entry = MockConfigEntry(domain=DOMAIN, data={CONF_LOOKBACK_DAYS: -5})
+    assert get_lookback_days(entry) == 0
+
+
+def test_get_lookback_days_options_override() -> None:
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={CONF_LOOKBACK_DAYS: 7},
+        options={CONF_LOOKBACK_DAYS: 21},
+    )
+    assert get_lookback_days(entry) == 21
+
+
+def test_get_lookback_days_invalid_returns_default() -> None:
+    entry = MockConfigEntry(domain=DOMAIN, data={CONF_LOOKBACK_DAYS: "abc"})
+    assert get_lookback_days(entry) == DEFAULT_LOOKBACK_DAYS
+
+
+async def test_options_flow_includes_lookback_days(hass: HomeAssistant) -> None:
+    """OptionsFlow lets the user change lookback in-place."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={CONF_LLM_MODE: LlmMode.OFF.value, CONF_LOOKBACK_DAYS: 14},
+        unique_id=DOMAIN,
+        title="HA Insights",
+    )
+    entry.add_to_hass(hass)
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "init"
+    # Schema should expose the lookback field
+    schema_keys = {str(k) for k in result["data_schema"].schema}
+    assert CONF_LOOKBACK_DAYS in schema_keys
+
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        user_input={CONF_LLM_MODE: LlmMode.OFF.value, CONF_LOOKBACK_DAYS: 21},
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["data"][CONF_LOOKBACK_DAYS] == 21
 
 
 async def test_single_instance_only(hass: HomeAssistant) -> None:

@@ -11,3 +11,24 @@ scan_now:
     Run all registered detectors immediately against the current state buffer.
     New insights land in the store; subscribed cards see them via the live
     update event stream.
+
+backfill:
+  name: Backfill from recorder
+  description: >
+    Re-populate the state-event buffer from HA's recorder history. Runs
+    automatically on first install but can be re-run manually after large
+    entity changes or if recorder retention was just extended. Local-only;
+    no LLM calls.
+  fields:
+    lookback_days:
+      name: Lookback days
+      description: >
+        Override the configured lookback window for this run only.
+        Range 1-30. Omit to use the integration's configured value.
+      example: 14
+      selector:
+        number:
+          min: 1
+          max: 30
+          step: 1
+          mode: slider

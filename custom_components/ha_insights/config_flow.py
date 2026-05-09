@@ -24,6 +24,9 @@ from .const import DOMAIN
 
 CONF_LLM_MODE = "llm_mode"
 CONF_CLOUD_CONSENT = "cloud_consent"
+CONF_LOOKBACK_DAYS = "lookback_days"
+DEFAULT_LOOKBACK_DAYS = 14
+LOOKBACK_DAYS_RANGE = (0, 30)  # 0 disables backfill entirely
 
 
 class LlmMode(StrEnum):
@@ -46,6 +49,20 @@ def get_active_mode(entry: ConfigEntry) -> str:
     return entry.options.get(
         CONF_LLM_MODE, entry.data.get(CONF_LLM_MODE, LlmMode.OFF.value)
     )
+
+
+def get_lookback_days(entry: ConfigEntry) -> int:
+    """Resolve the configured backfill lookback (options override data)."""
+    raw = entry.options.get(
+        CONF_LOOKBACK_DAYS,
+        entry.data.get(CONF_LOOKBACK_DAYS, DEFAULT_LOOKBACK_DAYS),
+    )
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return DEFAULT_LOOKBACK_DAYS
+    lo, hi = LOOKBACK_DAYS_RANGE
+    return max(lo, min(hi, value))
 
 
 class HaInsightsConfigFlow(ConfigFlow, domain=DOMAIN):
@@ -98,7 +115,10 @@ class HaInsightsConfigFlow(ConfigFlow, domain=DOMAIN):
         mode = self._mode or LlmMode.OFF
         return self.async_create_entry(
             title="HA Insights",
-            data={CONF_LLM_MODE: mode.value},
+            data={
+                CONF_LLM_MODE: mode.value,
+                CONF_LOOKBACK_DAYS: DEFAULT_LOOKBACK_DAYS,
+            },
         )
 
 
@@ -108,25 +128,37 @@ class HaInsightsOptionsFlow(OptionsFlow):
     def __init__(self, config_entry: ConfigEntry) -> None:
         self.config_entry = config_entry
         self._mode: LlmMode | None = None
+        self._lookback: int = DEFAULT_LOOKBACK_DAYS
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Mode picker, defaulting to whatever the user currently has."""
-        current = get_active_mode(self.config_entry)
+        """Mode + lookback picker, defaulting to whatever the user currently has."""
+        current_mode = get_active_mode(self.config_entry)
+        current_lookback = get_lookback_days(self.config_entry)
 
         if user_input is not None:
             self._mode = LlmMode(user_input[CONF_LLM_MODE])
-            if self._mode is LlmMode.CLOUD and current != LlmMode.CLOUD.value:
+            self._lookback = int(user_input.get(CONF_LOOKBACK_DAYS, current_lookback))
+            if self._mode is LlmMode.CLOUD and current_mode != LlmMode.CLOUD.value:
                 # Only require fresh consent if switching INTO cloud
                 return await self.async_step_cloud_consent()
             return self.async_create_entry(
                 title="",
-                data={CONF_LLM_MODE: self._mode.value},
+                data={
+                    CONF_LLM_MODE: self._mode.value,
+                    CONF_LOOKBACK_DAYS: self._lookback,
+                },
             )
 
+        lo, hi = LOOKBACK_DAYS_RANGE
         schema = vol.Schema(
-            {vol.Required(CONF_LLM_MODE, default=current): vol.In(_MODE_LABELS)}
+            {
+                vol.Required(CONF_LLM_MODE, default=current_mode): vol.In(_MODE_LABELS),
+                vol.Required(
+                    CONF_LOOKBACK_DAYS, default=current_lookback
+                ): vol.All(vol.Coerce(int), vol.Range(min=lo, max=hi)),
+            }
         )
         return self.async_show_form(step_id="init", data_schema=schema)
 
@@ -138,7 +170,10 @@ class HaInsightsOptionsFlow(OptionsFlow):
             if user_input.get(CONF_CLOUD_CONSENT):
                 return self.async_create_entry(
                     title="",
-                    data={CONF_LLM_MODE: LlmMode.CLOUD.value},
+                    data={
+                        CONF_LLM_MODE: LlmMode.CLOUD.value,
+                        CONF_LOOKBACK_DAYS: self._lookback,
+                    },
                 )
             self._mode = None
             return await self.async_step_init()

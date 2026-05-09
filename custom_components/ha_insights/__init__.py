@@ -1,7 +1,8 @@
 """HA Insights integration for Home Assistant."""
 from __future__ import annotations
 
-from datetime import UTC, datetime
+import logging
+from datetime import UTC, datetime, timedelta
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EVENT_STATE_CHANGED, Platform
@@ -9,11 +10,15 @@ from homeassistant.core import Event, HomeAssistant, ServiceCall, State, callbac
 from homeassistant.helpers import entity_registry as er
 
 from . import ws_api
+from .config_flow import get_lookback_days
 from .const import DOMAIN
+from .observers.history_backfill import backfill as backfill_history
 from .observers.state_event_buffer import StateEvent, StateEventBuffer
 from .store import InsightStore
 
 PLATFORMS: list[Platform] = [Platform.SENSOR]
+
+_LOGGER = logging.getLogger(__name__)
 
 _WS_REGISTERED_FLAG = "_ws_registered"
 _SERVICES_REGISTERED_FLAG = "_services_registered"
@@ -29,7 +34,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     store = InsightStore(storage_path)
     await store.open()
 
-    buffer_ = StateEventBuffer()
+    lookback_days = get_lookback_days(entry)
+    # Buffer max_age must >= lookback so backfilled events aren't immediately
+    # eligible for prune (default buffer max is 7d, our default lookback 14d).
+    buffer_max_age = timedelta(days=max(7, lookback_days))
+    buffer_ = StateEventBuffer(max_age=buffer_max_age)
 
     entity_reg = er.async_get(hass)
 
@@ -81,6 +90,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "buffer": buffer_,
         "unsub_state": unsub_state,
         "unsub_registry": unsub_registry,
+        "last_backfill": None,
     }
 
     if not hass.data[DOMAIN].get(_WS_REGISTERED_FLAG):
@@ -92,7 +102,44 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.data[DOMAIN][_SERVICES_REGISTERED_FLAG] = True
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+
+    # Schedule backfill as a background task so it doesn't block setup.
+    # Skipped entirely if lookback_days == 0.
+    if lookback_days > 0:
+        hass.async_create_background_task(
+            _run_initial_backfill(hass, entry.entry_id, buffer_, lookback_days),
+            name=f"{DOMAIN}_initial_backfill_{entry.entry_id}",
+        )
     return True
+
+
+async def _run_initial_backfill(
+    hass: HomeAssistant,
+    entry_id: str,
+    buffer_: StateEventBuffer,
+    lookback_days: int,
+) -> None:
+    """Run a one-shot backfill in the background and stash the summary."""
+    try:
+        summary = await backfill_history(
+            hass, buffer_, lookback_days=lookback_days
+        )
+    except Exception:
+        _LOGGER.exception("HA Insights backfill failed")
+        return
+    entry_data = hass.data.get(DOMAIN, {}).get(entry_id)
+    if isinstance(entry_data, dict):
+        entry_data["last_backfill"] = {
+            "completed_at": datetime.now(tz=UTC).isoformat(),
+            **summary,
+        }
+    _LOGGER.info(
+        "HA Insights backfilled %d events from %d entities (%.1fs, %dd lookback)",
+        summary["events_added"],
+        summary["entities_seen"],
+        summary["duration_seconds"],
+        summary["lookback_days"],
+    )
 
 
 @callback
@@ -125,8 +172,35 @@ def _async_register_services(hass: HomeAssistant) -> None:
                 for insight in await detector_cls().scan(ctx):
                     await store.add_insight(insight)
 
+    async def _backfill(call: ServiceCall) -> None:
+        """Manual recorder backfill — re-runs for every active config entry."""
+        for entry_id, entry_data in hass.data.get(DOMAIN, {}).items():
+            if not isinstance(entry_data, dict) or "buffer" not in entry_data:
+                continue
+            entry = hass.config_entries.async_get_entry(entry_id)
+            if entry is None:
+                continue
+            lookback = int(call.data.get("lookback_days") or get_lookback_days(entry))
+            if lookback <= 0:
+                continue
+            buffer_obj = entry_data["buffer"]
+            summary = await backfill_history(
+                hass, buffer_obj, lookback_days=lookback
+            )
+            entry_data["last_backfill"] = {
+                "completed_at": datetime.now(tz=UTC).isoformat(),
+                **summary,
+            }
+            _LOGGER.info(
+                "HA Insights manual backfill: %d events / %d entities (%dd)",
+                summary["events_added"],
+                summary["entities_seen"],
+                summary["lookback_days"],
+            )
+
     hass.services.async_register(DOMAIN, "purge_observations", _purge_observations)
     hass.services.async_register(DOMAIN, "scan_now", _scan_now)
+    hass.services.async_register(DOMAIN, "backfill", _backfill)
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
