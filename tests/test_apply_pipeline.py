@@ -143,3 +143,87 @@ async def test_apply_records_history(
     # applied_at field is stored separately; check via the list filter
     applied_only = await store.list_insights(include_applied=True)
     assert any(i.id == insight.id for i in applied_only)
+
+
+# --- v0.3: apply with payload_override (refine pipeline) ---
+
+
+def _valid_automation_payload(**overrides: Any) -> dict[str, Any]:
+    base: dict[str, Any] = {
+        "alias": "Override test",
+        "trigger": [{"platform": "state", "entity_id": "binary_sensor.x", "to": "on"}],
+        "action": [
+            {"service": "light.turn_on", "target": {"entity_id": "light.y"}}
+        ],
+        "mode": "single",
+    }
+    base.update(overrides)
+    return base
+
+
+async def test_apply_with_payload_override_stamps_description(
+    hass: HomeAssistant, hass_ws_client, setup_integration, tmp_path
+) -> None:
+    hass.config.config_dir = str(tmp_path)
+    store = hass.data[DOMAIN][setup_integration.entry_id]["store"]
+    await store.add_insight(
+        _make_insight(payload=_valid_automation_payload())
+    )
+
+    refined = _valid_automation_payload(mode="queued")
+    client = await hass_ws_client(hass)
+    await client.send_json_auto_id(
+        {
+            "type": "home_insights/apply",
+            "insight_id": "abc123",
+            "payload_override": refined,
+        }
+    )
+    msg = await client.receive_json()
+    assert msg["success"] is True, msg
+    assert msg["result"]["refined"] is True
+
+    yaml_path = tmp_path / "automations.yaml"
+    assert yaml_path.exists()
+    content = yaml_path.read_text(encoding="utf-8")
+    assert "Refined by HA Insights" in content
+    assert "queued" in content
+
+
+async def test_apply_without_override_uses_original(
+    hass: HomeAssistant, hass_ws_client, setup_integration, tmp_path
+) -> None:
+    hass.config.config_dir = str(tmp_path)
+    store = hass.data[DOMAIN][setup_integration.entry_id]["store"]
+    await store.add_insight(
+        _make_insight(payload=_valid_automation_payload(mode="single"))
+    )
+
+    client = await hass_ws_client(hass)
+    await client.send_json_auto_id(
+        {"type": "home_insights/apply", "insight_id": "abc123"}
+    )
+    msg = await client.receive_json()
+    assert msg["success"] is True
+    assert msg["result"].get("refined") is False
+
+
+async def test_apply_with_invalid_override_returns_error(
+    hass: HomeAssistant, hass_ws_client, setup_integration
+) -> None:
+    store = hass.data[DOMAIN][setup_integration.entry_id]["store"]
+    await store.add_insight(
+        _make_insight(payload=_valid_automation_payload())
+    )
+
+    client = await hass_ws_client(hass)
+    await client.send_json_auto_id(
+        {
+            "type": "home_insights/apply",
+            "insight_id": "abc123",
+            "payload_override": {"alias": "broken — no trigger"},
+        }
+    )
+    msg = await client.receive_json()
+    assert msg["success"] is False
+    assert msg["error"]["code"] == "invalid_payload"
