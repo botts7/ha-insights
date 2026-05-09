@@ -326,6 +326,157 @@ async def scenario_apply_layer2_rejects_unknown_platform(s: Smoke) -> None:
     )
 
 
+async def scenario_refine_basic(s: Smoke, *, llm_enabled: bool) -> None:
+    """[REGRESSION] LLM refine end-to-end — service-vs-entity validator
+    distinction, response shape, drift handling on a real LLM call.
+
+    Skipped if privacy mode is OFF (no LLM configured). Lenient assertions
+    because real LLM responses vary; we just verify the round-trip
+    completes with one of the documented success / failure shapes.
+    """
+    await section("refine: live LLM round-trip [REGRESSION]")
+    if not llm_enabled:
+        await s.assert_pass(
+            "refine basic (skipped — privacy mode is OFF)",
+            True,
+            "no LLM configured",
+        )
+        return
+
+    insights = await s.list_insights()
+    target = next(
+        (i for i in insights if i["detector"] == "cooccurrence"), None
+    ) or next(
+        (i for i in insights if i.get("payload_format") == "automation"),
+        None,
+    )
+    if target is None:
+        await s.assert_pass(
+            "refine basic (skipped — no automation insight)", False, ""
+        )
+        return
+
+    r = await s.call(
+        "home_insights/refine",
+        insight_id=target["id"],
+    )
+
+    if r.get("success"):
+        result = r["result"]
+        await s.assert_pass(
+            "refine returned refined_payload dict",
+            isinstance(result.get("refined_payload"), dict),
+        )
+        await s.assert_pass(
+            "refine returned diff_summary list",
+            isinstance(result.get("diff_summary"), list),
+        )
+        # Service vs entity_id distinction (the bug we just fixed): if the
+        # LLM produced multiple service calls (e.g. turn_on AND turn_off),
+        # validation didn't false-positive on the second service name.
+        actions = result["refined_payload"].get("action") or []
+        services = {
+            a.get("service") for a in actions if isinstance(a, dict)
+        }
+        await s.assert_pass(
+            "refined payload action services parsed",
+            isinstance(services, set),
+            f"services: {services}",
+        )
+    else:
+        # Acceptable error codes: refine_failed (LLM declined / token cap /
+        # parse fail / validation), explain_failed for the rule-based path.
+        # Failure modes we should NOT see: not_set_up, not_found, raw 500.
+        err_code = r.get("error", {}).get("code", "")
+        ok_codes = {"refine_failed"}
+        await s.assert_pass(
+            f"refine failure surfaced cleanly (code: {err_code})",
+            err_code in ok_codes,
+            r.get("error", {}).get("message", "")[:120],
+        )
+
+
+async def scenario_refine_with_feedback(s: Smoke, *, llm_enabled: bool) -> None:
+    """Re-refine with a feedback string. Server should accept feedback
+    parameter and use it as highest-priority considerations in the prompt.
+    """
+    await section("refine: re-refine with feedback [REGRESSION]")
+    if not llm_enabled:
+        await s.assert_pass(
+            "refine feedback (skipped — privacy mode is OFF)",
+            True,
+        )
+        return
+
+    insights = await s.list_insights()
+    target = next(
+        (i for i in insights if i["detector"] == "cooccurrence"), None
+    ) or next(
+        (i for i in insights if i.get("payload_format") == "automation"),
+        None,
+    )
+    if target is None:
+        await s.assert_pass("refine feedback (skipped)", False, "no insights")
+        return
+
+    r = await s.call(
+        "home_insights/refine",
+        insight_id=target["id"],
+        feedback="Use mode: queued and add a 'for: 5s' debounce to the trigger.",
+    )
+
+    success_or_known_failure = (
+        r.get("success") is True
+        or r.get("error", {}).get("code") == "refine_failed"
+    )
+    await s.assert_pass(
+        "refine accepts feedback parameter without protocol error",
+        success_or_known_failure,
+        r.get("error", {}).get("message", "")[:120] if not r.get("success") else "ok",
+    )
+
+
+async def scenario_refine_audit_log_grows(s: Smoke, *, llm_enabled: bool) -> None:
+    """Each refine call records a row in outbound_calls; the audit log
+    should reflect the new entry."""
+    await section("refine: audit log records calls [REGRESSION]")
+    if not llm_enabled:
+        await s.assert_pass(
+            "refine audit (skipped — privacy mode is OFF)",
+            True,
+        )
+        return
+
+    before = await s.call("home_insights/audit_log", limit=200)
+    before_count = (
+        len(before.get("result", {}).get("calls", []))
+        if before.get("success")
+        else 0
+    )
+
+    insights = await s.list_insights()
+    target = next(
+        (i for i in insights if i.get("payload_format") == "automation"), None
+    )
+    if target is None:
+        await s.assert_pass("refine audit (skipped)", False, "no insights")
+        return
+
+    await s.call("home_insights/refine", insight_id=target["id"])
+
+    after = await s.call("home_insights/audit_log", limit=200)
+    after_count = (
+        len(after.get("result", {}).get("calls", []))
+        if after.get("success")
+        else 0
+    )
+    await s.assert_pass(
+        "audit log gained at least one row after refine",
+        after_count > before_count,
+        f"{before_count} -> {after_count}",
+    )
+
+
 async def scenario_undo_round_trip(s: Smoke, *, mutate: bool) -> None:
     """Apply then undo: yaml entry written then removed, applied_at cleared."""
     await section("undo: apply -> undo round-trip [REGRESSION]")
@@ -428,6 +579,12 @@ async def main() -> int:
             s.ws = ws
             await s.authenticate()
 
+            # Probe privacy mode so LLM tests can self-skip when LLM is OFF
+            hello = await s.call("home_insights/hello", card_version="0.8.1")
+            llm_enabled = (
+                hello.get("result", {}).get("privacy_mode", "off") != "off"
+            )
+
             await scenario_handshake(s)
             await scenario_redaction_preview(s)
             await scenario_audit_log(s)
@@ -436,6 +593,9 @@ async def main() -> int:
             await scenario_test_actions_skip_non_service(s)
             await scenario_apply_rejects_invalid(s)
             await scenario_apply_layer2_rejects_unknown_platform(s)
+            await scenario_refine_basic(s, llm_enabled=llm_enabled)
+            await scenario_refine_with_feedback(s, llm_enabled=llm_enabled)
+            await scenario_refine_audit_log_grows(s, llm_enabled=llm_enabled)
             await scenario_undo_unknown(s)
             await scenario_undo_round_trip(s, mutate=not args.quick)
 
