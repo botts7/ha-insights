@@ -27,21 +27,22 @@ if TYPE_CHECKING:
 
 
 _REFINE_PROMPT_TMPL = (
-    "Refine this Home Assistant automation to address common considerations "
-    "(debounce, conditions, mode, race-conditions). Output strictly two "
-    "sections, nothing else:\n"
-    "RATIONALE: <one short line>\n"
+    "Refine this Home Assistant automation. Add a debounce, condition, or "
+    "mode change as appropriate. Be brief.\n\n"
+    "Output exactly two sections (no markdown fences, no extra commentary):\n"
+    "RATIONALE: <one short sentence>\n"
     "YAML:\n"
-    "<the complete refined YAML body, no markdown fences>\n\n"
-    "Constraints:\n"
-    "- Use ONLY these entity_ids: [{entity_list}]\n"
-    "- Keep the same trigger entity\n"
-    "- Output must be valid HA automation YAML (alias, trigger, action, mode)\n"
-    "- Do not invent entities, services, or values that weren't in the original\n\n"
+    "alias: ...\n"
+    "trigger: [...]\n"
+    "action: [...]\n"
+    "mode: ...\n\n"
+    "Constraints (strict):\n"
+    "- Use ONLY these entity_ids: {entity_list}\n"
+    "- Output must be complete valid YAML (close all quotes/brackets)\n"
+    "- Keep the response under 200 tokens total\n\n"
     "Current automation:\n"
     "{current_yaml}\n\n"
-    "Considerations from earlier:\n"
-    "{considerations}\n"
+    "Considerations: {considerations}\n"
 )
 
 
@@ -121,12 +122,36 @@ def parse_refine_response(text: str) -> tuple[str | None, dict[str, Any] | None,
     try:
         parsed = yaml.safe_load(yaml_body)
     except yaml.YAMLError as exc:
+        # Detect truncation patterns so users get an actionable error.
+        if _looks_truncated(yaml_body):
+            return rationale, None, (
+                "LLM response was cut off mid-YAML — likely hit "
+                "max_output_tokens. Increase the limit in your LLM "
+                "Conversation integration's config (Settings → Devices & "
+                "Services → your LLM → Configure → Maximum tokens)."
+            )
         return rationale, None, f"YAML parse failed: {exc}"
 
     if not isinstance(parsed, dict):
         return rationale, None, "YAML did not parse to a mapping"
 
     return rationale, parsed, None
+
+
+def _looks_truncated(yaml_body: str) -> bool:
+    """Heuristics for token-limit truncation: unclosed quote/bracket."""
+    if not yaml_body:
+        return True
+    # Unterminated single/double quote on the last non-empty line
+    last_line = yaml_body.rstrip().splitlines()[-1] if yaml_body.strip() else ""
+    if last_line.count("'") % 2 == 1 or last_line.count('"') % 2 == 1:
+        return True
+    # Unbalanced brackets across the whole body
+    if yaml_body.count("[") != yaml_body.count("]"):
+        return True
+    if yaml_body.count("{") != yaml_body.count("}"):
+        return True
+    return False
 
 
 def diff_payloads(original: dict[str, Any], refined: dict[str, Any]) -> list[str]:
