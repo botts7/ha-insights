@@ -22,6 +22,8 @@ _LOGGER = logging.getLogger(__name__)
 
 _WS_REGISTERED_FLAG = "_ws_registered"
 _SERVICES_REGISTERED_FLAG = "_services_registered"
+_PANEL_REGISTERED_FLAG = "_panel_registered"
+_PANEL_URL_PATH = "ha-insights"
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -101,6 +103,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if not hass.data[DOMAIN].get(_SERVICES_REGISTERED_FLAG):
         _async_register_services(hass)
         hass.data[DOMAIN][_SERVICES_REGISTERED_FLAG] = True
+
+    if not hass.data[DOMAIN].get(_PANEL_REGISTERED_FLAG):
+        _async_register_panel(hass)
+        hass.data[DOMAIN][_PANEL_REGISTERED_FLAG] = True
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
@@ -213,6 +219,39 @@ def _async_register_services(hass: HomeAssistant) -> None:
     hass.services.async_register(DOMAIN, "backfill", _backfill)
 
 
+@callback
+def _async_register_panel(hass: HomeAssistant) -> None:
+    """Register the HA Insights sidebar panel.
+
+    Loads /local/ha-insights-panel.js and mounts <ha-insights-panel>. The
+    file is shipped via HACS (or copied manually to www/) — the integration
+    just registers the URL path + sidebar metadata.
+    """
+    from homeassistant.components.frontend import async_register_built_in_panel
+
+    try:
+        async_register_built_in_panel(
+            hass,
+            component_name="custom",
+            sidebar_title="Insights",
+            sidebar_icon="mdi:chart-arc",
+            frontend_url_path=_PANEL_URL_PATH,
+            config={
+                "_panel_custom": {
+                    "name": "ha-insights-panel",
+                    "embed_iframe": False,
+                    "trust_external": False,
+                    "module_url": "/local/ha-insights-panel.js",
+                },
+            },
+            require_admin=False,
+        )
+    except ValueError:
+        # Already registered — we use a flag to avoid this but the API is
+        # idempotent-by-error; swallow so duplicate setup doesn't crash.
+        _LOGGER.debug("HA Insights panel already registered")
+
+
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry — closes the store and event listeners."""
     unloaded = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
@@ -227,4 +266,14 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         data["unsub_registry"]()
     if "store" in data:
         await data["store"].close()
+    # Unregister the panel only when the LAST entry unloads (other entries
+    # still need it). We check whether any per-entry data remains.
+    remaining = [
+        v for v in hass.data.get(DOMAIN, {}).values() if isinstance(v, dict)
+    ]
+    if not remaining and hass.data.get(DOMAIN, {}).get(_PANEL_REGISTERED_FLAG):
+        from homeassistant.components.frontend import async_remove_panel
+
+        async_remove_panel(hass, _PANEL_URL_PATH)
+        hass.data[DOMAIN][_PANEL_REGISTERED_FLAG] = False
     return True
