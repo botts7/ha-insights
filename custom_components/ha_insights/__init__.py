@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import logging
+import os
+import time
 from datetime import UTC, datetime, timedelta
 
 from homeassistant.config_entries import ConfigEntry
@@ -226,8 +228,20 @@ def _async_register_panel(hass: HomeAssistant) -> None:
     Loads /local/ha-insights-panel.js and mounts <ha-insights-panel>. The
     file is shipped via HACS (or copied manually to www/) — the integration
     just registers the URL path + sidebar metadata.
+
+    The module_url is bumped with a cache-buster based on the panel JS
+    file's mtime (falls back to startup time). HA's static handler serves
+    /local/* with a 31-day Cache-Control, so without a fresh query string
+    the browser can hold a stale build for weeks. Bumping on every HA
+    setup makes "deploy new panel.js + restart HA" a clean update path.
     """
     from homeassistant.components.frontend import async_register_built_in_panel
+
+    panel_path = hass.config.path("www/ha-insights-panel.js")
+    try:
+        cache_bust = int(os.path.getmtime(panel_path))
+    except OSError:
+        cache_bust = int(time.time())
 
     try:
         async_register_built_in_panel(
@@ -241,7 +255,7 @@ def _async_register_panel(hass: HomeAssistant) -> None:
                     "name": "ha-insights-panel",
                     "embed_iframe": False,
                     "trust_external": False,
-                    "module_url": "/local/ha-insights-panel.js",
+                    "module_url": f"/local/ha-insights-panel.js?v={cache_bust}",
                 },
             },
             require_admin=False,
