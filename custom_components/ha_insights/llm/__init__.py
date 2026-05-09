@@ -20,6 +20,13 @@ from .redactor import (
     RedactionMode,
     Redactor,
 )
+from .refiner import (
+    RefinementResult,
+    build_refine_prompt,
+    diff_payloads,
+    parse_refine_response,
+    refine_insight,
+)
 
 __all__ = [
     "ALWAYS_REDACT_ATTRIBUTES",
@@ -27,7 +34,12 @@ __all__ = [
     "RedactionMap",
     "RedactionMode",
     "Redactor",
+    "RefinementResult",
     "build_explain_prompt",
+    "build_refine_prompt",
+    "diff_payloads",
     "explain_insight",
+    "parse_refine_response",
     "record_call",
+    "refine_insight",
 ]
