@@ -180,16 +180,21 @@ def _get_assist_default_agent_id(hass: HomeAssistant) -> str | None:
 
 
 def _list_agent_candidates(
-    hass: HomeAssistant, *, requested: str | None
+    hass: HomeAssistant,
+    *,
+    requested: str | None,
+    preferred: str | None = None,
 ) -> list[str | None]:
     """Build the prioritized list of agents to try.
 
     Order:
-      1. If `requested` is explicit, single-shot — respect the user's pin.
-      2. Assist's configured default agent (skipping the rule-based built-in).
-         This is the "what the user picked in the Voice/Assist UI" answer.
-      3. All other non-builtin conversation.* entities, in registry order.
-      4. None (HA's fallback) if nothing else is installed.
+      1. If `requested` is explicit (per-call WS pin), single-shot — respect
+         the user's intent for this specific call, no failover.
+      2. `preferred` (from OptionsFlow) — the user's persistent agent of
+         choice. Tried first, but failover still walks the rest if it fails.
+      3. Assist's configured default agent (skipping the rule-based built-in).
+      4. All other non-builtin conversation.* entities, in registry order.
+      5. None (HA's fallback) if nothing else is installed.
 
     Returns at minimum [None] so the caller never has an empty list.
     """
@@ -199,10 +204,19 @@ def _list_agent_candidates(
     seen: set[str] = set()
     candidates: list[str | None] = []
 
+    if (
+        isinstance(preferred, str)
+        and preferred
+        and preferred != "conversation.home_assistant"
+    ):
+        candidates.append(preferred)
+        seen.add(preferred)
+
     assist_default = _get_assist_default_agent_id(hass)
     if (
         isinstance(assist_default, str)
         and assist_default != "conversation.home_assistant"
+        and assist_default not in seen
     ):
         candidates.append(assist_default)
         seen.add(assist_default)
@@ -273,6 +287,7 @@ async def explain_insight(
     insight: Insight,
     redactor: Redactor,
     prompt_kind: str = "explain",
+    preferred_agent_id: str | None = None,
 ) -> ExplanationResult:
     """Call the configured Conversation agent and return an LLM response.
 
@@ -280,9 +295,13 @@ async def explain_insight(
       - "explain": "why is this routine worth automating?" (default)
       - "hypothesize": "what plausible causes could explain this anomaly?"
 
-    Auto-pick path (agent_id=None) walks the candidate list — Assist's
-    configured default first, then other installed LLM agents — returning
-    the first success. If the user pinned an explicit agent, no failover.
+    Resolution order (auto-pick path, agent_id=None):
+      1. `preferred_agent_id` from OptionsFlow — tried first, failover-eligible
+      2. Assist's configured default agent
+      3. Other installed LLM agents in registry order
+    If `agent_id` is explicit (per-call WS pin), it short-circuits to a
+    single attempt — no failover, respects the caller's intent.
+
     On any failure, returns the last attempt's result with `success=False`.
     Caller is responsible for recording the audit log entry against
     `result.chosen_agent_id`.
@@ -310,7 +329,9 @@ async def explain_insight(
         user_prompt = build_explain_prompt(redacted_insight, redacted_payload)
     bytes_sent = len(user_prompt.encode("utf-8"))
 
-    candidates = _list_agent_candidates(hass, requested=agent_id)
+    candidates = _list_agent_candidates(
+        hass, requested=agent_id, preferred=preferred_agent_id
+    )
     last_result: ExplanationResult | None = None
     for candidate in candidates:
         last_result = await _explain_one_attempt(

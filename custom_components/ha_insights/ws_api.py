@@ -97,6 +97,22 @@ def _resolve_blocked_entities(hass: HomeAssistant, getter) -> frozenset[str]:
     return frozenset(blocked)
 
 
+def _resolve_preferred_agent_id(hass: HomeAssistant) -> str | None:
+    """First non-empty preferred LLM agent across active config entries.
+
+    Single-entry common case returns that entry's preference. Multi-entry
+    installs pick the first one set — preferences are install-wide
+    intent, not per-entry, so first-set wins.
+    """
+    from .config_flow import get_preferred_agent_id
+
+    for entry in hass.config_entries.async_entries(DOMAIN):
+        preferred = get_preferred_agent_id(entry)
+        if preferred:
+            return preferred
+    return None
+
+
 # --- Handlers ---
 
 
@@ -197,11 +213,16 @@ async def ws_explain(
 
     agent_id = msg.get("agent_id")
     blocked = _resolve_blocked_entities(hass, get_blocked_entities)
+    preferred = _resolve_preferred_agent_id(hass)
     redactor = Redactor(
         store, mode=RedactionMode.AGGRESSIVE, blocked_entities=blocked
     )
     result = await explain_insight(
-        hass, agent_id=agent_id, insight=insight, redactor=redactor
+        hass,
+        agent_id=agent_id,
+        insight=insight,
+        redactor=redactor,
+        preferred_agent_id=preferred,
     )
 
     # Audit against the agent that actually responded (failover may have
@@ -298,6 +319,7 @@ async def ws_hypothesize(
 
     agent_id = msg.get("agent_id")
     blocked = _resolve_blocked_entities(hass, get_blocked_entities)
+    preferred = _resolve_preferred_agent_id(hass)
     redactor = Redactor(
         store, mode=RedactionMode.AGGRESSIVE, blocked_entities=blocked
     )
@@ -307,6 +329,7 @@ async def ws_hypothesize(
         insight=insight,
         redactor=redactor,
         prompt_kind="hypothesize",
+        preferred_agent_id=preferred,
     )
 
     audit_agent = result.chosen_agent_id or agent_id
@@ -567,6 +590,7 @@ async def ws_refine(
     from .config_flow import get_blocked_entities
 
     blocked = _resolve_blocked_entities(hass, get_blocked_entities)
+    preferred = _resolve_preferred_agent_id(hass)
     redactor = Redactor(
         store, mode=RedactionMode.AGGRESSIVE, blocked_entities=blocked
     )
@@ -577,6 +601,7 @@ async def ws_refine(
         redactor=redactor,
         prior_explanation=insight.explanation,
         feedback=msg.get("feedback"),
+        preferred_agent_id=preferred,
     )
 
     # Audit against the agent that actually responded — failover may have

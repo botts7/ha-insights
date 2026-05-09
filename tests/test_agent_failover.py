@@ -102,6 +102,71 @@ def test_explicit_agent_id_short_circuits_to_single_attempt() -> None:
     assert candidates == ["conversation.user_pin"]
 
 
+def test_preferred_agent_goes_first_in_candidate_list() -> None:
+    """OptionsFlow preference comes ahead of Assist default + registry."""
+    hass = MagicMock()
+    registry = _fake_registry(
+        {
+            "conversation.preferred_pick": "anthropic",
+            "conversation.assist_default": "openai",
+            "conversation.other": "ollama",
+        }
+    )
+    with (
+        patch(
+            "homeassistant.helpers.entity_registry.async_get",
+            return_value=registry,
+            create=True,
+        ),
+        patch(
+            "homeassistant.components.conversation.async_get_default_agent",
+            return_value=SimpleNamespace(entity_id="conversation.assist_default"),
+            create=True,
+        ),
+    ):
+        candidates = _list_agent_candidates(
+            hass, requested=None, preferred="conversation.preferred_pick"
+        )
+    # Preferred is first; Assist default is second; other is third.
+    assert candidates[0] == "conversation.preferred_pick"
+    assert candidates[1] == "conversation.assist_default"
+    assert "conversation.other" in candidates
+
+
+def test_preferred_dedups_against_assist_default() -> None:
+    """If preferred IS the Assist default, no double-listing."""
+    hass = MagicMock()
+    registry = _fake_registry({"conversation.same_one": "anthropic"})
+    with (
+        patch(
+            "homeassistant.helpers.entity_registry.async_get",
+            return_value=registry,
+            create=True,
+        ),
+        patch(
+            "homeassistant.components.conversation.async_get_default_agent",
+            return_value=SimpleNamespace(entity_id="conversation.same_one"),
+            create=True,
+        ),
+    ):
+        candidates = _list_agent_candidates(
+            hass, requested=None, preferred="conversation.same_one"
+        )
+    assert candidates.count("conversation.same_one") == 1
+
+
+def test_explicit_agent_id_overrides_preferred() -> None:
+    """Per-call explicit pin wins over OptionsFlow preference."""
+    hass = MagicMock()
+    candidates = _list_agent_candidates(
+        hass,
+        requested="conversation.per_call_pin",
+        preferred="conversation.options_flow_pref",
+    )
+    # Single attempt, the per-call value
+    assert candidates == ["conversation.per_call_pin"]
+
+
 def test_auto_pick_orders_assist_default_first() -> None:
     """Auto-pick lists Assist's configured default ahead of other agents."""
     hass = MagicMock()

@@ -30,6 +30,10 @@ CONF_NOTIFY_ON_INSIGHT = "notify_on_insight"
 CONF_NOTIFY_THRESHOLD = "notify_threshold"
 CONF_DIGEST_ENABLED = "digest_enabled"
 CONF_DIGEST_HOUR = "digest_hour"
+# v0.9 phase 9: per-install LLM agent preference. Empty string / None means
+# "auto-pick" (Assist default first, then registry order). Otherwise this
+# entity_id is tried first; failover still kicks in on its failure.
+CONF_PREFERRED_AGENT_ID = "preferred_agent_id"
 DEFAULT_LOOKBACK_DAYS = 14
 LOOKBACK_DAYS_RANGE = (0, 30)  # 0 disables backfill entirely
 DEFAULT_NOTIFY_ON_INSIGHT = True
@@ -97,6 +101,22 @@ def get_notify_settings(entry: ConfigEntry) -> tuple[bool, float]:
     return bool(enabled_raw), threshold
 
 
+def get_preferred_agent_id(entry: ConfigEntry) -> str | None:
+    """Resolve the user's persistent preferred LLM agent (or None for auto).
+
+    Stored as an entity_id string in either entry.options or entry.data.
+    Empty strings normalize to None so the auto-pick path runs cleanly.
+    """
+    raw = entry.options.get(
+        CONF_PREFERRED_AGENT_ID,
+        entry.data.get(CONF_PREFERRED_AGENT_ID),
+    )
+    if not isinstance(raw, str):
+        return None
+    raw = raw.strip()
+    return raw or None
+
+
 def get_digest_settings(entry: ConfigEntry) -> tuple[bool, int]:
     """Resolve daily-digest settings: (enabled, hour).
 
@@ -139,6 +159,24 @@ def get_blocked_entities(entry: ConfigEntry) -> frozenset[str]:
     else:
         items = []
     return frozenset(items)
+
+
+def _conversation_agent_selector() -> Any:
+    """Build an entity-picker schema field for `conversation.*` entities.
+
+    Uses HA's selector helper when available so the OptionsFlow renders a
+    proper dropdown. Falls back to a free-text string field if the
+    selector module's shape drifts in some future HA release — losing
+    the dropdown UX but preserving the feature.
+    """
+    try:
+        from homeassistant.helpers import selector  # type: ignore
+
+        return selector.EntitySelector(
+            selector.EntitySelectorConfig(domain="conversation"),
+        )
+    except Exception:  # pragma: no cover — defensive
+        return str
 
 
 class HaInsightsConfigFlow(ConfigFlow, domain=DOMAIN):
@@ -216,6 +254,7 @@ class HaInsightsOptionsFlow(OptionsFlow):
         self._notify_threshold: float = DEFAULT_NOTIFY_THRESHOLD
         self._digest_enabled: bool = DEFAULT_DIGEST_ENABLED
         self._digest_hour: int = DEFAULT_DIGEST_HOUR
+        self._preferred_agent_id: str | None = None
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
@@ -229,6 +268,7 @@ class HaInsightsOptionsFlow(OptionsFlow):
         current_digest_on, current_digest_hour = get_digest_settings(
             self.config_entry
         )
+        current_preferred = get_preferred_agent_id(self.config_entry) or ""
 
         if user_input is not None:
             self._mode = LlmMode(user_input[CONF_LLM_MODE])
@@ -245,6 +285,14 @@ class HaInsightsOptionsFlow(OptionsFlow):
             self._digest_hour = int(
                 user_input.get(CONF_DIGEST_HOUR, current_digest_hour)
             )
+            preferred_raw = user_input.get(
+                CONF_PREFERRED_AGENT_ID, current_preferred
+            )
+            self._preferred_agent_id = (
+                str(preferred_raw).strip() or None
+                if isinstance(preferred_raw, str)
+                else None
+            )
             if self._mode is LlmMode.CLOUD and current_mode != LlmMode.CLOUD.value:
                 # Only require fresh consent if switching INTO cloud
                 return await self.async_step_cloud_consent()
@@ -257,6 +305,7 @@ class HaInsightsOptionsFlow(OptionsFlow):
                     CONF_NOTIFY_THRESHOLD: self._notify_threshold,
                     CONF_DIGEST_ENABLED: self._digest_enabled,
                     CONF_DIGEST_HOUR: self._digest_hour,
+                    CONF_PREFERRED_AGENT_ID: self._preferred_agent_id or "",
                 },
             )
 
@@ -285,6 +334,11 @@ class HaInsightsOptionsFlow(OptionsFlow):
                     vol.Coerce(int),
                     vol.Range(min=DIGEST_HOUR_RANGE[0], max=DIGEST_HOUR_RANGE[1]),
                 ),
+                # Preferred agent — entity selector filtered to conversation.*.
+                # Empty string => auto-pick (Assist default + failover).
+                vol.Optional(
+                    CONF_PREFERRED_AGENT_ID, default=current_preferred
+                ): _conversation_agent_selector(),
             }
         )
         return self.async_show_form(step_id="init", data_schema=schema)
@@ -304,6 +358,7 @@ class HaInsightsOptionsFlow(OptionsFlow):
                         CONF_NOTIFY_THRESHOLD: self._notify_threshold,
                         CONF_DIGEST_ENABLED: self._digest_enabled,
                         CONF_DIGEST_HOUR: self._digest_hour,
+                        CONF_PREFERRED_AGENT_ID: self._preferred_agent_id or "",
                     },
                 )
             self._mode = None

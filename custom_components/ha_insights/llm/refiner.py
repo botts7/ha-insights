@@ -377,6 +377,7 @@ async def refine_insight(
     redactor: Redactor,
     prior_explanation: str | None = None,
     feedback: str | None = None,
+    preferred_agent_id: str | None = None,
 ) -> RefinementResult:
     """Ask the configured Conversation agent for a refined version of the automation.
 
@@ -409,7 +410,9 @@ async def refine_insight(
     )
     bytes_sent = len(prompt.encode("utf-8"))
 
-    candidates = _list_agent_candidates(hass, requested=agent_id)
+    candidates = _list_agent_candidates(
+        hass, requested=agent_id, preferred=preferred_agent_id
+    )
     last_result: RefinementResult | None = None
     for candidate in candidates:
         last_result = await _refine_one_attempt(
