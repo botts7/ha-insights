@@ -174,7 +174,13 @@ async def ws_explain(
 ) -> None:
     """User-initiated LLM explanation. Redactor + agent + dereference + audit."""
     from .config_flow import get_blocked_entities
-    from .llm import RedactionMode, Redactor, explain_insight, record_call
+    from .llm import (
+        RedactionMode,
+        Redactor,
+        derive_agent_locality,
+        explain_insight,
+        record_call,
+    )
 
     store = _get_store(hass)
     if store is None:
@@ -201,10 +207,7 @@ async def ws_explain(
         store,
         insight_id=insight.id,
         agent=str(agent_id) if agent_id else "default",
-        # TODO: derive agent_locality from the chosen agent_id rather than
-        # hard-coding "cloud" — local Conversation integrations (Ollama,
-        # Piper) should record "local" so the audit log differentiates.
-        agent_locality="cloud",
+        agent_locality=derive_agent_locality(agent_id),
         redaction_mode=str(redactor.mode),
         bytes_sent=result.bytes_sent,
         bytes_received=result.bytes_received,
@@ -436,7 +439,13 @@ async def ws_refine(
     insight — the refined payload is returned for the card to preview, then
     applied via `home_insights/apply` with `payload_override` if accepted.
     """
-    from .llm import RedactionMode, Redactor, record_call, refine_insight
+    from .llm import (
+        RedactionMode,
+        Redactor,
+        derive_agent_locality,
+        record_call,
+        refine_insight,
+    )
 
     store = _get_store(hass)
     if store is None:
@@ -476,7 +485,7 @@ async def ws_refine(
         store,
         insight_id=insight.id,
         agent=str(msg.get("agent_id")) if msg.get("agent_id") else "default",
-        agent_locality="cloud",
+        agent_locality=derive_agent_locality(msg.get("agent_id")),
         redaction_mode=str(redactor.mode),
         bytes_sent=result.bytes_sent,
         bytes_received=result.bytes_received,

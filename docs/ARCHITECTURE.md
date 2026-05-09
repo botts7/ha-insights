@@ -205,7 +205,7 @@ Detects "user does X every weekday at ~T."
 7. Title: template ("On weekdays at 6:47 AM, light.kitchen turns on (12/12 days)").
 8. Explanation: empty until user clicks Explain → LLM call with redaction.
 
-**Edge cases:** manual override during routine (confidence decays), DST boundaries (clock-time grouping + DST notice), entities without friendly_name (fall back to entity_id), multi-state entities (on/off only in current ScheduleDetector — full enum support is a future enhancement).
+**Edge cases:** manual override during routine (confidence decays), DST boundaries (clock-time grouping + DST notice), entities without friendly_name (fall back to entity_id), multi-state entities (any short non-dotted enum state is supported — `on`/`off`, `playing`/`paused`, `home`/`away`, `armed_home`, etc; only `unavailable`/`unknown`/`none` are excluded).
 
 ---
 

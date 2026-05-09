@@ -176,6 +176,27 @@ def test_parse_invalid_yaml_without_truncation_signals() -> None:
     # produce a non-empty error.
 
 
+def test_parse_empty_rationale_does_not_capture_yaml() -> None:
+    """[REGRESSION] An empty `RATIONALE:` line followed by YAML: must NOT
+    let the rationale regex swallow the YAML body."""
+    text = (
+        "RATIONALE: \n"
+        "YAML:\n"
+        "alias: x\n"
+        "trigger:\n"
+        "  - platform: state\n    entity_id: light.x\n"
+        "action:\n"
+        "  - service: light.turn_on\n"
+        "mode: single\n"
+    )
+    rationale, payload, _error = parse_refine_response(text)
+    # Rationale should be None (or empty), not the YAML body
+    assert rationale is None or "alias" not in (rationale or "")
+    # YAML should still parse
+    assert payload is not None
+    assert payload.get("alias") == "x"
+
+
 def test_parse_truncated_yaml_unclosed_quote() -> None:
     """Unclosed quote on the last line should be flagged as truncation."""
     text = (

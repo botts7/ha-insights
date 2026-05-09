@@ -1,15 +1,14 @@
 """Conflict scanner — detect overlap with existing automations before apply.
 
-Current algorithm:
-  - Time-trigger overlap on the same target entity = conflict
-  - Time window: +/- 10 minutes by default
-  - Entity match: same entity_id in both action targets
+Algorithm:
+  - **Time-trigger overlap** on the same target entity = conflict
+    (Time window: +/- 10 minutes by default; entity match: same
+    entity_id in both action targets)
+  - **State-trigger overlap** on the same source entity = conflict
+    (Two automations both firing on `state(entity_id) -> X` would
+    cascade; we flag this so the user can decide whether to consolidate)
 
-State-trigger and numeric-trigger overlap detection is on the roadmap;
-today's CooccurrenceDetector / LongTailDetector / StreakDetector outputs
-emit state triggers that this scanner doesn't yet check against existing
-automations. Confidence reasoning + the "What gets sent?" preview help
-users catch overlaps that the scanner doesn't.
+Numeric-state and template-trigger overlap are not yet checked.
 """
 from __future__ import annotations
 
@@ -51,10 +50,11 @@ def find_conflicts(
 def _automations_overlap(
     a: dict[str, Any], b: dict[str, Any], time_window_min: int
 ) -> bool:
-    """Time-trigger overlap on the same target entity (within window)."""
+    """Either time-trigger or state-trigger overlap counts as a conflict."""
     a_triggers = _as_list(a.get("trigger"))
     b_triggers = _as_list(b.get("trigger"))
 
+    # Time-trigger overlap: same target entity within ±N minutes
     for at in a_triggers:
         if not isinstance(at, dict) or at.get("platform") != "time":
             continue
@@ -67,7 +67,51 @@ def _automations_overlap(
             b_entities = _extract_target_entities(b.get("action", []))
             if a_entities & b_entities:
                 return True
+
+    # State-trigger overlap: same source entity_id with overlapping `to:` value.
+    # Two automations firing on `light.kitchen -> on` would cascade; flag it.
+    a_states = _state_trigger_signatures(a_triggers)
+    b_states = _state_trigger_signatures(b_triggers)
+    if a_states & b_states:
+        return True
+
     return False
+
+
+def _state_trigger_signatures(
+    triggers: list[Any],
+) -> set[tuple[str, str | None]]:
+    """Extract (entity_id, to_state) signatures from state triggers.
+
+    `to` is normalized to None when missing so triggers without a
+    specific value (the "any change" form) match each other.
+    """
+    sigs: set[tuple[str, str | None]] = set()
+    for t in triggers:
+        if not isinstance(t, dict) or t.get("platform") != "state":
+            continue
+        eid = t.get("entity_id")
+        to_val = t.get("to")
+        # entity_id can be a string or list of strings
+        if isinstance(eid, str):
+            entity_ids = [eid]
+        elif isinstance(eid, list):
+            entity_ids = [e for e in eid if isinstance(e, str)]
+        else:
+            continue
+        # to: can be a string, list, or None ("any change")
+        if isinstance(to_val, list):
+            to_values: list[str | None] = [
+                str(v) for v in to_val if isinstance(v, (str, int, bool))
+            ]
+        elif isinstance(to_val, str):
+            to_values = [to_val]
+        else:
+            to_values = [None]
+        for e in entity_ids:
+            for v in to_values:
+                sigs.add((e, v))
+    return sigs
 
 
 def _as_list(value: Any) -> list[Any]:

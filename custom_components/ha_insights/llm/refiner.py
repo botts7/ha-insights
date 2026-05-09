@@ -177,10 +177,16 @@ def parse_refine_response(text: str) -> tuple[str | None, dict[str, Any] | None,
             "to a model with looser policies."
         )
 
-    rationale_match = re.search(r"RATIONALE:\s*(.+?)(?=\n\s*YAML:|\Z)", text, re.DOTALL)
+    # Match the RATIONALE line specifically (one logical line, not greedy
+    # over a YAML block). If the LLM emits an empty `RATIONALE:` line
+    # followed by YAML:, an unbounded `(.+?)` with DOTALL would capture
+    # the whole YAML body as the rationale because the lookahead
+    # `(?=\n\s*YAML:|\Z)` doesn't match when YAML: is the very next non-
+    # whitespace token. Use a single-line capture instead.
+    rationale_match = re.search(r"RATIONALE:[ \t]*([^\n\r]*)", text)
+    rationale_raw = rationale_match.group(1).strip() if rationale_match else None
+    rationale = rationale_raw if rationale_raw else None
     yaml_match = re.search(r"YAML:\s*(.+)", text, re.DOTALL)
-
-    rationale = rationale_match.group(1).strip() if rationale_match else None
 
     if yaml_match is None:
         return rationale, None, "missing YAML section"

@@ -132,15 +132,89 @@ def test_action_entity_id_list_detected() -> None:
     assert find_conflicts(_insight(payload), existing) == ["list_form"]
 
 
-def test_non_time_trigger_not_checked() -> None:
-    """v0.1 only checks time-trigger overlap; state-trigger pairings ignored."""
-    payload = _automation()
+def test_state_trigger_same_entity_same_to_value_conflicts() -> None:
+    """v0.8.2: state-trigger overlap on the same source entity = conflict."""
+    payload = {
+        "alias": "Insight",
+        "trigger": [
+            {"platform": "state", "entity_id": "light.kitchen", "to": "on"}
+        ],
+        "action": [{"service": "light.turn_on", "target": {"entity_id": "light.x"}}],
+    }
     existing = [{
-        "id": "state_trig",
-        "trigger": [{"platform": "state", "entity_id": "light.kitchen"}],
-        "action": [{"service": "light.turn_on", "target": {"entity_id": "light.kitchen"}}],
+        "id": "state_overlap",
+        "trigger": [
+            {"platform": "state", "entity_id": "light.kitchen", "to": "on"}
+        ],
+        "action": [{"service": "switch.turn_on", "target": {"entity_id": "switch.y"}}],
+    }]
+    assert find_conflicts(_insight(payload), existing) == ["state_overlap"]
+
+
+def test_state_trigger_different_entity_no_conflict() -> None:
+    payload = {
+        "alias": "Insight",
+        "trigger": [{"platform": "state", "entity_id": "light.kitchen", "to": "on"}],
+        "action": [{"service": "light.turn_on", "target": {"entity_id": "light.x"}}],
+    }
+    existing = [{
+        "id": "different_source",
+        "trigger": [{"platform": "state", "entity_id": "light.bedroom", "to": "on"}],
+        "action": [{"service": "switch.turn_on", "target": {"entity_id": "switch.y"}}],
     }]
     assert find_conflicts(_insight(payload), existing) == []
+
+
+def test_state_trigger_different_to_value_no_conflict() -> None:
+    payload = {
+        "alias": "Insight",
+        "trigger": [{"platform": "state", "entity_id": "light.kitchen", "to": "on"}],
+        "action": [{"service": "light.turn_on", "target": {"entity_id": "light.x"}}],
+    }
+    existing = [{
+        "id": "different_to",
+        "trigger": [{"platform": "state", "entity_id": "light.kitchen", "to": "off"}],
+        "action": [{"service": "switch.turn_on", "target": {"entity_id": "switch.y"}}],
+    }]
+    assert find_conflicts(_insight(payload), existing) == []
+
+
+def test_state_trigger_any_change_matches_specific() -> None:
+    """A trigger with no `to:` (any-change) overlaps a specific to: of None."""
+    payload = {
+        "alias": "Insight",
+        "trigger": [{"platform": "state", "entity_id": "light.kitchen"}],  # no to:
+        "action": [{"service": "light.turn_on"}],
+    }
+    existing = [{
+        "id": "any_change",
+        "trigger": [{"platform": "state", "entity_id": "light.kitchen"}],  # no to:
+        "action": [{"service": "switch.turn_on"}],
+    }]
+    assert find_conflicts(_insight(payload), existing) == ["any_change"]
+
+
+def test_state_trigger_entity_id_list_detected() -> None:
+    """state trigger entity_id can be a list of entities."""
+    payload = {
+        "alias": "Insight",
+        "trigger": [
+            {
+                "platform": "state",
+                "entity_id": ["light.kitchen", "light.den"],
+                "to": "on",
+            }
+        ],
+        "action": [{"service": "light.turn_on"}],
+    }
+    existing = [{
+        "id": "list_match",
+        "trigger": [
+            {"platform": "state", "entity_id": "light.den", "to": "on"}
+        ],
+        "action": [{"service": "switch.turn_on"}],
+    }]
+    assert find_conflicts(_insight(payload), existing) == ["list_match"]
 
 
 def test_malformed_time_does_not_crash() -> None:
