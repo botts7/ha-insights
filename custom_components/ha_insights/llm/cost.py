@@ -20,8 +20,8 @@ from dataclasses import dataclass
 from .privacy_log import derive_agent_locality
 
 # Conventional rule-of-thumb for English text. Anthropic / OpenAI /
-# Google all hover around 3.5–4.5 chars/token. We use 4 as the median;
-# the resulting estimate is within ±15% for typical prompts.
+# Google all hover around 3.5-4.5 chars/token. We use 4 as the median;
+# the resulting estimate is within +/-15% for typical prompts.
 _CHARS_PER_TOKEN = 4.0
 
 
@@ -66,7 +66,7 @@ _DEFAULT_CLOUD_PRICE = _Price(in_per_mtok=3.0, out_per_mtok=15.0)
 def _bytes_to_tokens(byte_count: int) -> int:
     if byte_count <= 0:
         return 0
-    return max(1, int(round(byte_count / _CHARS_PER_TOKEN)))
+    return max(1, round(byte_count / _CHARS_PER_TOKEN))
 
 
 def _resolve_price(agent_id: str | None) -> tuple[_Price, str]:
