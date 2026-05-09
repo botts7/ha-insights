@@ -8,7 +8,11 @@ import pytest
 from homeassistant.core import HomeAssistant
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.ha_insights.config_flow import CONF_LLM_MODE, LlmMode
+from custom_components.ha_insights.config_flow import (
+    CONF_LLM_MODE,
+    CONF_NOTIFY_ON_INSIGHT,
+    LlmMode,
+)
 from custom_components.ha_insights.const import DOMAIN
 from custom_components.ha_insights.insight import Insight, InsightKind
 
@@ -42,7 +46,13 @@ def _make_insight(insight_id: str = "abc123", **overrides: Any) -> Insight:
 async def setup_integration(hass: HomeAssistant) -> MockConfigEntry:
     entry = MockConfigEntry(
         domain=DOMAIN,
-        data={CONF_LLM_MODE: LlmMode.OFF.value},
+        data={
+            CONF_LLM_MODE: LlmMode.OFF.value,
+            # Disable insight-add notifications so the assertion targets
+            # in apply / undo tests aren't polluted by background
+            # persistent_notification.create calls.
+            CONF_NOTIFY_ON_INSIGHT: False,
+        },
         unique_id=DOMAIN,
         title="HA Insights",
     )

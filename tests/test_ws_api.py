@@ -7,7 +7,11 @@ import pytest
 from homeassistant.core import HomeAssistant
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.ha_insights.config_flow import CONF_LLM_MODE, LlmMode
+from custom_components.ha_insights.config_flow import (
+    CONF_LLM_MODE,
+    CONF_NOTIFY_ON_INSIGHT,
+    LlmMode,
+)
 from custom_components.ha_insights.const import DOMAIN
 from custom_components.ha_insights.insight import Insight, InsightKind
 from custom_components.ha_insights.ws_api import (
@@ -39,7 +43,13 @@ async def setup_integration(hass: HomeAssistant) -> MockConfigEntry:
     """Set up a config entry and return it."""
     entry = MockConfigEntry(
         domain=DOMAIN,
-        data={CONF_LLM_MODE: LlmMode.OFF.value},
+        data={
+            CONF_LLM_MODE: LlmMode.OFF.value,
+            # Tests don't expect persistent_notification.create to fire when
+            # insights land. Disable in the fixture so the assertion target
+            # is purely the test's own service registrations.
+            CONF_NOTIFY_ON_INSIGHT: False,
+        },
         unique_id=DOMAIN,
         title="HA Insights",
     )
