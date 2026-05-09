@@ -40,6 +40,7 @@ SUPPORTED_METHODS = (
     "test_actions",
     "backfill_status",
     "redaction_preview",
+    "audit_log",
 )
 
 
@@ -59,6 +60,7 @@ def async_register(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_test_actions)
     websocket_api.async_register_command(hass, ws_backfill_status)
     websocket_api.async_register_command(hass, ws_redaction_preview)
+    websocket_api.async_register_command(hass, ws_audit_log)
     websocket_api.async_register_command(hass, ws_dev_inject_event)
 
 
@@ -708,6 +710,27 @@ async def ws_redaction_preview(
             "privacy_mode": str(redactor.mode),
         },
     )
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "home_insights/audit_log",
+        vol.Optional("limit", default=50): vol.All(int, vol.Range(min=1, max=500)),
+    }
+)
+@websocket_api.async_response
+async def ws_audit_log(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Return recent outbound LLM calls for the audit log viewer."""
+    store = _get_store(hass)
+    if store is None:
+        connection.send_error(msg["id"], "not_set_up", "Store not initialized")
+        return
+    rows = await store.get_outbound_calls(limit=msg["limit"])
+    connection.send_result(msg["id"], {"calls": rows})
 
 
 @websocket_api.websocket_command(

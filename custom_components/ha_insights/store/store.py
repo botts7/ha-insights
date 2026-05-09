@@ -244,6 +244,54 @@ class InsightStore:
             "outbound_calls_deleted": calls_before,
         }
 
+    async def get_outbound_calls(
+        self, *, limit: int = 50
+    ) -> list[dict[str, object]]:
+        """Return the most recent outbound_calls rows for the audit log viewer.
+
+        Joins to the insights table on insight_id so the UI can show the
+        insight title alongside each call. Insight may have been deleted —
+        in that case the title is None.
+        """
+        async with self._c.execute(
+            """
+            SELECT
+                oc.id,
+                oc.timestamp,
+                oc.insight_id,
+                oc.agent,
+                oc.agent_locality,
+                oc.redaction_mode,
+                oc.bytes_sent,
+                oc.bytes_received,
+                oc.success,
+                i.title AS insight_title
+            FROM outbound_calls oc
+            LEFT JOIN insights i ON i.id = oc.insight_id
+            ORDER BY oc.timestamp DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ) as cur:
+            rows = await cur.fetchall()
+        return [
+            {
+                "id": int(row["id"]),
+                "timestamp": datetime.fromtimestamp(
+                    row["timestamp"], tz=UTC
+                ).isoformat(),
+                "insight_id": row["insight_id"],
+                "insight_title": row["insight_title"],
+                "agent": row["agent"],
+                "agent_locality": row["agent_locality"],
+                "redaction_mode": row["redaction_mode"],
+                "bytes_sent": int(row["bytes_sent"] or 0),
+                "bytes_received": int(row["bytes_received"] or 0),
+                "success": bool(row["success"]) if row["success"] is not None else None,
+            }
+            for row in rows
+        ]
+
     async def get_outbound_call_summary(
         self, *, since: datetime
     ) -> dict[str, object | None]:
