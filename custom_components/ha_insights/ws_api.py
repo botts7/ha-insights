@@ -78,6 +78,18 @@ def _get_buffer(hass: HomeAssistant):
     return None
 
 
+def _resolve_blocked_entities(hass: HomeAssistant, getter) -> frozenset[str]:
+    """Aggregate the per-entity opt-out across active config entries.
+
+    Single-entry common case returns that entry's set; future multi-entry
+    setups are already supported by union.
+    """
+    blocked: set[str] = set()
+    for entry in hass.config_entries.async_entries(DOMAIN):
+        blocked |= getter(entry)
+    return frozenset(blocked)
+
+
 # --- Handlers ---
 
 
@@ -155,6 +167,7 @@ async def ws_explain(
     msg: dict[str, Any],
 ) -> None:
     """User-initiated LLM explanation. Redactor + agent + dereference + audit."""
+    from .config_flow import get_blocked_entities
     from .llm import RedactionMode, Redactor, explain_insight, record_call
 
     store = _get_store(hass)
@@ -170,7 +183,10 @@ async def ws_explain(
         return
 
     agent_id = msg.get("agent_id")
-    redactor = Redactor(store, mode=RedactionMode.AGGRESSIVE)
+    blocked = _resolve_blocked_entities(hass, get_blocked_entities)
+    redactor = Redactor(
+        store, mode=RedactionMode.AGGRESSIVE, blocked_entities=blocked
+    )
     result = await explain_insight(
         hass, agent_id=agent_id, insight=insight, redactor=redactor
     )
@@ -410,7 +426,12 @@ async def ws_refine(
         )
         return
 
-    redactor = Redactor(store, mode=RedactionMode.AGGRESSIVE)
+    from .config_flow import get_blocked_entities
+
+    blocked = _resolve_blocked_entities(hass, get_blocked_entities)
+    redactor = Redactor(
+        store, mode=RedactionMode.AGGRESSIVE, blocked_entities=blocked
+    )
     result = await refine_insight(
         hass,
         agent_id=msg.get("agent_id"),

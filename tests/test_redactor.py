@@ -22,6 +22,91 @@ async def store(tmp_path: Path) -> AsyncIterator[InsightStore]:
     await db.close()
 
 
+# --- Per-entity opt-out (v0.6) ---
+
+
+async def test_blocked_entity_in_string_value(store: InsightStore) -> None:
+    """A blocked entity_id in a top-level string is replaced with [blocked]."""
+    redactor = Redactor(
+        store,
+        mode=RedactionMode.AGGRESSIVE,
+        blocked_entities=frozenset({"lock.front_door"}),
+    )
+    cleaned, redaction_map = await redactor.redact_insight_payload(
+        {"alias": "Test", "trigger_entity": "lock.front_door"}
+    )
+    assert cleaned["trigger_entity"] == "[blocked]"
+    assert "lock.front_door" in redaction_map.entities_blocked
+
+
+async def test_blocked_entity_in_target_dict(store: InsightStore) -> None:
+    """target.entity_id pointing at a blocked entity is dropped to [blocked]."""
+    redactor = Redactor(
+        store,
+        mode=RedactionMode.AGGRESSIVE,
+        blocked_entities=frozenset({"lock.front_door"}),
+    )
+    payload = {
+        "action": [
+            {"service": "lock.unlock", "target": {"entity_id": "lock.front_door"}}
+        ]
+    }
+    cleaned, redaction_map = await redactor.redact_insight_payload(payload)
+    assert cleaned["action"][0]["target"] == {"entity_id": "[blocked]"}
+    assert "lock.front_door" in redaction_map.entities_blocked
+
+
+async def test_blocked_entity_filtered_from_list(store: InsightStore) -> None:
+    """A list of entity_ids has blocked entries filtered out."""
+    redactor = Redactor(
+        store,
+        mode=RedactionMode.AGGRESSIVE,
+        blocked_entities=frozenset({"lock.front_door"}),
+    )
+    payload = {
+        "target": {
+            "entity_id": ["light.kitchen", "lock.front_door", "switch.fan"]
+        }
+    }
+    cleaned, redaction_map = await redactor.redact_insight_payload(payload)
+    assert "lock.front_door" not in cleaned["target"]["entity_id"]
+    assert "light.kitchen" in cleaned["target"]["entity_id"]
+    assert "switch.fan" in cleaned["target"]["entity_id"]
+    assert "lock.front_door" in redaction_map.entities_blocked
+
+
+async def test_blocked_entity_in_pseudonymized_text(store: InsightStore) -> None:
+    """Inside free-text, blocked entities become [blocked], not pseudonyms."""
+    redactor = Redactor(
+        store,
+        mode=RedactionMode.AGGRESSIVE,
+        blocked_entities=frozenset({"lock.front_door"}),
+    )
+    cleaned_text, redaction_map = await redactor.redact_text(
+        "Open lock.front_door when light.kitchen turns on"
+    )
+    assert "lock.front_door" not in cleaned_text
+    assert "[blocked]" in cleaned_text
+    # light.kitchen still gets a pseudonym
+    assert "light.entity_" in cleaned_text
+    assert "lock.front_door" in redaction_map.entities_blocked
+
+
+async def test_unblocked_entity_passes_through_normally(store: InsightStore) -> None:
+    """Empty blocklist means no behavior change."""
+    redactor = Redactor(
+        store,
+        mode=RedactionMode.AGGRESSIVE,
+        blocked_entities=frozenset(),
+    )
+    cleaned, redaction_map = await redactor.redact_insight_payload(
+        {"target": {"entity_id": "light.kitchen"}}
+    )
+    # Pseudonymized but not blocked
+    assert cleaned["target"]["entity_id"].startswith("light.entity_")
+    assert redaction_map.entities_blocked == []
+
+
 # --- Always-redact attributes ---
 
 

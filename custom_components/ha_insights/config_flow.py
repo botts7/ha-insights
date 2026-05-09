@@ -25,6 +25,7 @@ from .const import DOMAIN
 CONF_LLM_MODE = "llm_mode"
 CONF_CLOUD_CONSENT = "cloud_consent"
 CONF_LOOKBACK_DAYS = "lookback_days"
+CONF_LLM_BLOCK_ENTITIES = "llm_block_entities"
 DEFAULT_LOOKBACK_DAYS = 14
 LOOKBACK_DAYS_RANGE = (0, 30)  # 0 disables backfill entirely
 
@@ -63,6 +64,27 @@ def get_lookback_days(entry: ConfigEntry) -> int:
         return DEFAULT_LOOKBACK_DAYS
     lo, hi = LOOKBACK_DAYS_RANGE
     return max(lo, min(hi, value))
+
+
+def get_blocked_entities(entry: ConfigEntry) -> frozenset[str]:
+    """Resolve the per-entity LLM opt-out list.
+
+    These entity_ids are NEVER included in any LLM prompt — neither as
+    pseudonyms nor as real values. Privacy floor below the redactor's
+    mode-driven behavior.
+    """
+    raw = entry.options.get(
+        CONF_LLM_BLOCK_ENTITIES,
+        entry.data.get(CONF_LLM_BLOCK_ENTITIES, []),
+    )
+    if isinstance(raw, str):
+        # Tolerate comma-separated strings from older configs
+        items = [s.strip() for s in raw.split(",") if s.strip()]
+    elif isinstance(raw, (list, tuple, set, frozenset)):
+        items = [str(s).strip() for s in raw if str(s).strip()]
+    else:
+        items = []
+    return frozenset(items)
 
 
 class HaInsightsConfigFlow(ConfigFlow, domain=DOMAIN):

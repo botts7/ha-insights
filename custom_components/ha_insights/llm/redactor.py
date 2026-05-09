@@ -52,12 +52,15 @@ class RedactionMap:
     """Tracks pseudonymization so LLM output can be dereferenced.
 
     `entity_to_pseudonym` covers what we sent; `pseudonym_to_entity` is the
-    inverse for parsing the LLM's response.
+    inverse for parsing the LLM's response. `entities_blocked` records
+    entity_ids that were stripped entirely due to per-entity opt-out
+    (different from being attributes-stripped).
     """
 
     entity_to_pseudonym: dict[str, str] = field(default_factory=dict)
     pseudonym_to_entity: dict[str, str] = field(default_factory=dict)
     attributes_stripped: list[str] = field(default_factory=list)
+    entities_blocked: list[str] = field(default_factory=list)
 
     def dereference(self, text: str) -> str:
         """Replace any pseudonyms in `text` with their real entity_ids."""
@@ -80,10 +83,19 @@ class Redactor:
         *,
         mode: RedactionMode = RedactionMode.AGGRESSIVE,
         extra_attribute_blocklist: frozenset[str] | None = None,
+        blocked_entities: frozenset[str] | None = None,
     ) -> None:
         self._store = store
         self._mode = mode
         self._blocklist = ALWAYS_REDACT_ATTRIBUTES | (extra_attribute_blocklist or frozenset())
+        # Privacy floor — these entity_ids are stripped from any LLM-bound
+        # payload regardless of mode. The redactor refuses to forward them
+        # in any form (real, pseudonymized, or as substring inside a value).
+        self._blocked_entities = blocked_entities or frozenset()
+
+    @property
+    def blocked_entities(self) -> frozenset[str]:
+        return self._blocked_entities
 
     @property
     def mode(self) -> RedactionMode:
@@ -121,7 +133,10 @@ class Redactor:
     ) -> Any:
         """Walk a nested structure, dropping any blocklisted attribute keys.
 
-        Mutates a fresh copy; the input is never touched.
+        Mutates a fresh copy; the input is never touched. Also enforces the
+        per-entity opt-out: any value that mentions a blocked entity_id is
+        replaced with a `[blocked]` placeholder, and dict items whose
+        `entity_id` field references a blocked entity are dropped wholesale.
         """
         if isinstance(value, dict):
             cleaned: dict[str, Any] = {}
@@ -130,9 +145,29 @@ class Redactor:
                     redaction_map.attributes_stripped.append(key)
                     continue
                 cleaned[key] = self.strip_attributes_recursive(sub, redaction_map)
+            # If the cleaned dict references a blocked entity_id directly
+            # (e.g. {"entity_id": "lock.front_door"}), drop the value to a
+            # marker so the LLM never sees it.
+            eid = cleaned.get("entity_id")
+            if isinstance(eid, str) and eid in self._blocked_entities:
+                if eid not in redaction_map.entities_blocked:
+                    redaction_map.entities_blocked.append(eid)
+                return {"entity_id": "[blocked]"}
+            if isinstance(eid, list):
+                filtered = [e for e in eid if e not in self._blocked_entities]
+                dropped = [e for e in eid if e in self._blocked_entities]
+                for e in dropped:
+                    if e not in redaction_map.entities_blocked:
+                        redaction_map.entities_blocked.append(e)
+                if dropped:
+                    cleaned["entity_id"] = filtered or ["[blocked]"]
             return cleaned
         if isinstance(value, list):
             return [self.strip_attributes_recursive(item, redaction_map) for item in value]
+        if isinstance(value, str) and value in self._blocked_entities:
+            if value not in redaction_map.entities_blocked:
+                redaction_map.entities_blocked.append(value)
+            return "[blocked]"
         return value
 
     async def _pseudonymize_recursive(
@@ -156,20 +191,29 @@ class Redactor:
     async def _pseudonymize_text(
         self, text: str, redaction_map: RedactionMap
     ) -> str:
-        """Replace any entity_id-shaped substrings with their pseudonym."""
-        # Find all entity_id matches; replace each with its pseudonym.
+        """Replace any entity_id-shaped substrings with their pseudonym.
+
+        Blocked entities are replaced with `[blocked]` instead of a
+        pseudonym — they shouldn't even be referenceable.
+        """
         matches = list(_ENTITY_ID_RE.finditer(text))
         if not matches:
             return text
-        # Process in reverse so earlier indices remain valid.
         result_parts: list[str] = []
         last_end = 0
         for match in matches:
             entity_id = match.group(0)
             start, end = match.span()
-            pseudonym = await self._get_or_record_pseudonym(entity_id, redaction_map)
+            if entity_id in self._blocked_entities:
+                if entity_id not in redaction_map.entities_blocked:
+                    redaction_map.entities_blocked.append(entity_id)
+                replacement = "[blocked]"
+            else:
+                replacement = await self._get_or_record_pseudonym(
+                    entity_id, redaction_map
+                )
             result_parts.append(text[last_end:start])
-            result_parts.append(pseudonym)
+            result_parts.append(replacement)
             last_end = end
         result_parts.append(text[last_end:])
         return "".join(result_parts)
