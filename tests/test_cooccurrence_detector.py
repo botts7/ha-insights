@@ -123,11 +123,11 @@ async def test_payload_has_state_trigger_and_service_action() -> None:
 
 @pytest.mark.asyncio
 async def test_inconsistent_timing_rejected() -> None:
-    """Wildly varying delays should not produce an insight."""
+    """Wildly varying delays (stddev > threshold) should not produce an insight."""
     buf = StateEventBuffer()
     end = datetime.now(tz=UTC).replace(microsecond=0)
-    # Varying delays from 1s to 28s (stddev > threshold)
-    for i, delta in enumerate([1, 5, 10, 15, 20, 25, 28, 2, 26, 4]):
+    # Bimodal 2s / 28s alternating: stddev ~13 > 12s threshold
+    for i, delta in enumerate([2, 28, 2, 28, 2, 28, 2, 28, 2, 28]):
         base = end - timedelta(hours=i + 1)
         buf.add(_ev(base, "binary_sensor.door", "on"))
         buf.add(_ev(base + timedelta(seconds=delta), "light.porch", "on"))
