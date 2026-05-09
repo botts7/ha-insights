@@ -86,14 +86,19 @@ def build_refine_prompt(
     redacted_payload: dict[str, Any],
     *,
     prior_explanation: str | None,
+    feedback: str | None = None,
 ) -> str:
     entities: set[str] = set()
     _collect_entity_ids(redacted_payload, entities)
-    considerations = (
-        prior_explanation.strip()
-        if prior_explanation
-        else "(no prior explanation; infer common-sense caveats)"
-    )
+    parts: list[str] = []
+    if feedback:
+        # User feedback is the highest-priority instruction; place it first.
+        parts.append(f"USER FEEDBACK: {feedback.strip()}")
+    if prior_explanation:
+        parts.append(prior_explanation.strip())
+    if not parts:
+        parts.append("(infer common-sense caveats)")
+    considerations = "\n".join(parts)
     return _REFINE_PROMPT_TMPL.format(
         entity_list=", ".join(sorted(entities)) or "(none)",
         current_yaml=_yaml_dump(redacted_payload),
@@ -156,18 +161,22 @@ def _looks_truncated(yaml_body: str) -> bool:
         return True
     if yaml_body.count("{") != yaml_body.count("}"):
         return True
-    # Last line ends with an unfinished mapping marker. Examples:
-    #   "trigger:" with no value below
-    #   "  - entity_" trailing identifier without colon
-    #   "to: '" trailing quote-start (already caught above, kept for clarity)
     stripped = last_line.rstrip()
+    # Trailing colon — key opened, no value
     if stripped.endswith(":") and not stripped.endswith("::"):
-        # Trailing colon means a key was opened with no value yet. Could be
-        # legit if the value is on the next line, but YAML body already
-        # ended — so this is mid-emit.
         return True
+    # Dangling list dash
     if stripped.endswith(("- ", "-")) and len(stripped) <= 4:
-        # Dangling list dash with no item.
+        return True
+    # Last line is a bare indented identifier (no colon, no dash, no value).
+    # E.g. "    target" — the LLM was about to type ":" + a target dict
+    # but ran out of tokens. yaml.safe_load may either raise or coerce
+    # depending on context.
+    if re.fullmatch(r"\s*[a-zA-Z_][a-zA-Z0-9_]*\s*", last_line):
+        return True
+    # Our prompt explicitly asks for `mode: ...` as the final block. If it's
+    # missing entirely, the response was cut off before the LLM got there.
+    if "mode:" not in yaml_body and "mode :" not in yaml_body:
         return True
     return False
 
@@ -244,6 +253,7 @@ async def refine_insight(
     insight: Insight,
     redactor: Redactor,
     prior_explanation: str | None = None,
+    feedback: str | None = None,
 ) -> RefinementResult:
     """Ask the configured Conversation agent for a refined version of the automation.
 
@@ -262,9 +272,14 @@ async def refine_insight(
     redacted_explanation: str | None = None
     if prior_explanation:
         redacted_explanation, _ = await redactor.redact_text(prior_explanation)
+    redacted_feedback: str | None = None
+    if feedback:
+        redacted_feedback, _ = await redactor.redact_text(feedback)
 
     prompt = build_refine_prompt(
-        redacted_payload, prior_explanation=redacted_explanation
+        redacted_payload,
+        prior_explanation=redacted_explanation,
+        feedback=redacted_feedback,
     )
     bytes_sent = len(prompt.encode("utf-8"))
 

@@ -373,6 +373,7 @@ async def ws_apply(
         vol.Required("type"): "home_insights/refine",
         vol.Required("insight_id"): str,
         vol.Optional("agent_id"): vol.Any(str, None),
+        vol.Optional("feedback"): vol.Any(str, None),
     }
 )
 @websocket_api.async_response
@@ -416,6 +417,7 @@ async def ws_refine(
         insight=insight,
         redactor=redactor,
         prior_explanation=insight.explanation,
+        feedback=msg.get("feedback"),
     )
 
     await record_call(
