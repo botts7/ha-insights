@@ -162,21 +162,22 @@ def get_blocked_entities(entry: ConfigEntry) -> frozenset[str]:
 
 
 def _conversation_agent_selector() -> Any:
-    """Build an entity-picker schema field for `conversation.*` entities.
+    """Schema field for the preferred conversation agent.
 
-    Uses HA's selector helper when available so the OptionsFlow renders a
-    proper dropdown. Falls back to a free-text string field if the
-    selector module's shape drifts in some future HA release — losing
-    the dropdown UX but preserving the feature.
+    Uses a plain string field rather than EntitySelector. The selector
+    flavors that filter by domain="conversation" don't serialize cleanly
+    when wrapped in vol.Any (which we need so empty "" is a valid sentinel
+    for "auto-pick") — HA's form renderer returns a 500 trying to render
+    the schema. The string field accepts any value, and the runtime
+    candidate-list logic ignores anything that doesn't resolve to a real
+    agent, so a typo just falls through to the failover chain.
+
+    UX cost: the user has to type the entity_id (e.g.
+    "conversation.gemini_2_5_flash") instead of picking from a dropdown.
+    Look it up under Settings -> Devices & Services -> Entities and
+    filter to domain "conversation".
     """
-    try:
-        from homeassistant.helpers import selector  # type: ignore
-
-        return selector.EntitySelector(
-            selector.EntitySelectorConfig(domain="conversation"),
-        )
-    except Exception:  # pragma: no cover — defensive
-        return str
+    return str
 
 
 class HaInsightsConfigFlow(ConfigFlow, domain=DOMAIN):
@@ -334,13 +335,13 @@ class HaInsightsOptionsFlow(OptionsFlow):
                     vol.Coerce(int),
                     vol.Range(min=DIGEST_HOUR_RANGE[0], max=DIGEST_HOUR_RANGE[1]),
                 ),
-                # Preferred agent — entity selector filtered to conversation.*.
-                # Empty string => auto-pick (Assist default + failover).
-                # vol.Any covers the empty-string case; the selector won't
-                # validate "" against a real conversation entity.
+                # Preferred agent — plain text entity_id (e.g.
+                # "conversation.gemini_2_5_flash"). Empty string => auto-pick
+                # (Assist default + failover). See _conversation_agent_selector
+                # for why we don't use EntitySelector here.
                 vol.Optional(
                     CONF_PREFERRED_AGENT_ID, default=current_preferred
-                ): vol.Any("", _conversation_agent_selector()),
+                ): _conversation_agent_selector(),
             }
         )
         return self.async_show_form(step_id="init", data_schema=schema)
