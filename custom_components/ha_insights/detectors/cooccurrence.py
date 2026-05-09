@@ -32,6 +32,10 @@ class CooccurrenceDetector(Detector):
 
     LOOKBACK_DAYS = 14
     WINDOW_SECONDS = 30
+    # Pairs closer than this don't count. Subclasses (LaggedCorrelationDetector)
+    # raise this to carve out their own "delayed reaction" niche without
+    # double-firing on what cooccurrence already catches.
+    MIN_DELTA_SECONDS = 0.0
     MIN_OCCURRENCES = 5
     DELTA_STDDEV_MAX_SECONDS = 12.0
     MAX_LOOKBACK_EVENTS = 200  # cap pair search per follower for perf
@@ -63,6 +67,8 @@ class CooccurrenceDetector(Detector):
                     continue
                 delta = (follower.timestamp - leader.timestamp).total_seconds()
                 if delta <= 0:
+                    continue
+                if delta < self.MIN_DELTA_SECONDS:
                     continue
                 key = (
                     leader.entity_id,
