@@ -55,49 +55,31 @@ async def validate_automation_online(
         )
         return []
 
-    # Try modern (hass, config) signature first.
+    # Try the modern (hass, config) signature first.
     try:
-        result = await async_validate_config_item(hass, config)  # type: ignore[arg-type]
-        if result is False or result is None:
-            # Some HA versions return None on success, False on failure.
-            # We treat None as success unless an exception was raised.
-            pass
+        await async_validate_config_item(hass, config)  # type: ignore[arg-type]
         return []
     except TypeError as exc:
         # Signature drift: try the (hass, config_key, config) shape
         message = str(exc)
         if "missing" in message and "argument" in message:
             try:
-                # Synthesize a config_key from the alias (HA uses the
-                # automation's id internally; alias is good enough for
-                # validation purposes — it doesn't get persisted)
-                config_key = config.get("alias") or config.get("id") or "ha_insights_validate"
+                config_key = (
+                    config.get("alias")
+                    or config.get("id")
+                    or "ha_insights_validate"
+                )
                 await async_validate_config_item(hass, config_key, config)  # type: ignore[call-arg]
                 return []
-            except (vol_invalid_or_other(), TypeError, ValueError) as inner:
+            except Exception as inner:
+                # Either vol.Invalid (rejected config — user-actionable) or
+                # something else from the validator. Surface either as a
+                # validation error so the user sees what happened.
                 inner_msg = str(inner).strip() or inner.__class__.__name__
                 return [inner_msg]
-            except Exception as inner:
-                _LOGGER.debug("online validator (3-arg) errored: %s", inner)
-                return []
         # TypeError NOT about missing args = real problem with the config
         return [message.strip() or "TypeError"]
     except Exception as exc:
         # vol.Invalid renders nicely; other exceptions get a generic prefix
         message = str(exc).strip() or exc.__class__.__name__
         return [message]
-
-
-def vol_invalid_or_other():
-    """Return a tuple of exceptions that mean "config rejected by validator".
-
-    Imported lazily because voluptuous may not be present in some test
-    environments — falling back to a generic Exception keeps the wrapper
-    from crashing on import-time failures.
-    """
-    try:
-        import voluptuous as vol
-
-        return (vol.Invalid,)
-    except ImportError:
-        return (Exception,)
