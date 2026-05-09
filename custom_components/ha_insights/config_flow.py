@@ -76,7 +76,7 @@ class HaInsightsConfigFlow(ConfigFlow, domain=DOMAIN):
     @staticmethod
     @callback
     def async_get_options_flow(config_entry: ConfigEntry) -> HaInsightsOptionsFlow:
-        return HaInsightsOptionsFlow(config_entry)
+        return HaInsightsOptionsFlow()
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
@@ -123,10 +123,13 @@ class HaInsightsConfigFlow(ConfigFlow, domain=DOMAIN):
 
 
 class HaInsightsOptionsFlow(OptionsFlow):
-    """In-place mode switcher — Settings -> Devices & Services -> HA Insights -> Configure."""
+    """In-place mode switcher — Settings -> Devices & Services -> HA Insights -> Configure.
 
-    def __init__(self, config_entry: ConfigEntry) -> None:
-        self.config_entry = config_entry
+    HA injects `self.config_entry` automatically via the parent class; we
+    must NOT set it explicitly (read-only since 2025.12).
+    """
+
+    def __init__(self) -> None:
         self._mode: LlmMode | None = None
         self._lookback: int = DEFAULT_LOOKBACK_DAYS
 
