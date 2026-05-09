@@ -38,6 +38,7 @@ SUPPORTED_METHODS = (
     "explain",
     "refine",
     "test_actions",
+    "backfill_status",
 )
 
 
@@ -55,6 +56,7 @@ def async_register(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_explain)
     websocket_api.async_register_command(hass, ws_refine)
     websocket_api.async_register_command(hass, ws_test_actions)
+    websocket_api.async_register_command(hass, ws_backfill_status)
     websocket_api.async_register_command(hass, ws_dev_inject_event)
 
 
@@ -616,6 +618,34 @@ async def ws_scan_now(
             "insights_emitted": new_count,
         },
     )
+
+
+@websocket_api.websocket_command(
+    {vol.Required("type"): "home_insights/backfill_status"}
+)
+@callback
+def ws_backfill_status(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Return the current backfill status for the (single) config entry.
+
+    Used by the card to surface a "Backfilled N events" toast on first
+    connect after install. Returns {running, last}; `last` is the summary
+    dict from the most recent run (or null if backfill has never run).
+    """
+    for entry_data in hass.data.get(DOMAIN, {}).values():
+        if isinstance(entry_data, dict) and "buffer" in entry_data:
+            connection.send_result(
+                msg["id"],
+                {
+                    "running": bool(entry_data.get("backfill_running")),
+                    "last": entry_data.get("last_backfill"),
+                },
+            )
+            return
+    connection.send_error(msg["id"], "not_set_up", "Integration not initialized")
 
 
 @websocket_api.websocket_command(

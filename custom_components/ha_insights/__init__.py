@@ -91,6 +91,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "unsub_state": unsub_state,
         "unsub_registry": unsub_registry,
         "last_backfill": None,
+        "backfill_running": False,
     }
 
     if not hass.data[DOMAIN].get(_WS_REGISTERED_FLAG):
@@ -120,19 +121,24 @@ async def _run_initial_backfill(
     lookback_days: int,
 ) -> None:
     """Run a one-shot backfill in the background and stash the summary."""
+    entry_data = hass.data.get(DOMAIN, {}).get(entry_id)
+    if isinstance(entry_data, dict):
+        entry_data["backfill_running"] = True
     try:
         summary = await backfill_history(
             hass, buffer_, lookback_days=lookback_days
         )
     except Exception:
         _LOGGER.exception("HA Insights backfill failed")
+        if isinstance(entry_data, dict):
+            entry_data["backfill_running"] = False
         return
-    entry_data = hass.data.get(DOMAIN, {}).get(entry_id)
     if isinstance(entry_data, dict):
         entry_data["last_backfill"] = {
             "completed_at": datetime.now(tz=UTC).isoformat(),
             **summary,
         }
+        entry_data["backfill_running"] = False
     _LOGGER.info(
         "HA Insights backfilled %d events from %d entities (%.1fs, %dd lookback)",
         summary["events_added"],
@@ -184,9 +190,13 @@ def _async_register_services(hass: HomeAssistant) -> None:
             if lookback <= 0:
                 continue
             buffer_obj = entry_data["buffer"]
-            summary = await backfill_history(
-                hass, buffer_obj, lookback_days=lookback
-            )
+            entry_data["backfill_running"] = True
+            try:
+                summary = await backfill_history(
+                    hass, buffer_obj, lookback_days=lookback
+                )
+            finally:
+                entry_data["backfill_running"] = False
             entry_data["last_backfill"] = {
                 "completed_at": datetime.now(tz=UTC).isoformat(),
                 **summary,
