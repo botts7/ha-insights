@@ -87,13 +87,18 @@ def ws_hello(
     connection: websocket_api.ActiveConnection,
     msg: dict[str, Any],
 ) -> None:
-    """Handshake — return integration metadata + supported methods."""
+    """Handshake — return integration metadata + supported methods + privacy mode."""
+    privacy_mode = "off"
+    for entry in hass.config_entries.async_entries(DOMAIN):
+        privacy_mode = entry.data.get("llm_mode", "off")
+        break
     connection.send_result(
         msg["id"],
         {
             "integration_version": INTEGRATION_VERSION,
             "ws_protocol_version": WS_PROTOCOL_VERSION,
             "supported_methods": list(SUPPORTED_METHODS),
+            "privacy_mode": privacy_mode,
         },
     )
 
