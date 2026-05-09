@@ -4,11 +4,23 @@ Privacy is the central invariant of this project. This document spells out exact
 
 **If anything in this document differs from what you observe in practice, that's a bug — please open an issue.**
 
-## v0.1 summary (TL;DR)
+## TL;DR
 
-- **Zero outbound network calls.** v0.1 ships without the LLM gateway wired up. Nothing leaves your Home Assistant host.
-- **All state lives locally** in a per-entry SQLite database (`<config>/ha_insights_<entry_id>.db`) and an in-memory rolling buffer (default 7 days).
-- **One-shot escape hatch**: the `home_insights.purge_observations` service wipes observed state, insights, and the outbound-call audit log. Pseudonyms and applied-automation snapshots are preserved by design.
+- **Three privacy modes** (Off / Local / Cloud) selected at install + switchable in-place via the OptionsFlow.
+- **Off** ships zero outbound network calls. All detection is local.
+- **Local** + **Cloud** both run all data through a redactor before any LLM call: entity_ids become stable pseudonyms (`light.entity_a3f1b2`), sensitive attributes (GPS / MAC / tokens / passwords / serial) are stripped, per-entity opt-out lets you blocklist specific entities entirely.
+- **Audit log + previewer**: the panel surfaces every outbound LLM call, and a 🛡️ "What gets sent?" button shows the exact redacted payload before any LLM call.
+- **One-shot escape hatch**: the `ha_insights.purge_observations` service wipes observed state, insights, and the outbound-call audit log.
+
+## Privacy modes
+
+| Mode | LLM enabled? | What leaves the host? |
+|---|---|---|
+| **Off** | No | Nothing. Pattern detection is local-only. |
+| **Local** | Yes — local Conversation agent (Ollama, Piper) | Pseudonymized payload + redacted text. Stays on your network. |
+| **Cloud** | Yes — cloud Conversation agent (Anthropic, OpenAI, Google AI, Nabu Casa) | Same pseudonymized payload + redacted text. Real entity_ids never leave. Requires explicit consent in the wizard. |
+
+Mode is changeable in-place via **Settings → Devices & Services → HA Insights → Configure**. Switching INTO Cloud re-prompts the consent dialog.
 
 ## What HA Insights observes
 
@@ -17,17 +29,17 @@ After install + setup, the integration subscribes to **two** HA event-bus events
 1. **`state_changed`** — every state transition for entities in your selected Areas. Default-blocked domains (`camera`, `person`, `device_tracker`, `lock`) are filtered before they ever enter the buffer.
 2. **`entity_registry_updated`** — so a HA-side rename atomically migrates the buffer entries and pseudonym map. Avoids breaking detector history when you rename `light.kitchen` to `light.galley`.
 
-Each accepted state change is appended to an in-memory rolling buffer. The buffer is dropped on HA restart in v0.1 (SQLite persistence is opt-in and lands in v0.2).
+Each accepted state change is appended to an in-memory rolling buffer (default 14-day window, matching the configured `lookback_days`). On first install, HA's recorder is queried to backfill historical events into the buffer (configurable 0-30 days — 0 disables backfill entirely).
 
 ## Where data lives
 
 | What | Where | Persists across restart? |
 |---|---|---|
-| State events | In-memory ring buffer | No (v0.1) |
+| State events (live + backfilled) | In-memory rolling buffer | No (recorder backfill repopulates on next setup) |
 | Insights | `<config>/ha_insights_<entry_id>.db` (SQLite) | Yes |
-| Pseudonym map | Same SQLite | Yes |
-| Applied-history snapshots | Same SQLite | Yes (used for Undo) |
-| Outbound-call audit log | Same SQLite | Yes (empty in v0.1) |
+| Pseudonym map | Same SQLite | Yes (so the LLM sees stable identifiers across calls) |
+| Applied-history snapshots | Same SQLite | Yes (used for future undo) |
+| Outbound-call audit log | Same SQLite | Yes |
 
 The `.db` filename includes the config-entry id so removing and re-adding the integration creates a fresh database.
 
@@ -38,34 +50,70 @@ HA Insights ignores all events on:
 - `camera` — privacy (image / motion data)
 - `person` — privacy (presence / location)
 - `device_tracker` — privacy (location)
-- `lock` — safety (LLMs should never suggest unlock automations)
+- `lock` — safety (LLMs never suggest unlock automations, even with explicit user prompting)
 
-The privacy three (camera / person / device_tracker) become unblock-able in v0.2 once the LLM gateway lands and you're in **Local** mode (data stays on your network). The safety block on `lock` stays in every mode regardless — that's a hard rule, not a preference.
+The privacy three (camera / person / device_tracker) are recoverable via custom config in future releases. The safety block on `lock` stays in every mode regardless — that's a hard rule, not a preference.
 
-## What never leaves your network in v0.1
+## Per-entity opt-out (v0.6)
 
-**Nothing.** v0.1 has no LLM call path wired up.
+Beyond mode-driven redaction, you can blocklist specific entity_ids that should NEVER reach an LLM in any form. The `llm_block_entities` config option (set via `data` or `options` on the config entry):
 
-The `Local` and `Cloud` choices in the setup wizard are recorded as preferences but dormant — they activate when the LLM gateway lands in v0.2.
+```yaml
+llm_block_entities:
+  - lock.front_door
+  - device_tracker.kids_phone
+  - sensor.specific_secret_metric
+```
+
+Behaviour at the redactor layer:
+- Listed entity_ids in payload values become `[blocked]`
+- Listed entity_ids inside list values are filtered out
+- Free-text mentions of listed entity_ids are masked to `[blocked]`
+- The `🛡️ What gets sent?` modal shows a "blocked" count when any opt-out hit
+
+## Redactor (Cloud + Local mode)
+
+Every LLM-bound payload runs through:
+
+1. **Always-redact attribute floor** — these keys are stripped regardless of mode:
+   - `gps_lat`, `gps_lon`, `latitude`, `longitude`, `altitude`
+   - `mac`, `ip`, `bssid`, `ssid`
+   - `password`, `token`, `access_token`, `auth`, `api_key`, `secret`
+   - `serial_number`, `device_id`
+2. **Per-entity opt-out** (above)
+3. **Pseudonymization** — entity_ids replaced with stable per-call pseudonyms via the local `pseudonym_map` table. The LLM sees `light.entity_a3f1b2`; the response is dereferenced back to `light.kitchen` before display.
+4. **Title + payload deep-walk** — every string value is scanned for entity-id-shaped substrings; matches are replaced.
+
+The redactor is the same module called by Refine, Explain, and the `home_insights/redaction_preview` WS endpoint, so the previewer shows the *actual* output of the same pipeline that gets sent to the LLM.
+
+## Audit log
+
+Every LLM call (Refine + Explain) writes one row to `outbound_calls`:
+- Timestamp + insight_id + agent + agent_locality (local / cloud) + redaction_mode
+- Bytes sent + bytes received
+- Success / failure
+- Optional: full redacted payload JSON (off by default; toggle for forensics only)
+
+The panel's **🛡️ LLM activity** section displays the most recent 25 calls. The full table is queryable via the existing `home_insights/audit_log` WS command (limit configurable 1-500).
 
 ## How to wipe everything
 
 Fastest path — call the service from Developer Tools → Services, or from any automation:
 
 ```yaml
-service: home_insights.purge_observations
+service: ha_insights.purge_observations
 ```
 
 This deletes:
 
 - All in-memory state events
 - All insights in the SQLite store
-- All outbound-call audit entries (empty in v0.1)
+- All outbound-call audit entries
 
 It **preserves**:
 
-- The pseudonym map — so cross-restart references stay stable for the v0.2 LLM gateway
-- Applied-history snapshots — so undo within the 7-day window still works for previously-applied automations
+- The pseudonym map — so cross-restart references stay stable
+- Applied-history snapshots — so future undo still works for previously-applied automations
 
 For a complete wipe including pseudonyms and applied-history, remove the integration entirely via **Settings → Devices & Services → HA Insights → Delete**. The next install creates a fresh per-entry SQLite database with no historical state at all.
 
@@ -77,30 +125,20 @@ The SQLite database is plain text-readable from inside the HA container:
 docker exec -it homeassistant sqlite3 /config/ha_insights_<entry_id>.db
 sqlite> .tables
 sqlite> SELECT * FROM insights;
-sqlite> SELECT * FROM outbound_calls;  # empty in v0.1
+sqlite> SELECT * FROM outbound_calls;
+sqlite> SELECT * FROM pseudonym_map;
 ```
 
 Or copy the file out of the container (`docker cp ...`) for offline inspection.
 
 ## What HA Insights *cannot* do (hard guarantees)
 
-- It registers exactly two event-bus listeners: `state_changed` and `entity_registry_updated`. No others.
-- It does not write to entities outside of the automation it creates on Apply.
-- It does not call HA services other than `automation.reload` after writing an automation file.
-- It does not open any outbound network connection in v0.1. (Verified by absence of `aiohttp.ClientSession` usage outside `dev/probe.py`, which is a developer-only test harness, not part of the integration.)
-- It does not include sensitive attributes — GPS coordinates, MAC addresses, tokens, passwords — in any insight payload. (Mostly moot in v0.1 since no payloads leave the host, but the redactor module is already in place for v0.2.)
-
-## What changes in v0.2
-
-When the LLM gateway lands:
-
-- Three privacy modes (Off / Local / Cloud) become functional.
-- Every outbound LLM call passes through a redactor that pseudonymizes entity IDs and strips sensitive attributes by default.
-- Every call is recorded in the `outbound_calls` audit table.
-- A `sensor.ha_insights_privacy_log` entity surfaces total bytes sent / received per day for at-a-glance audit.
-- A "What gets sent?" modal in the card shows an example payload at the user's current settings.
-
-The redactor module and audit-log table are already in the v0.1 schema, so adding the LLM gateway requires no schema migration.
+- Two event-bus listeners only: `state_changed` and `entity_registry_updated`. No others.
+- Does not write to entities outside the automation it creates on Apply.
+- Does not call HA services other than `automation.reload` after writing the automation file (and the action you click Test on, which is by definition explicit).
+- In **Off** mode: makes no outbound network connection. (Verified by absence of `aiohttp.ClientSession` usage in non-LLM code paths.)
+- In **Local / Cloud** modes: every outbound call passes through the redactor; the audit log captures the final sent payload size; the previewer can show the exact JSON before sending.
+- Sensitive attributes (GPS / MAC / tokens / passwords / serials) are stripped from every insight payload regardless of mode — they never reach the redactor's pseudonymization pass to begin with.
 
 ## Reporting privacy concerns
 
