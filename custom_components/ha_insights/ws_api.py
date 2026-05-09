@@ -430,11 +430,18 @@ async def ws_refine(
     )
 
     if not result.success:
-        connection.send_error(
-            msg["id"],
-            "refine_failed",
-            result.error or "Refinement failed",
-        )
+        # Include a truncated raw_response so the user (and the card) can see
+        # what the LLM actually returned when validation rejects the output.
+        # Many LLMs produce shape-incomplete YAML even within token budget;
+        # being able to inspect the raw text is essential for self-service
+        # debugging.
+        detail = result.error or "Refinement failed"
+        if result.raw_response:
+            snippet = result.raw_response.strip()
+            if len(snippet) > 600:
+                snippet = snippet[:600] + "…"
+            detail = f"{detail}\n\nLLM said:\n{snippet}"
+        connection.send_error(msg["id"], "refine_failed", detail)
         return
 
     connection.send_result(
