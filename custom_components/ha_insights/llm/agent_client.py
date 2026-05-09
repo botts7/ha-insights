@@ -150,7 +150,28 @@ async def explain_insight(
             error=str(err),
         )
 
+    response_type = _extract_response_type(result)
     speech = _extract_speech(result)
+
+    # HA's default agent returns ResponseType.ERROR for unrecognized commands —
+    # that's the "Sorry, I'm not aware of any device called X" path. It means
+    # the user has no LLM-backed Conversation integration active. Return a
+    # friendly hint so the card can surface installation instructions instead
+    # of leaking the rule-based fallback message.
+    if response_type and "error" in response_type.lower():
+        return ExplanationResult(
+            explanation=None,
+            redaction_map=redaction_map,
+            bytes_sent=bytes_sent,
+            bytes_received=len(speech.encode("utf-8")) if speech else 0,
+            success=False,
+            error=(
+                "Active Conversation agent isn't an LLM (rule-based fallback). "
+                "Install an LLM Conversation integration like Anthropic, OpenAI, "
+                "Google Generative AI, or Ollama, then select it as your agent."
+            ),
+        )
+
     if speech is None:
         return ExplanationResult(
             explanation=None,
@@ -192,3 +213,15 @@ def _extract_speech(result: object) -> str | None:
     if isinstance(speech_str, str):
         return speech_str
     return None
+
+
+def _extract_response_type(result: object) -> str | None:
+    """Get the response_type as a lowercase string ('action_done', 'error', etc.)."""
+    response = getattr(result, "response", None)
+    if response is None:
+        return None
+    rt = getattr(response, "response_type", None)
+    if rt is None:
+        return None
+    # Could be an enum (.value) or already a string
+    return str(getattr(rt, "value", rt)).lower()
