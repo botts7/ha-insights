@@ -90,10 +90,16 @@ def _summarize_payload(payload: dict) -> str:
                 service = action.get("service", "?")
                 target = action.get("target", {})
                 eid = target.get("entity_id") if isinstance(target, dict) else None
+                # Spell it out so the LLM doesn't confuse the service name
+                # (light.turn_off) for another entity_id.
                 if eid:
-                    lines.append(f"  Action: {service} on {eid}")
+                    lines.append(
+                        f"  Call service: {service} (this turns the entity "
+                        f"on or off depending on the service name)"
+                    )
+                    lines.append(f"  Target entity: {eid}")
                 else:
-                    lines.append(f"  Action: {service}")
+                    lines.append(f"  Call service: {service}")
     return "\n".join(lines) if lines else "  (no readable summary)"
 
 
