@@ -68,6 +68,7 @@ class PrivacyLogSensor(SensorEntity):
         self._bytes_received = 0
         self._last_call: datetime | None = None
         self._last_agent: str | None = None
+        self._est_cost_usd_total: float = 0.0
 
     @property
     def native_value(self) -> int:
@@ -82,6 +83,9 @@ class PrivacyLogSensor(SensorEntity):
             "bytes_sent_today": self._bytes_sent,
             "bytes_received_today": self._bytes_received,
             "last_agent": self._last_agent,
+            # v0.9 phase 1C: rough USD cost estimate so users can spot
+            # expensive Refine usage without leaving the dashboard.
+            "est_cost_usd_today": self._est_cost_usd_total,
         }
 
     async def async_update(self) -> None:
@@ -95,3 +99,10 @@ class PrivacyLogSensor(SensorEntity):
         self._last_call = last_ts if isinstance(last_ts, datetime) else None
         last_agent = summary.get("last_agent")
         self._last_agent = last_agent if isinstance(last_agent, str) else None
+        cost_total = summary.get("est_cost_usd_total")
+        try:
+            self._est_cost_usd_total = (
+                float(cost_total) if cost_total is not None else 0.0
+            )
+        except (TypeError, ValueError):
+            self._est_cost_usd_total = 0.0

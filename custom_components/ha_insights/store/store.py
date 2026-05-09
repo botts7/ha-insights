@@ -16,6 +16,7 @@ from pathlib import Path
 import aiosqlite
 
 from ..insight import Insight, InsightKind
+from ..llm.cost import estimate_cost
 from .schema import MIGRATIONS
 
 # Listener signature: (event_type, insight). event_type is one of:
@@ -283,23 +284,41 @@ class InsightStore:
             (limit,),
         ) as cur:
             rows = await cur.fetchall()
-        return [
-            {
-                "id": int(row["id"]),
-                "timestamp": datetime.fromtimestamp(
-                    row["timestamp"], tz=UTC
-                ).isoformat(),
-                "insight_id": row["insight_id"],
-                "insight_title": row["insight_title"],
-                "agent": row["agent"],
-                "agent_locality": row["agent_locality"],
-                "redaction_mode": row["redaction_mode"],
-                "bytes_sent": int(row["bytes_sent"] or 0),
-                "bytes_received": int(row["bytes_received"] or 0),
-                "success": bool(row["success"]) if row["success"] is not None else None,
-            }
-            for row in rows
-        ]
+        result: list[dict[str, object]] = []
+        for row in rows:
+            bytes_sent = int(row["bytes_sent"] or 0)
+            bytes_received = int(row["bytes_received"] or 0)
+            cost = estimate_cost(
+                agent_id=row["agent"],
+                bytes_sent=bytes_sent,
+                bytes_received=bytes_received,
+                locality=row["agent_locality"],
+            )
+            result.append(
+                {
+                    "id": int(row["id"]),
+                    "timestamp": datetime.fromtimestamp(
+                        row["timestamp"], tz=UTC
+                    ).isoformat(),
+                    "insight_id": row["insight_id"],
+                    "insight_title": row["insight_title"],
+                    "agent": row["agent"],
+                    "agent_locality": row["agent_locality"],
+                    "redaction_mode": row["redaction_mode"],
+                    "bytes_sent": bytes_sent,
+                    "bytes_received": bytes_received,
+                    "success": (
+                        bool(row["success"]) if row["success"] is not None else None
+                    ),
+                    # v0.9 phase 1C: rough cost estimate. Computed at read
+                    # time from bytes + agent_id, no schema migration needed.
+                    "est_tokens_in": cost["tokens_in"],
+                    "est_tokens_out": cost["tokens_out"],
+                    "est_cost_usd": cost["cost_usd"],
+                    "cost_source": cost["source"],
+                }
+            )
+        return result
 
     async def get_outbound_call_summary(
         self, *, since: datetime
@@ -340,6 +359,28 @@ class InsightStore:
                 if latest is not None:
                     last_agent = latest["agent"]
 
+        # Per-call cost estimate aggregated across the window. We sum row-by-row
+        # rather than from totals because pricing differs per agent — a window
+        # mixing local + cloud agents would otherwise over-charge.
+        est_cost_total = 0.0
+        async with self._c.execute(
+            """
+            SELECT agent, agent_locality, bytes_sent, bytes_received
+            FROM outbound_calls
+            WHERE timestamp >= ?
+            """,
+            (since_ts,),
+        ) as cur:
+            cost_rows = await cur.fetchall()
+        for cost_row in cost_rows:
+            cost = estimate_cost(
+                agent_id=cost_row["agent"],
+                bytes_sent=int(cost_row["bytes_sent"] or 0),
+                bytes_received=int(cost_row["bytes_received"] or 0),
+                locality=cost_row["agent_locality"],
+            )
+            est_cost_total += float(cost["cost_usd"])
+
         return {
             "call_count": int(row["call_count"]) if row else 0,
             "bytes_sent_total": int(row["bytes_sent_total"]) if row else 0,
@@ -350,6 +391,7 @@ class InsightStore:
                 else None
             ),
             "last_agent": last_agent,
+            "est_cost_usd_total": round(est_cost_total, 4),
         }
 
     async def clear_applied(self, insight_id: str) -> bool:
