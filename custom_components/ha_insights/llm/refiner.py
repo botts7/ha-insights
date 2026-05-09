@@ -139,11 +139,16 @@ def parse_refine_response(text: str) -> tuple[str | None, dict[str, Any] | None,
 
 
 def _looks_truncated(yaml_body: str) -> bool:
-    """Heuristics for token-limit truncation: unclosed quote/bracket."""
+    """Heuristics for token-limit truncation.
+
+    Catches cases the YAML parser would either reject outright (unclosed
+    quote/bracket) AND cases where the body parses but ends mid-key.
+    """
     if not yaml_body:
         return True
+    text = yaml_body.rstrip()
+    last_line = text.splitlines()[-1] if text else ""
     # Unterminated single/double quote on the last non-empty line
-    last_line = yaml_body.rstrip().splitlines()[-1] if yaml_body.strip() else ""
     if last_line.count("'") % 2 == 1 or last_line.count('"') % 2 == 1:
         return True
     # Unbalanced brackets across the whole body
@@ -151,6 +156,44 @@ def _looks_truncated(yaml_body: str) -> bool:
         return True
     if yaml_body.count("{") != yaml_body.count("}"):
         return True
+    # Last line ends with an unfinished mapping marker. Examples:
+    #   "trigger:" with no value below
+    #   "  - entity_" trailing identifier without colon
+    #   "to: '" trailing quote-start (already caught above, kept for clarity)
+    stripped = last_line.rstrip()
+    if stripped.endswith(":") and not stripped.endswith("::"):
+        # Trailing colon means a key was opened with no value yet. Could be
+        # legit if the value is on the next line, but YAML body already
+        # ended — so this is mid-emit.
+        return True
+    if stripped.endswith(("- ", "-")) and len(stripped) <= 4:
+        # Dangling list dash with no item.
+        return True
+    return False
+
+
+def _looks_structurally_incomplete(payload: dict[str, Any]) -> bool:
+    """A parsed-but-broken payload that's likely a token-limit cut-off.
+
+    `validate_automation` rejects on shape errors, but we want to give the
+    user a more actionable error than "trigger[0] must be a dict" if the
+    real issue is "the YAML stopped halfway through emitting the trigger."
+    """
+    required = {"alias", "trigger", "action", "mode"}
+    missing = required - set(payload.keys())
+    # Missing 'action' is the dead-giveaway truncation pattern: LLMs emit
+    # alias -> trigger -> action -> mode in order, so 'action' missing
+    # almost always means the response stopped between trigger and action.
+    if "action" in missing and "trigger" in payload:
+        return True
+    # Trigger present but not a list-of-dicts (e.g. partial string value)
+    triggers = payload.get("trigger")
+    if triggers is not None and not isinstance(triggers, list):
+        return True
+    if isinstance(triggers, list):
+        for trigger in triggers:
+            if not isinstance(trigger, dict):
+                return True
     return False
 
 
@@ -337,6 +380,28 @@ async def refine_insight(
     _collect_entity_ids(insight.payload, allowed_entities)
     validation_error = _validate_refined(refined, allowed_entities)
     if validation_error:
+        # Distinguish "the YAML stopped halfway" from real validation issues.
+        # Same root cause as truncation but the parser was lenient enough to
+        # produce a partial dict — the validator catches it as missing keys
+        # or wrong-type triggers. Surface the actionable message instead.
+        if _looks_structurally_incomplete(refined):
+            return RefinementResult(
+                refined_payload=None,
+                rationale=rationale,
+                diff_summary=[],
+                redaction_map=redaction_map,
+                bytes_sent=bytes_sent,
+                bytes_received=bytes_received,
+                success=False,
+                error=(
+                    "LLM response was cut off mid-YAML — likely hit "
+                    "max_output_tokens. Increase the limit in your LLM "
+                    "Conversation integration's config (try 4096), or "
+                    "switch to a non-thinking model that uses tokens "
+                    "more efficiently."
+                ),
+                raw_response=speech,
+            )
         return RefinementResult(
             refined_payload=None,
             rationale=rationale,
