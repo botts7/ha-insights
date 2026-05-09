@@ -36,6 +36,8 @@ SUPPORTED_METHODS = (
     "scan_now",
     "purge_all",
     "explain",
+    "refine",
+    "test_actions",
 )
 
 
@@ -51,6 +53,8 @@ def async_register(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_scan_now)
     websocket_api.async_register_command(hass, ws_purge_all)
     websocket_api.async_register_command(hass, ws_explain)
+    websocket_api.async_register_command(hass, ws_refine)
+    websocket_api.async_register_command(hass, ws_test_actions)
     websocket_api.async_register_command(hass, ws_dev_inject_event)
 
 
@@ -295,6 +299,7 @@ async def ws_dismiss(
     {
         vol.Required("type"): "home_insights/apply",
         vol.Required("insight_id"): str,
+        vol.Optional("payload_override"): dict,
     }
 )
 @websocket_api.async_response
@@ -303,7 +308,13 @@ async def ws_apply(
     connection: websocket_api.ActiveConnection,
     msg: dict[str, Any],
 ) -> None:
-    """Apply an insight: validate, write the automation, record snapshot."""
+    """Apply an insight: validate, write the automation, record snapshot.
+
+    `payload_override` (added v0.3) lets the card apply a refined automation
+    in place of the original. The override is validated identically and
+    stamped with `description: "Refined by HA Insights"` so the lineage is
+    visible in HA's automation editor.
+    """
     from .apply import AutomationWriter, hash_config, validate_automation
 
     store = _get_store(hass)
@@ -324,14 +335,23 @@ async def ws_apply(
         )
         return
 
-    errors = validate_automation(insight.payload)
+    override = msg.get("payload_override")
+    if override is not None:
+        # Stamp description so the user sees the lineage in HA's automation editor.
+        # Don't mutate caller's dict.
+        payload = {**override}
+        payload.setdefault("description", "Refined by HA Insights")
+    else:
+        payload = insight.payload
+
+    errors = validate_automation(payload)
     if errors:
         connection.send_error(msg["id"], "invalid_payload", "; ".join(errors))
         return
 
     writer = AutomationWriter(hass)
-    auto_id = await writer.write(insight.payload)
-    snapshot = await writer.read(auto_id) or insight.payload
+    auto_id = await writer.write(payload)
+    snapshot = await writer.read(auto_id) or payload
 
     await store.record_applied(
         insight.id,
@@ -340,7 +360,190 @@ async def ws_apply(
         snapshot=snapshot,
         snapshot_hash=hash_config(snapshot),
     )
-    connection.send_result(msg["id"], {"automation_id": auto_id})
+    connection.send_result(
+        msg["id"],
+        {"automation_id": auto_id, "refined": override is not None},
+    )
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "home_insights/refine",
+        vol.Required("insight_id"): str,
+        vol.Optional("agent_id"): vol.Any(str, None),
+    }
+)
+@websocket_api.async_response
+async def ws_refine(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """User-initiated LLM refinement of an automation insight.
+
+    Pseudonymizes the payload, calls the configured Conversation agent,
+    parses + dereferences + validates the response. Does NOT mutate the
+    insight — the refined payload is returned for the card to preview, then
+    applied via `home_insights/apply` with `payload_override` if accepted.
+    """
+    from .llm import RedactionMode, Redactor, record_call, refine_insight
+
+    store = _get_store(hass)
+    if store is None:
+        connection.send_error(msg["id"], "not_set_up", "Store not initialized")
+        return
+    insight = await store.get_insight(msg["insight_id"])
+    if insight is None:
+        connection.send_error(
+            msg["id"], "not_found", f"No insight {msg['insight_id']!r}"
+        )
+        return
+    if insight.payload_format != "automation":
+        connection.send_error(
+            msg["id"],
+            "unsupported_format",
+            f"refine only supports payload_format='automation' (got "
+            f"{insight.payload_format!r})",
+        )
+        return
+
+    redactor = Redactor(store, mode=RedactionMode.AGGRESSIVE)
+    result = await refine_insight(
+        hass,
+        agent_id=msg.get("agent_id"),
+        insight=insight,
+        redactor=redactor,
+        prior_explanation=insight.explanation,
+    )
+
+    await record_call(
+        store,
+        insight_id=insight.id,
+        agent=str(msg.get("agent_id")) if msg.get("agent_id") else "default",
+        agent_locality="cloud",
+        redaction_mode=str(redactor.mode),
+        bytes_sent=result.bytes_sent,
+        bytes_received=result.bytes_received,
+        success=result.success,
+    )
+
+    if not result.success:
+        connection.send_error(
+            msg["id"],
+            "refine_failed",
+            result.error or "Refinement failed",
+        )
+        return
+
+    connection.send_result(
+        msg["id"],
+        {
+            "refined_payload": result.refined_payload,
+            "rationale": result.rationale,
+            "diff_summary": result.diff_summary,
+            "bytes_sent": result.bytes_sent,
+            "bytes_received": result.bytes_received,
+        },
+    )
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "home_insights/test_actions",
+        vol.Required("insight_id"): str,
+        vol.Optional("payload_override"): dict,
+    }
+)
+@websocket_api.async_response
+async def ws_test_actions(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Fire the action block of an insight without saving the automation.
+
+    Mirrors HA's "Run Actions" button on the automation editor. Iterates
+    `payload['action']` (or the override) and calls each as a real service
+    call. Triggers and conditions are skipped. Returns a per-action summary
+    so the card can toast successes or surface specific errors.
+
+    This is a privileged operation — it has real side effects on the user's
+    home. The card surfaces a one-line warning before the first test.
+    """
+    store = _get_store(hass)
+    if store is None:
+        connection.send_error(msg["id"], "not_set_up", "Store not initialized")
+        return
+    insight = await store.get_insight(msg["insight_id"])
+    if insight is None:
+        connection.send_error(
+            msg["id"], "not_found", f"No insight {msg['insight_id']!r}"
+        )
+        return
+
+    payload = msg.get("payload_override") or insight.payload
+    actions = payload.get("action")
+    if not isinstance(actions, list) or not actions:
+        connection.send_error(
+            msg["id"], "no_actions", "Payload has no action list to test"
+        )
+        return
+
+    results: list[dict[str, Any]] = []
+    for index, action in enumerate(actions):
+        if not isinstance(action, dict) or "service" not in action:
+            results.append({
+                "index": index,
+                "ok": False,
+                "error": "non-service actions (delay/choose/etc) skipped",
+                "skipped": True,
+            })
+            continue
+
+        service_str = action.get("service")
+        if not isinstance(service_str, str) or "." not in service_str:
+            results.append({
+                "index": index,
+                "ok": False,
+                "error": f"invalid service: {service_str!r}",
+            })
+            continue
+
+        domain, service = service_str.split(".", 1)
+        target = action.get("target")
+        # service_data = action minus the keys that aren't service params
+        reserved = {"service", "target", "alias", "metadata"}
+        service_data: dict[str, Any] = {
+            k: v for k, v in action.items() if k not in reserved
+        }
+        # Some legacy actions put entity_id directly at the action level.
+        # Move it into target if no target was set.
+        if target is None and "entity_id" in service_data:
+            target = {"entity_id": service_data.pop("entity_id")}
+
+        try:
+            await hass.services.async_call(
+                domain,
+                service,
+                service_data or None,
+                target=target,
+                blocking=True,
+            )
+            results.append({"index": index, "ok": True, "service": service_str})
+        except Exception as err:
+            results.append({
+                "index": index,
+                "ok": False,
+                "service": service_str,
+                "error": str(err),
+            })
+
+    ran = sum(1 for r in results if r.get("ok"))
+    errors = [r for r in results if not r.get("ok") and not r.get("skipped")]
+    connection.send_result(
+        msg["id"],
+        {"ran": ran, "results": results, "error_count": len(errors)},
+    )
 
 
 @websocket_api.websocket_command(

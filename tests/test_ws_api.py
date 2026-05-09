@@ -225,3 +225,247 @@ async def test_subscribe_emits_event_on_dismiss(
     assert event["type"] == "event"
     assert event["event"]["action"] == "dismissed"
     assert event["event"]["insight"]["id"] == "evt2"
+
+
+# --- apply with payload_override (v0.3 refine wiring) ---
+
+
+def _valid_automation_payload(**overrides):
+    base = {
+        "alias": "Test",
+        "trigger": [{"platform": "state", "entity_id": "binary_sensor.x", "to": "on"}],
+        "action": [
+            {"service": "light.turn_on", "target": {"entity_id": "light.y"}}
+        ],
+        "mode": "single",
+    }
+    base.update(overrides)
+    return base
+
+
+async def test_apply_with_payload_override_stamps_description(
+    hass: HomeAssistant, hass_ws_client, setup_integration, tmp_path
+) -> None:
+    """Applying with a payload_override should write the override and stamp the description."""
+    hass.config.config_dir = str(tmp_path)
+    store = hass.data[DOMAIN][setup_integration.entry_id]["store"]
+    await store.add_insight(
+        _make_insight(payload=_valid_automation_payload())
+    )
+
+    refined = _valid_automation_payload(mode="queued")
+    client = await hass_ws_client(hass)
+    await client.send_json_auto_id(
+        {
+            "type": "home_insights/apply",
+            "insight_id": "abc123",
+            "payload_override": refined,
+        }
+    )
+    msg = await client.receive_json()
+    assert msg["success"] is True, msg
+    assert msg["result"]["refined"] is True
+
+    yaml_path = tmp_path / "automations.yaml"
+    assert yaml_path.exists()
+    content = yaml_path.read_text(encoding="utf-8")
+    assert "Refined by HA Insights" in content
+    assert "queued" in content
+
+
+async def test_apply_without_override_uses_original(
+    hass: HomeAssistant, hass_ws_client, setup_integration, tmp_path
+) -> None:
+    hass.config.config_dir = str(tmp_path)
+    store = hass.data[DOMAIN][setup_integration.entry_id]["store"]
+    await store.add_insight(
+        _make_insight(payload=_valid_automation_payload(mode="single"))
+    )
+
+    client = await hass_ws_client(hass)
+    await client.send_json_auto_id(
+        {"type": "home_insights/apply", "insight_id": "abc123"}
+    )
+    msg = await client.receive_json()
+    assert msg["success"] is True
+    assert msg["result"].get("refined") is False
+
+
+async def test_apply_with_invalid_override_returns_error(
+    hass: HomeAssistant, hass_ws_client, setup_integration
+) -> None:
+    store = hass.data[DOMAIN][setup_integration.entry_id]["store"]
+    await store.add_insight(
+        _make_insight(payload=_valid_automation_payload())
+    )
+
+    client = await hass_ws_client(hass)
+    await client.send_json_auto_id(
+        {
+            "type": "home_insights/apply",
+            "insight_id": "abc123",
+            "payload_override": {"alias": "broken — no trigger"},
+        }
+    )
+    msg = await client.receive_json()
+    assert msg["success"] is False
+    assert msg["error"]["code"] == "invalid_payload"
+
+
+# --- test_actions ---
+
+
+async def test_test_actions_calls_each_action(
+    hass: HomeAssistant, hass_ws_client, setup_integration
+) -> None:
+    """test_actions should invoke each service in the action block as real calls."""
+    calls: list[dict] = []
+
+    async def record_call(call) -> None:
+        calls.append({
+            "domain": call.domain,
+            "service": call.service,
+            "data": dict(call.data),
+        })
+
+    hass.services.async_register("light", "turn_on", record_call)
+
+    store = hass.data[DOMAIN][setup_integration.entry_id]["store"]
+    await store.add_insight(_make_insight(payload=_valid_automation_payload()))
+
+    client = await hass_ws_client(hass)
+    await client.send_json_auto_id(
+        {"type": "home_insights/test_actions", "insight_id": "abc123"}
+    )
+    msg = await client.receive_json()
+    assert msg["success"] is True, msg
+    assert msg["result"]["ran"] == 1
+    assert msg["result"]["error_count"] == 0
+    assert calls
+    assert calls[0]["domain"] == "light"
+    assert calls[0]["service"] == "turn_on"
+
+
+async def test_test_actions_with_override(
+    hass: HomeAssistant, hass_ws_client, setup_integration
+) -> None:
+    """payload_override should be tested, not the stored payload."""
+    calls: list[str] = []
+
+    async def record(call) -> None:
+        calls.append(f"{call.domain}.{call.service}")
+
+    hass.services.async_register("light", "turn_off", record)
+
+    store = hass.data[DOMAIN][setup_integration.entry_id]["store"]
+    await store.add_insight(_make_insight(payload=_valid_automation_payload()))
+
+    refined = _valid_automation_payload(
+        action=[{"service": "light.turn_off", "target": {"entity_id": "light.y"}}]
+    )
+    client = await hass_ws_client(hass)
+    await client.send_json_auto_id(
+        {
+            "type": "home_insights/test_actions",
+            "insight_id": "abc123",
+            "payload_override": refined,
+        }
+    )
+    msg = await client.receive_json()
+    assert msg["success"] is True
+    assert calls == ["light.turn_off"]
+
+
+async def test_test_actions_records_service_errors(
+    hass: HomeAssistant, hass_ws_client, setup_integration
+) -> None:
+    async def boom(_call) -> None:
+        raise RuntimeError("device unreachable")
+
+    hass.services.async_register("light", "turn_on", boom)
+
+    store = hass.data[DOMAIN][setup_integration.entry_id]["store"]
+    await store.add_insight(_make_insight(payload=_valid_automation_payload()))
+
+    client = await hass_ws_client(hass)
+    await client.send_json_auto_id(
+        {"type": "home_insights/test_actions", "insight_id": "abc123"}
+    )
+    msg = await client.receive_json()
+    assert msg["success"] is True  # the WS call succeeded; the action errored
+    assert msg["result"]["ran"] == 0
+    assert msg["result"]["error_count"] == 1
+    assert "device unreachable" in msg["result"]["results"][0]["error"]
+
+
+async def test_test_actions_no_actions(
+    hass: HomeAssistant, hass_ws_client, setup_integration
+) -> None:
+    store = hass.data[DOMAIN][setup_integration.entry_id]["store"]
+    await store.add_insight(_make_insight(payload={"alias": "x", "action": []}))
+
+    client = await hass_ws_client(hass)
+    await client.send_json_auto_id(
+        {"type": "home_insights/test_actions", "insight_id": "abc123"}
+    )
+    msg = await client.receive_json()
+    assert msg["success"] is False
+    assert msg["error"]["code"] == "no_actions"
+
+
+async def test_test_actions_skips_non_service_actions(
+    hass: HomeAssistant, hass_ws_client, setup_integration
+) -> None:
+    """Delay/choose/repeat actions don't have `service:` and should be skipped, not errored."""
+    store = hass.data[DOMAIN][setup_integration.entry_id]["store"]
+    await store.add_insight(
+        _make_insight(
+            payload={
+                "alias": "x",
+                "trigger": [{"platform": "state"}],
+                "action": [{"delay": "00:00:05"}],
+                "mode": "single",
+            }
+        )
+    )
+
+    client = await hass_ws_client(hass)
+    await client.send_json_auto_id(
+        {"type": "home_insights/test_actions", "insight_id": "abc123"}
+    )
+    msg = await client.receive_json()
+    assert msg["success"] is True
+    assert msg["result"]["ran"] == 0
+    # delay was skipped, not counted as error
+    assert msg["result"]["error_count"] == 0
+    assert msg["result"]["results"][0].get("skipped") is True
+
+
+# --- refine endpoint ---
+
+
+async def test_refine_unknown_insight_returns_error(
+    hass: HomeAssistant, hass_ws_client, setup_integration
+) -> None:
+    client = await hass_ws_client(hass)
+    await client.send_json_auto_id(
+        {"type": "home_insights/refine", "insight_id": "nope"}
+    )
+    msg = await client.receive_json()
+    assert msg["success"] is False
+    assert msg["error"]["code"] == "not_found"
+
+
+async def test_refine_unsupported_format_returns_error(
+    hass: HomeAssistant, hass_ws_client, setup_integration
+) -> None:
+    store = hass.data[DOMAIN][setup_integration.entry_id]["store"]
+    await store.add_insight(_make_insight(payload_format="card"))
+
+    client = await hass_ws_client(hass)
+    await client.send_json_auto_id(
+        {"type": "home_insights/refine", "insight_id": "abc123"}
+    )
+    msg = await client.receive_json()
+    assert msg["success"] is False
+    assert msg["error"]["code"] == "unsupported_format"
