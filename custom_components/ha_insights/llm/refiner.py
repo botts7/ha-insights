@@ -501,6 +501,17 @@ async def refine_insight(
             raw_response=speech,
         )
 
+    # LLMs frequently drop the `description` field when they emit refined
+    # YAML — they re-emit alias/trigger/action/mode but forget the
+    # narrative description. Backfill it: the rationale is usually more
+    # useful than the detector-generated description (it explains what
+    # CHANGED), so prefer it; otherwise carry the original through.
+    if not refined.get("description"):
+        if rationale:
+            refined["description"] = rationale.strip()
+        elif insight.payload.get("description"):
+            refined["description"] = insight.payload["description"]
+
     allowed_entities: set[str] = set()
     _collect_entity_ids(insight.payload, allowed_entities)
     validation_error = _validate_refined(refined, allowed_entities)

@@ -323,6 +323,101 @@ async def test_refine_allows_new_service_calls(store: InsightStore) -> None:
 
 
 @pytest.mark.asyncio
+async def test_refine_backfills_description_with_rationale(store: InsightStore) -> None:
+    """LLMs commonly drop the `description` field when emitting YAML.
+    The refiner should backfill it from the rationale (more useful than
+    the detector-generated original description)."""
+    insight = _make_insight()
+    redactor = Redactor(store, mode=RedactionMode.AGGRESSIVE)
+    hass = MagicMock()
+
+    door_p = await store.get_or_create_pseudonym("binary_sensor.front_door")
+    porch_p = await store.get_or_create_pseudonym("light.porch")
+
+    # YAML deliberately OMITS the description block (typical LLM behavior)
+    fake_yaml = (
+        "RATIONALE: Debouncing the trigger prevents nuisance activations.\n"
+        "YAML:\n"
+        "alias: Porch follow-on\n"
+        "trigger:\n"
+        f"  - platform: state\n    entity_id: {door_p}\n    to: 'on'\n    for: '00:00:05'\n"
+        "action:\n"
+        f"  - service: light.turn_on\n    target:\n      entity_id: {porch_p}\n"
+        "mode: single\n"
+    )
+
+    with patch(
+        "homeassistant.components.conversation.async_converse",
+        new=AsyncMock(return_value=_conv(fake_yaml)),
+        create=True,
+    ):
+        result = await refine_insight(
+            hass, agent_id="ollama", insight=insight, redactor=redactor
+        )
+
+    assert result.success is True, result.error
+    assert result.refined_payload is not None
+    description = result.refined_payload.get("description")
+    assert description is not None and description != "", (
+        "description should be backfilled, not dropped"
+    )
+    # Rationale wins over the original detector-generated description
+    assert "Debouncing" in description
+
+
+@pytest.mark.asyncio
+async def test_refine_falls_back_to_original_description(
+    store: InsightStore,
+) -> None:
+    """When LLM omits both description AND rationale, the refiner should
+    carry the original detector-generated description through."""
+    insight = _make_insight(
+        payload={
+            "alias": "Porch follow-on",
+            "description": "Original detector description",
+            "trigger": [
+                {"platform": "state", "entity_id": "binary_sensor.front_door", "to": "on"}
+            ],
+            "action": [
+                {"service": "light.turn_on", "target": {"entity_id": "light.porch"}}
+            ],
+            "mode": "single",
+        }
+    )
+    redactor = Redactor(store, mode=RedactionMode.AGGRESSIVE)
+    hass = MagicMock()
+
+    door_p = await store.get_or_create_pseudonym("binary_sensor.front_door")
+    porch_p = await store.get_or_create_pseudonym("light.porch")
+
+    # No rationale this time AND no description in the YAML
+    fake_yaml = (
+        "RATIONALE: \n"  # explicitly empty
+        "YAML:\n"
+        "alias: Porch follow-on\n"
+        "trigger:\n"
+        f"  - platform: state\n    entity_id: {door_p}\n    to: 'on'\n"
+        "action:\n"
+        f"  - service: light.turn_on\n    target:\n      entity_id: {porch_p}\n"
+        "mode: single\n"
+    )
+
+    with patch(
+        "homeassistant.components.conversation.async_converse",
+        new=AsyncMock(return_value=_conv(fake_yaml)),
+        create=True,
+    ):
+        result = await refine_insight(
+            hass, agent_id="ollama", insight=insight, redactor=redactor
+        )
+
+    assert result.success is True, result.error
+    assert result.refined_payload is not None
+    description = result.refined_payload.get("description")
+    assert description == "Original detector description"
+
+
+@pytest.mark.asyncio
 async def test_refine_rejects_hallucinated_entity(store: InsightStore) -> None:
     """LLM proposes an entity that wasn't in the original — must reject."""
     insight = _make_insight()
