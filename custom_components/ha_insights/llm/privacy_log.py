@@ -18,12 +18,18 @@ if TYPE_CHECKING:
 # Used to classify each call as "local" or "cloud" in the audit log so users
 # (and `sensor.ha_insights_privacy_log`) can see at a glance how much of
 # their LLM activity is leaving the network.
+#
+# Note: "conversation" is intentionally NOT in this set even though it's the
+# domain prefix on every agent_id. Including it would mark every cloud-backed
+# Conversation entity (conversation.openai_*, conversation.claude_*, etc.) as
+# local, breaking the cost estimator and giving users false privacy comfort.
+# The default rule-based built-in is handled explicitly via the
+# "conversation.home_assistant" check below.
 _LOCAL_AGENT_PLATFORMS: frozenset[str] = frozenset({
     "ollama",        # popular local LLM runner
     "piper",         # local TTS — usually wired as STT-only but lists as conversation
     "wyoming",       # protocol; usually local-side
     "homeassistant", # built-in rule-based agent (no network)
-    "conversation",  # default conversation entity
 })
 
 
