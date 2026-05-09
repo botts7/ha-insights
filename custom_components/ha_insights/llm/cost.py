@@ -80,10 +80,12 @@ def _resolve_price(agent_id: str | None) -> tuple[_Price, str]:
     if not agent_id:
         return _DEFAULT_CLOUD_PRICE, "fallback"
     lowered = agent_id.lower()
+    # Vendor-only markers are explicitly listed so adding new model entries
+    # to _PRICING never accidentally promotes them to "exact" by length.
+    vendor_only = {"anthropic", "openai", "google", "gemini"}
     for marker in sorted(_PRICING.keys(), key=len, reverse=True):
         if marker in lowered:
-            # vendor-only markers are short (<= 8 chars: anthropic/openai/google/gemini)
-            source = "default" if len(marker) <= 8 else "exact"
+            source = "default" if marker in vendor_only else "exact"
             return _PRICING[marker], source
     return _DEFAULT_CLOUD_PRICE, "fallback"
 
