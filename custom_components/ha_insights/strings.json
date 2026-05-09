@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "Set up HA Insights",
-        "description": "HA Insights observes your home state to suggest automations. Pick how (or whether) the LLM enrichment surface works. You can change this later.",
+        "description": "HA Insights observes your home state to suggest automations. Pick how (or whether) the LLM enrichment surface works. You can change this later in Configure.",
         "data": {
           "llm_mode": "LLM mode"
         }
@@ -18,6 +18,24 @@
     },
     "abort": {
       "already_configured": "HA Insights is already set up."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "HA Insights — change mode",
+        "description": "Switch privacy mode at any time. Switching INTO Cloud requires re-confirming the data-flow consent.",
+        "data": {
+          "llm_mode": "LLM mode"
+        }
+      },
+      "cloud_consent": {
+        "title": "Confirm cloud data flow",
+        "description": "Pseudonymized data will be sent to your configured Cloud LLM agent. Real names never leave; sensitive attributes are stripped.",
+        "data": {
+          "cloud_consent": "I understand and want to enable cloud LLM enrichment"
+        }
+      }
     }
   }
 }

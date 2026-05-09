@@ -88,9 +88,11 @@ def ws_hello(
     msg: dict[str, Any],
 ) -> None:
     """Handshake — return integration metadata + supported methods + privacy mode."""
+    from .config_flow import get_active_mode
+
     privacy_mode = "off"
     for entry in hass.config_entries.async_entries(DOMAIN):
-        privacy_mode = entry.data.get("llm_mode", "off")
+        privacy_mode = get_active_mode(entry)
         break
     connection.send_result(
         msg["id"],
