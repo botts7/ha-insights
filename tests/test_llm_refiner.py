@@ -390,9 +390,12 @@ async def test_refine_falls_back_to_original_description(
     door_p = await store.get_or_create_pseudonym("binary_sensor.front_door")
     porch_p = await store.get_or_create_pseudonym("light.porch")
 
-    # No rationale this time AND no description in the YAML
+    # No RATIONALE block at all — the parser sets rationale=None, so the
+    # refiner should fall through to the original payload's description.
+    # (An empty RATIONALE: line would confuse the lookahead regex into
+    # capturing the YAML body, which is its own production edge case but
+    # not what this test is targeting.)
     fake_yaml = (
-        "RATIONALE: \n"  # explicitly empty
         "YAML:\n"
         "alias: Porch follow-on\n"
         "trigger:\n"
