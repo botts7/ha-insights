@@ -114,7 +114,7 @@ async def test_loose_time_drift_within_30min() -> None:
     base = datetime.now(tz=UTC).replace(microsecond=0)
     saturdays = _last_n_weekdays(5, 4, base)
     times = [time(19, 0), time(19, 15), time(19, 30), time(20, 0)]
-    for d, t in zip(saturdays, times):
+    for d, t in zip(saturdays, times, strict=True):
         buf.add(_ev(d.replace(hour=t.hour, minute=t.minute), "switch.bbq"))
     detector = SeasonalityDetector()
     insights = await detector.scan(_ctx(buf))
@@ -129,7 +129,7 @@ async def test_excessive_time_drift_rejected() -> None:
     base = datetime.now(tz=UTC).replace(microsecond=0)
     sundays = _last_n_weekdays(6, 4, base)
     hours = [9, 12, 15, 21]
-    for d, h in zip(sundays, hours):
+    for d, h in zip(sundays, hours, strict=True):
         buf.add(_ev(d.replace(hour=h, minute=0), "light.porch"))
     detector = SeasonalityDetector()
     assert await detector.scan(_ctx(buf)) == []
