@@ -1,6 +1,6 @@
-# HA Insights — Architecture (v0.1)
+# HA Insights — Architecture
 
-Drafted 2026-05-08. Canonical reference for the project.
+> **Status:** Drafted 2026-05-08 as the v0.1 implementation charter. The architectural invariants below remain authoritative across releases; phase callouts ("v0.1 ships X", "deferred to v0.2") describe the original roadmap and don't always match what actually shipped. The [README](../README.md) and [CHANGELOG](../CHANGELOG.md) reflect the current state (currently **v0.7.0**); a release-history table at the bottom of this doc covers actual ship versus plan.
 
 ## Project frame
 
@@ -622,16 +622,28 @@ Each step's "verify" is the gate that must pass before commit. Agent advances au
 
 ---
 
-## v0.1 → v1.0 roadmap
+## Release history (actual)
 
-| Version | Theme | Ships |
+| Version | Theme | Highlights |
 |---|---|---|
-| v0.1 | Hero | ScheduleDetector + inbox card + privacy + apply pipeline |
-| v0.2 | Co-occurrence | CooccurrenceDetector + card-proposal + undo UI + upgrade resilience |
-| v0.3 | Cleanup | DashboardCleanupDetector + GroupProposalDetector + bulk actions + Floors/Labels scope |
-| v0.4 | Anomaly | AnomalyDetector (z-score) + notification triage + person-aware attribution |
-| v0.5 | Vision | Vision-LLM detectors via vision-capable Conversation agents |
-| v1.0 | HACS default | Stable WS API guarantee + i18n + community detector showcase |
+| v0.1.0 | Foundation | ScheduleDetector, inbox card, three-mode privacy wizard, apply pipeline |
+| v0.2.0 | LLM Explain | Conversation API integration, Redactor, privacy log sensor, OptionsFlow |
+| v0.3.0 | Refine + co-occur | CooccurrenceDetector, LLM Refine, Test actions, modal UI, TTS, inline rename |
+| v0.4.0 | Day-one onboarding | Recorder backfill (auto on setup + manual service + lookback config) |
+| v0.5.0 | Surface expansion | Sidebar panel, visual editor, adaptive sizing, compact tile, search |
+| v0.5.1 | Refine polish | INSUFFICIENT_BUDGET self-signal, refusal detection, side-by-side compare, follow-up feedback |
+| v0.6.0 | Trust & visibility | Per-entity LLM opt-out, "What gets sent?" preview, audit log viewer, trust pills |
+| v0.7.0 | Detector library doubles | LongTailDetector, OrphanDeviceDetector, StreakDetector, confidence colors, age, sort/group |
+
+## Future roadmap (planned)
+
+| Target | Theme | Candidate items |
+|---|---|---|
+| v0.8 | Apply pipeline polish | Undo applied, online (Layer 2) validator, edit YAML before apply, bulk apply |
+| v0.9 | Smart features | Notifications, LLM cost estimator, agent failover, AnomalyDetector, SeasonalityDetector, CorrelationDetector |
+| v1.0 | Release candidate | Multi-config-entry, custom detector loading, multi-turn refine, i18n, docs site, HACS default-store PR |
+
+> The original v0.1 charter envisioned a different shape (vision-LLM, anomaly, cleanup as separate releases). Actual cadence has prioritized refining the hero loop and the privacy story before broadening detector kinds. See git tags for the canonical record.
 
 ---
 
