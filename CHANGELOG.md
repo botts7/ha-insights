@@ -4,13 +4,23 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-05-09
+
+Refine + Co-occurrence detector + better Test actions feedback. Live-verified end-to-end against Google Gemini.
+
 ### Added
 
-- **`CooccurrenceDetector`** — finds "entity B follows entity A within N seconds" patterns over the rolling state buffer. Common case: porch light comes on shortly after front door opens. Walks the buffer with a 30s sliding window, requires ≥5 occurrences with timing stddev ≤12s and ≥60% leader-follower consistency, emits an `AUTOMATION_PROPOSAL` insight with a state-trigger automation payload. Same default-blocked-domain rules as `ScheduleDetector`.
+- **`CooccurrenceDetector`** — finds "entity B follows entity A within N seconds" patterns over the rolling state buffer. Common case: porch light comes on shortly after front door opens. 30s sliding window, requires ≥5 occurrences with timing stddev ≤12s and ≥60% leader-follower consistency. Emits an `AUTOMATION_PROPOSAL` with a state-trigger automation payload. Inherits the same default-blocked-domain rules (camera/person/tracker/lock) from the Detector ABC.
+- **`home_insights/refine` WS endpoint** — user-initiated LLM refinement of an automation insight. Pseudonymizes the payload, calls the configured Conversation agent with a structured `RATIONALE: / YAML:` prompt, parses + dereferences pseudonyms, validates shape, and validates that the entity-id set is a subset of the original (rejects hallucinated entities). Returns refined_payload + rationale + diff_summary. Does NOT mutate the insight — the card holds the preview locally and applies via `home_insights/apply` with `payload_override` if the user accepts.
+- **`payload_override` on `home_insights/apply`** — apply a refined automation in place of the original. The override is validated identically and stamped with `description: "Refined by HA Insights"` so the lineage shows in HA's automation editor.
+- **`home_insights/test_actions` WS endpoint** — fires the action block of an insight without saving the automation. Mirrors HA's "Run Actions" button. Iterates `payload['action']`, skips non-service actions (delay/choose/etc), calls each via `hass.services.async_call`, returns per-action results with `ran` / `error_count` summary. Accepts `payload_override` so users can test a refined version before applying.
+- **Truncation-aware refine error** — when the LLM hits its `max_output_tokens` mid-YAML, the refiner detects the unterminated quote/bracket pattern and surfaces a user-actionable error pointing to the LLM Conversation integration's max-tokens setting, instead of a raw YAML parser exception.
 
-### Deferred to a later release
+### Deferred to v0.4
 
-- HA Blueprint emission (current raw-automation apply works end-to-end; blueprint storage path is a non-trivial refactor without obvious user benefit).
+- HA Blueprint emission (raw-automation apply path works end-to-end).
+- Recorder backfill for day-one onboarding (insights immediately on install instead of after a 1-2 week buffer fill).
+- Dedicated insights sidebar panel.
 
 ## [0.2.0] — 2026-05-09
 
