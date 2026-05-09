@@ -304,6 +304,54 @@ async def test_test_actions_with_override(
     assert calls == ["light.turn_off"]
 
 
+async def test_test_actions_unwraps_data_key(
+    hass: HomeAssistant, hass_ws_client, setup_integration
+) -> None:
+    """Actions using HA's canonical `data:` wrapper should be unpacked.
+
+    Format: {service: foo.bar, data: {key1: v1}} — common for
+    persistent_notification.create. service_data must be the FLAT dict,
+    not {data: {...}}.
+    """
+    received: list[dict] = []
+
+    async def record(call) -> None:
+        received.append(dict(call.data))
+
+    hass.services.async_register("persistent_notification", "create", record)
+
+    store = hass.data[DOMAIN][setup_integration.entry_id]["store"]
+    await store.add_insight(
+        _make_insight(
+            payload={
+                "alias": "Test",
+                "trigger": [{"platform": "state"}],
+                "action": [
+                    {
+                        "service": "persistent_notification.create",
+                        "data": {"title": "Hi", "message": "Hello world"},
+                    }
+                ],
+                "mode": "single",
+            }
+        )
+    )
+
+    client = await hass_ws_client(hass)
+    await client.send_json_auto_id(
+        {"type": "home_insights/test_actions", "insight_id": "abc123"}
+    )
+    msg = await client.receive_json()
+    assert msg["success"] is True, msg
+    assert msg["result"]["ran"] == 1
+    assert msg["result"]["error_count"] == 0
+    # The handler MUST have called the service with flat params
+    assert received and received[0].get("title") == "Hi"
+    assert received[0].get("message") == "Hello world"
+    # And NOT with a nested {"data": {...}} which the validator rejects
+    assert "data" not in received[0]
+
+
 async def test_test_actions_records_service_errors(
     hass: HomeAssistant, hass_ws_client, setup_integration
 ) -> None:

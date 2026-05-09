@@ -574,11 +574,19 @@ async def ws_test_actions(
 
         domain, service = service_str.split(".", 1)
         target = action.get("target")
-        # service_data = action minus the keys that aren't service params
-        reserved = {"service", "target", "alias", "metadata"}
-        service_data: dict[str, Any] = {
-            k: v for k, v in action.items() if k not in reserved
-        }
+        # service_data assembly. HA's automation YAML supports two shapes:
+        #   1. Flat:    {service: foo.bar, key1: v1, key2: v2}
+        #   2. Wrapped: {service: foo.bar, data: {key1: v1, key2: v2}}
+        # Both must produce a flat service_data for hass.services.async_call.
+        reserved = {"service", "target", "alias", "metadata", "data"}
+        service_data: dict[str, Any] = {}
+        wrapped = action.get("data")
+        if isinstance(wrapped, dict):
+            service_data.update(wrapped)
+        for k, v in action.items():
+            if k in reserved:
+                continue
+            service_data[k] = v
         # Some legacy actions put entity_id directly at the action level.
         # Move it into target if no target was set.
         if target is None and "entity_id" in service_data:
