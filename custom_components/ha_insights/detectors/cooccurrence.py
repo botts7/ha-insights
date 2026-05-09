@@ -149,15 +149,22 @@ class CooccurrenceDetector(Detector):
         }
 
         # Build automation: state trigger on leader + service call on follower
-        leader_domain = leader_eid.split(".", 1)[0] if "." in leader_eid else "homeassistant"
-        follower_domain = follower_eid.split(".", 1)[0] if "." in follower_eid else "homeassistant"
+        follower_domain = (
+            follower_eid.split(".", 1)[0] if "." in follower_eid else "homeassistant"
+        )
         service = self._domain_to_service(follower_domain, follower_state)
 
+        alias = (
+            f"HA Insights: when {leader_eid} {leader_state}, "
+            f"{follower_eid} {follower_state}"
+        )
+        description = (
+            f"Auto-detected co-occurrence: {follower_eid} follows "
+            f"{leader_eid} by ~{avg_delta_int}s"
+        )
         payload = {
-            "alias": f"HA Insights: when {leader_eid} {leader_state}, {follower_eid} {follower_state}",
-            "description": (
-                f"Auto-detected co-occurrence: {follower_eid} follows {leader_eid} by ~{avg_delta_int}s"
-            ),
+            "alias": alias,
+            "description": description,
             "trigger": [
                 {
                     "platform": "state",
