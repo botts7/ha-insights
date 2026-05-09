@@ -39,6 +39,7 @@ SUPPORTED_METHODS = (
     "refine",
     "test_actions",
     "backfill_status",
+    "redaction_preview",
 )
 
 
@@ -57,6 +58,7 @@ def async_register(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_refine)
     websocket_api.async_register_command(hass, ws_test_actions)
     websocket_api.async_register_command(hass, ws_backfill_status)
+    websocket_api.async_register_command(hass, ws_redaction_preview)
     websocket_api.async_register_command(hass, ws_dev_inject_event)
 
 
@@ -646,6 +648,64 @@ async def ws_scan_now(
         {
             "detectors_run": detector_names,
             "insights_emitted": new_count,
+        },
+    )
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "home_insights/redaction_preview",
+        vol.Required("insight_id"): str,
+    }
+)
+@websocket_api.async_response
+async def ws_redaction_preview(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Show the user exactly what would be sent to the LLM, no call made.
+
+    Same redaction pipeline as `explain` and `refine` but stops before
+    the conversation API. Returns:
+      - redacted_payload: the dict that would be embedded in the prompt
+      - entities_blocked: entity_ids stripped via per-entity opt-out
+      - pseudonym_map: real-id -> pseudonym pairs (transparency)
+      - attributes_stripped: attribute names dropped (gps, mac, secrets)
+      - privacy_mode: which mode this preview reflects
+    """
+    from .config_flow import get_blocked_entities
+    from .llm import RedactionMode, Redactor
+
+    store = _get_store(hass)
+    if store is None:
+        connection.send_error(msg["id"], "not_set_up", "Store not initialized")
+        return
+    insight = await store.get_insight(msg["insight_id"])
+    if insight is None:
+        connection.send_error(
+            msg["id"], "not_found", f"No insight {msg['insight_id']!r}"
+        )
+        return
+
+    blocked = _resolve_blocked_entities(hass, get_blocked_entities)
+    redactor = Redactor(
+        store, mode=RedactionMode.AGGRESSIVE, blocked_entities=blocked
+    )
+    redacted_payload, redaction_map = await redactor.redact_insight_payload(
+        insight.payload
+    )
+    redacted_title, _ = await redactor.redact_text(insight.title)
+
+    connection.send_result(
+        msg["id"],
+        {
+            "redacted_title": redacted_title,
+            "redacted_payload": redacted_payload,
+            "entities_blocked": list(redaction_map.entities_blocked),
+            "pseudonym_map": dict(redaction_map.entity_to_pseudonym),
+            "attributes_stripped": list(redaction_map.attributes_stripped),
+            "privacy_mode": str(redactor.mode),
         },
     )
 
