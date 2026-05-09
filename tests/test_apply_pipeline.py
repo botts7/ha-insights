@@ -227,3 +227,110 @@ async def test_apply_with_invalid_override_returns_error(
     msg = await client.receive_json()
     assert msg["success"] is False
     assert msg["error"]["code"] == "invalid_payload"
+
+
+# --- v0.8: undo applied (round-trip + drift detection) ---
+
+
+async def test_undo_unknown_insight(
+    hass: HomeAssistant, hass_ws_client, setup_integration
+) -> None:
+    client = await hass_ws_client(hass)
+    await client.send_json_auto_id(
+        {"type": "home_insights/undo", "insight_id": "never_applied"}
+    )
+    msg = await client.receive_json()
+    assert msg["success"] is False
+    assert msg["error"]["code"] == "not_applied"
+
+
+async def test_apply_then_undo_round_trip(
+    hass: HomeAssistant, hass_ws_client, setup_integration, tmp_path
+) -> None:
+    """Happy path: apply then undo removes the automation and clears state."""
+    hass.config.config_dir = str(tmp_path)
+    store = hass.data[DOMAIN][setup_integration.entry_id]["store"]
+    await store.add_insight(_make_insight(payload=_valid_automation_payload()))
+
+    client = await hass_ws_client(hass)
+
+    # Apply
+    await client.send_json_auto_id(
+        {"type": "home_insights/apply", "insight_id": "abc123"}
+    )
+    apply_msg = await client.receive_json()
+    assert apply_msg["success"] is True
+    auto_id = apply_msg["result"]["automation_id"]
+
+    yaml_path = tmp_path / "automations.yaml"
+    assert yaml_path.exists()
+    content_before = yaml_path.read_text(encoding="utf-8")
+    assert auto_id in content_before
+
+    # Undo
+    await client.send_json_auto_id(
+        {"type": "home_insights/undo", "insight_id": "abc123"}
+    )
+    undo_msg = await client.receive_json()
+    assert undo_msg["success"] is True, undo_msg
+    assert undo_msg["result"]["automation_id"] == auto_id
+    assert undo_msg["result"]["drift_detected"] is False
+    assert undo_msg["result"]["applied_cleared"] is True
+
+    # Automation removed from yaml
+    content_after = yaml_path.read_text(encoding="utf-8")
+    assert auto_id not in content_after
+
+    # Insight no longer marked applied
+    refreshed = await store.get_insight("abc123")
+    assert refreshed is not None
+    assert refreshed.applied_at is None
+
+
+async def test_undo_refuses_on_drift_unless_forced(
+    hass: HomeAssistant, hass_ws_client, setup_integration, tmp_path
+) -> None:
+    hass.config.config_dir = str(tmp_path)
+    store = hass.data[DOMAIN][setup_integration.entry_id]["store"]
+    await store.add_insight(_make_insight(payload=_valid_automation_payload()))
+
+    client = await hass_ws_client(hass)
+    await client.send_json_auto_id(
+        {"type": "home_insights/apply", "insight_id": "abc123"}
+    )
+    apply_msg = await client.receive_json()
+    auto_id = apply_msg["result"]["automation_id"]
+
+    # Simulate user editing the automation: rewrite the yaml file with
+    # a different alias for the same id
+    import yaml as _yaml
+
+    yaml_path = tmp_path / "automations.yaml"
+    parsed = _yaml.safe_load(yaml_path.read_text(encoding="utf-8")) or []
+    for item in parsed:
+        if item.get("id") == auto_id:
+            item["alias"] = "User edited this manually"
+    yaml_path.write_text(_yaml.safe_dump(parsed, sort_keys=False), encoding="utf-8")
+
+    # Undo without force should refuse
+    await client.send_json_auto_id(
+        {"type": "home_insights/undo", "insight_id": "abc123"}
+    )
+    msg = await client.receive_json()
+    assert msg["success"] is False
+    assert msg["error"]["code"] == "drift"
+
+    # Automation still in yaml
+    assert auto_id in yaml_path.read_text(encoding="utf-8")
+    refreshed = await store.get_insight("abc123")
+    assert refreshed is not None and refreshed.applied_at is not None
+
+    # Force=true should remove it anyway
+    await client.send_json_auto_id(
+        {"type": "home_insights/undo", "insight_id": "abc123", "force": True}
+    )
+    forced = await client.receive_json()
+    assert forced["success"] is True
+    assert forced["result"]["drift_detected"] is True
+    assert forced["result"]["force_used"] is True
+    assert auto_id not in yaml_path.read_text(encoding="utf-8")

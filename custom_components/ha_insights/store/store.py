@@ -124,9 +124,18 @@ class InsightStore:
         await self._c.commit()
         self._notify("added", insight)
 
+    # Reusable LEFT JOIN clause so applied insights carry their undo window
+    # info on every read. _row_to_insight reads `i.*` PLUS the joined cols.
+    _SELECT_INSIGHTS = (
+        "SELECT i.*, "
+        "ah.undo_window_expires_at AS ah_undo_window_expires_at "
+        "FROM insights i "
+        "LEFT JOIN applied_history ah ON ah.insight_id = i.id"
+    )
+
     async def get_insight(self, insight_id: str) -> Insight | None:
         async with self._c.execute(
-            "SELECT * FROM insights WHERE id = ?", (insight_id,)
+            f"{self._SELECT_INSIGHTS} WHERE i.id = ?", (insight_id,)
         ) as cur:
             row = await cur.fetchone()
         return self._row_to_insight(row) if row else None
@@ -141,15 +150,15 @@ class InsightStore:
         clauses: list[str] = []
         params: list[float] = []
         if not include_dismissed:
-            clauses.append("dismissed_at IS NULL")
+            clauses.append("i.dismissed_at IS NULL")
         if not include_applied:
-            clauses.append("applied_at IS NULL")
+            clauses.append("i.applied_at IS NULL")
         if not include_snoozed:
-            clauses.append("(snoozed_until IS NULL OR snoozed_until <= ?)")
+            clauses.append("(i.snoozed_until IS NULL OR i.snoozed_until <= ?)")
             params.append(datetime.now(tz=UTC).timestamp())
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         async with self._c.execute(
-            f"SELECT * FROM insights {where} ORDER BY created_at DESC", params
+            f"{self._SELECT_INSIGHTS} {where} ORDER BY i.created_at DESC", params
         ) as cur:
             rows = await cur.fetchall()
         return [self._row_to_insight(r) for r in rows]
@@ -343,6 +352,28 @@ class InsightStore:
             "last_agent": last_agent,
         }
 
+    async def clear_applied(self, insight_id: str) -> bool:
+        """Reverse a record_applied: drop the snapshot, clear the marker.
+
+        Returns True if a row was actually un-applied. Notifies subscribers
+        with the "undone" event so cards can refresh.
+        """
+        # Only proceed if there's actually an applied row to clear
+        existing = await self.get_applied_history(insight_id)
+        if existing is None:
+            return False
+        await self._c.execute(
+            "DELETE FROM applied_history WHERE insight_id = ?", (insight_id,)
+        )
+        await self._c.execute(
+            "UPDATE insights SET applied_at = NULL, applied_artifact_id = NULL "
+            "WHERE id = ?",
+            (insight_id,),
+        )
+        await self._c.commit()
+        self._notify("undone", await self.get_insight(insight_id))
+        return True
+
     async def get_applied_history(
         self, insight_id: str
     ) -> dict[str, object] | None:
@@ -365,6 +396,22 @@ class InsightStore:
     @staticmethod
     def _row_to_insight(row: aiosqlite.Row) -> Insight:
         snoozed = row["snoozed_until"]
+        applied_at = (
+            row["applied_at"] if "applied_at" in row.keys() else None
+        )
+        applied_artifact_id = (
+            row["applied_artifact_id"]
+            if "applied_artifact_id" in row.keys()
+            else None
+        )
+        # `ah_undo_window_expires_at` only exists on rows from the LEFT JOIN
+        # path (get_insight / list_insights). Older read paths that don't
+        # join still work — applied surface is just None in that case.
+        undo_window_ts = (
+            row["ah_undo_window_expires_at"]
+            if "ah_undo_window_expires_at" in row.keys()
+            else None
+        )
         return Insight(
             id=row["id"],
             kind=InsightKind(row["kind"]),
@@ -381,6 +428,17 @@ class InsightStore:
             ),
             explanation=row["explanation"],
             conflicts_with=tuple(json.loads(row["conflicts_with_json"] or "[]")),
+            applied_at=(
+                datetime.fromtimestamp(applied_at, tz=UTC)
+                if applied_at
+                else None
+            ),
+            applied_artifact_id=applied_artifact_id,
+            undo_window_expires_at=(
+                datetime.fromtimestamp(undo_window_ts, tz=UTC)
+                if undo_window_ts
+                else None
+            ),
         )
 
     # --- Pseudonym map ---

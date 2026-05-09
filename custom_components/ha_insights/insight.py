@@ -61,6 +61,11 @@ class Insight:
     snoozed_until: datetime | None = None
     explanation: str | None = None
     conflicts_with: tuple[str, ...] = ()
+    # v0.8: applied state surfaced on the insight so cards can show
+    # "applied <when>" + an Undo button without a separate lookup.
+    applied_at: datetime | None = None
+    applied_artifact_id: str | None = None
+    undo_window_expires_at: datetime | None = None
 
     def __post_init__(self) -> None:
         if not 0.0 <= self.confidence <= 1.0:
@@ -89,6 +94,15 @@ class Insight:
             ),
             "explanation": self.explanation,
             "conflicts_with": list(self.conflicts_with),
+            "applied_at": (
+                self.applied_at.isoformat() if self.applied_at else None
+            ),
+            "applied_artifact_id": self.applied_artifact_id,
+            "undo_window_expires_at": (
+                self.undo_window_expires_at.isoformat()
+                if self.undo_window_expires_at
+                else None
+            ),
         }
 
     @classmethod

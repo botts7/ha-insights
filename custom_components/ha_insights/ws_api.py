@@ -33,6 +33,7 @@ SUPPORTED_METHODS = (
     "dismiss",
     "snooze",
     "apply",
+    "undo",
     "scan_now",
     "purge_all",
     "explain",
@@ -61,6 +62,7 @@ def async_register(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_backfill_status)
     websocket_api.async_register_command(hass, ws_redaction_preview)
     websocket_api.async_register_command(hass, ws_audit_log)
+    websocket_api.async_register_command(hass, ws_undo)
     websocket_api.async_register_command(hass, ws_dev_inject_event)
 
 
@@ -582,6 +584,85 @@ async def ws_test_actions(
     connection.send_result(
         msg["id"],
         {"ran": ran, "results": results, "error_count": len(errors)},
+    )
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "home_insights/undo",
+        vol.Required("insight_id"): str,
+        vol.Optional("force", default=False): bool,
+    }
+)
+@websocket_api.async_response
+async def ws_undo(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Reverse a previous apply: delete the automation, clear applied history.
+
+    Drift protection: if the user has edited the automation in HA's UI
+    since we wrote it, we refuse the undo unless `force=true` so the
+    user's manual edits aren't silently lost. The drift error returns
+    `code: "drift"` plus a side-by-side hint so the card can prompt
+    "you've edited this — undo anyway?".
+    """
+    from .apply import AutomationWriter, detect_drift
+
+    store = _get_store(hass)
+    if store is None:
+        connection.send_error(msg["id"], "not_set_up", "Store not initialized")
+        return
+
+    insight_id = msg["insight_id"]
+    history = await store.get_applied_history(insight_id)
+    if history is None:
+        connection.send_error(
+            msg["id"], "not_applied", f"Insight {insight_id!r} has no applied history"
+        )
+        return
+
+    artifact_id = str(history["artifact_id"])
+    snapshot = history["snapshot"]
+    if not isinstance(snapshot, dict):
+        connection.send_error(
+            msg["id"], "corrupt_snapshot", "Stored snapshot is malformed"
+        )
+        return
+
+    writer = AutomationWriter(hass)
+    current = await writer.read(artifact_id)
+    drift_detected = current is not None and detect_drift(snapshot, current)
+    if drift_detected and not msg.get("force"):
+        connection.send_error(
+            msg["id"],
+            "drift",
+            (
+                "Automation has been edited since it was applied. Pass "
+                "force=true to undo anyway and lose those edits."
+            ),
+        )
+        return
+
+    deleted = await writer.delete(artifact_id) if current is not None else True
+    if not deleted:
+        connection.send_error(
+            msg["id"],
+            "delete_failed",
+            f"Could not remove automation {artifact_id!r}",
+        )
+        return
+
+    cleared = await store.clear_applied(insight_id)
+    connection.send_result(
+        msg["id"],
+        {
+            "automation_id": artifact_id,
+            "drift_detected": drift_detected,
+            "force_used": bool(msg.get("force")),
+            "applied_cleared": cleared,
+        },
     )
 
 
