@@ -579,11 +579,14 @@ async def ws_refine(
         feedback=msg.get("feedback"),
     )
 
+    # Audit against the agent that actually responded — failover may have
+    # walked the candidate list before landing on a working agent.
+    audit_agent = result.chosen_agent_id or msg.get("agent_id")
     await record_call(
         store,
         insight_id=insight.id,
-        agent=str(msg.get("agent_id")) if msg.get("agent_id") else "default",
-        agent_locality=derive_agent_locality(msg.get("agent_id")),
+        agent=str(audit_agent) if audit_agent else "default",
+        agent_locality=derive_agent_locality(audit_agent),
         redaction_mode=str(redactor.mode),
         bytes_sent=result.bytes_sent,
         bytes_received=result.bytes_received,

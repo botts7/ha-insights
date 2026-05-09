@@ -17,7 +17,11 @@ from typing import TYPE_CHECKING, Any
 import yaml
 
 from ..apply.validator import validate_automation
-from .agent_client import _extract_response_type, _extract_speech, _pick_llm_agent_id
+from .agent_client import (
+    _extract_response_type,
+    _extract_speech,
+    _list_agent_candidates,
+)
 from .redactor import RedactionMap, Redactor
 
 if TYPE_CHECKING:
@@ -67,6 +71,8 @@ class RefinementResult:
 
     `success=False` populates `error` with a user-readable explanation.
     `raw_response` is included on failure for debugging — never on success.
+    `chosen_agent_id` reports which agent actually responded, relevant when
+    failover walked the candidate list before landing on a working agent.
     """
 
     refined_payload: dict[str, Any] | None
@@ -78,6 +84,7 @@ class RefinementResult:
     success: bool
     error: str | None = None
     raw_response: str | None = None
+    chosen_agent_id: str | None = None
 
 
 def _yaml_dump(payload: dict[str, Any]) -> str:
@@ -377,11 +384,14 @@ async def refine_insight(
     pseudonyms back to real entity_ids, and validates the result is shape-valid
     and references no hallucinated entities. On any validation failure, returns
     `success=False` with the actual reason and the raw response for debugging.
+
+    Auto-pick path (agent_id=None) walks the same candidate list as Explain
+    (Assist's default first, then other LLM agents). Retries on every kind
+    of failure — network, parse error, validation error, hallucination —
+    because all of them are model-specific and a different agent may
+    succeed where the previous one failed. User-pinned agent_id => single
+    attempt, no failover.
     """
-    from homeassistant.components import conversation as ha_conversation
-
-    chosen_agent_id = _pick_llm_agent_id(hass, agent_id)
-
     redacted_payload, redaction_map = await redactor.redact_insight_payload(
         insight.payload
     )
@@ -398,6 +408,37 @@ async def refine_insight(
         feedback=redacted_feedback,
     )
     bytes_sent = len(prompt.encode("utf-8"))
+
+    candidates = _list_agent_candidates(hass, requested=agent_id)
+    last_result: RefinementResult | None = None
+    for candidate in candidates:
+        last_result = await _refine_one_attempt(
+            hass,
+            chosen_agent_id=candidate,
+            prompt=prompt,
+            bytes_sent=bytes_sent,
+            redaction_map=redaction_map,
+            insight=insight,
+        )
+        if last_result.success:
+            return last_result
+    # All attempts failed — return the most recent failure verbatim.
+    # _list_agent_candidates always returns at least [None].
+    assert last_result is not None
+    return last_result
+
+
+async def _refine_one_attempt(
+    hass: HomeAssistant,
+    *,
+    chosen_agent_id: str | None,
+    prompt: str,
+    bytes_sent: int,
+    redaction_map: RedactionMap,
+    insight: Insight,
+) -> RefinementResult:
+    """Single-shot Refine: converse, parse, deref, validate, return."""
+    from homeassistant.components import conversation as ha_conversation
 
     try:
         result = await ha_conversation.async_converse(
@@ -418,6 +459,7 @@ async def refine_insight(
             bytes_received=0,
             success=False,
             error=str(err),
+            chosen_agent_id=chosen_agent_id,
         )
 
     response_type = _extract_response_type(result)
@@ -449,6 +491,7 @@ async def refine_insight(
             success=False,
             error=err_msg,
             raw_response=speech,
+            chosen_agent_id=chosen_agent_id,
         )
 
     if speech is None:
@@ -461,6 +504,7 @@ async def refine_insight(
             bytes_received=0,
             success=False,
             error="agent returned no speech",
+            chosen_agent_id=chosen_agent_id,
         )
 
     rationale, parsed, parse_error = parse_refine_response(speech)
@@ -475,6 +519,7 @@ async def refine_insight(
             success=False,
             error=f"could not parse refinement: {parse_error}",
             raw_response=speech,
+            chosen_agent_id=chosen_agent_id,
         )
 
     # Dereference pseudonyms: the LLM's output references the redacted names,
@@ -493,6 +538,7 @@ async def refine_insight(
             success=False,
             error=f"dereferenced YAML re-parse failed: {exc}",
             raw_response=speech,
+            chosen_agent_id=chosen_agent_id,
         )
     if not isinstance(refined, dict):
         return RefinementResult(
@@ -505,6 +551,7 @@ async def refine_insight(
             success=False,
             error="dereferenced YAML did not parse to a mapping",
             raw_response=speech,
+            chosen_agent_id=chosen_agent_id,
         )
 
     # LLMs frequently drop the `description` field when they emit refined
@@ -543,6 +590,7 @@ async def refine_insight(
                     "more efficiently."
                 ),
                 raw_response=speech,
+                chosen_agent_id=chosen_agent_id,
             )
         return RefinementResult(
             refined_payload=None,
@@ -554,6 +602,7 @@ async def refine_insight(
             success=False,
             error=f"validation failed: {validation_error}",
             raw_response=speech,
+            chosen_agent_id=chosen_agent_id,
         )
 
     diff_summary = diff_payloads(insight.payload, refined)
@@ -566,4 +615,5 @@ async def refine_insight(
         bytes_sent=bytes_sent,
         bytes_received=bytes_received,
         success=True,
+        chosen_agent_id=chosen_agent_id,
     )
