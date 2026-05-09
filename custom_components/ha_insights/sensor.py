@@ -14,6 +14,7 @@ from homeassistant.components.sensor import (
     SensorEntity,
     SensorStateClass,
 )
+from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
 from homeassistant.helpers.entity import EntityCategory
 
 from .const import DOMAIN
@@ -56,6 +57,12 @@ class PrivacyLogSensor(SensorEntity):
         self._store = store
         self._entry_id = entry_id
         self._attr_unique_id = f"{DOMAIN}_{entry_id}_privacy_log"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, entry_id)},
+            name="HA Insights",
+            manufacturer="HA Insights",
+            entry_type=DeviceEntryType.SERVICE,
+        )
         self._calls = 0
         self._bytes_sent = 0
         self._bytes_received = 0
