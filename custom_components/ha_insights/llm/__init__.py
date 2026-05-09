@@ -12,7 +12,12 @@ Modules:
 """
 from __future__ import annotations
 
-from .agent_client import ExplanationResult, build_explain_prompt, explain_insight
+from .agent_client import (
+    ExplanationResult,
+    build_explain_prompt,
+    build_hypothesize_prompt,
+    explain_insight,
+)
 from .privacy_log import derive_agent_locality, record_call
 from .redactor import (
     ALWAYS_REDACT_ATTRIBUTES,
@@ -36,6 +41,7 @@ __all__ = [
     "Redactor",
     "RefinementResult",
     "build_explain_prompt",
+    "build_hypothesize_prompt",
     "build_refine_prompt",
     "derive_agent_locality",
     "diff_payloads",

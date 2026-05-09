@@ -31,6 +31,20 @@ _USER_PROMPT_TMPL = (
     "automating and any caveats. Plain prose, no code, under 150 words."
 )
 
+# v0.9 phase 6: alternative prompt for ANOMALY-kind insights. The user
+# wants likely causes, not "should I automate this?". Numbered list keeps
+# the response scannable in a small toast / panel section.
+_USER_PROMPT_HYPOTHESIZE_TMPL = (
+    "I'm looking at an unusual pattern from my Home Assistant instance "
+    "and want help diagnosing it:\n\n"
+    "{title}\n\n"
+    "Details:\n{payload_summary}\n\n"
+    "Suggest 2-3 plausible causes for this anomaly. Common ones (dead "
+    "battery, network drop, stuck contact, manual override loop, runaway "
+    "automation) are fine — be specific about which is most likely given "
+    "the pattern above. Plain prose, numbered list, under 120 words."
+)
+
 
 @dataclass(frozen=True)
 class ExplanationResult:
@@ -42,6 +56,20 @@ class ExplanationResult:
     bytes_received: int
     success: bool
     error: str | None = None
+
+
+def build_hypothesize_prompt(insight: Insight, redacted_payload: dict) -> str:
+    """Build a "what could cause this anomaly?" prompt.
+
+    Uses the same payload-summary helper as explain so the LLM gets the
+    same tabular view of triggers/conditions/actions, but with a
+    diagnose-focused instruction.
+    """
+    payload_summary = _summarize_payload(redacted_payload)
+    return _USER_PROMPT_HYPOTHESIZE_TMPL.format(
+        title=insight.title,
+        payload_summary=payload_summary,
+    )
 
 
 def build_explain_prompt(
@@ -144,8 +172,13 @@ async def explain_insight(
     agent_id: str | None,
     insight: Insight,
     redactor: Redactor,
+    prompt_kind: str = "explain",
 ) -> ExplanationResult:
-    """Call the configured Conversation agent and return an explanation.
+    """Call the configured Conversation agent and return an LLM response.
+
+    `prompt_kind` selects the user prompt:
+      - "explain": "why is this routine worth automating?" (default)
+      - "hypothesize": "what plausible causes could explain this anomaly?"
 
     On any failure, returns a result with `success=False`. Caller is
     responsible for recording the audit log entry and updating the insight.
@@ -171,7 +204,10 @@ async def explain_insight(
         created_at=insight.created_at,
     )
 
-    user_prompt = build_explain_prompt(redacted_insight, redacted_payload)
+    if prompt_kind == "hypothesize":
+        user_prompt = build_hypothesize_prompt(redacted_insight, redacted_payload)
+    else:
+        user_prompt = build_explain_prompt(redacted_insight, redacted_payload)
     bytes_sent = len(user_prompt.encode("utf-8"))
 
     try:

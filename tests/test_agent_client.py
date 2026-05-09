@@ -22,6 +22,7 @@ from custom_components.ha_insights.llm import (
     RedactionMode,
     Redactor,
     build_explain_prompt,
+    build_hypothesize_prompt,
     explain_insight,
 )
 from custom_components.ha_insights.store import InsightStore
@@ -87,6 +88,62 @@ def test_build_prompt_returns_string() -> None:
     insight = _make_insight()
     prompt = build_explain_prompt(insight, insight.payload)
     assert isinstance(prompt, str)
+
+
+# --- v0.9 phase 6: hypothesize prompt ---
+
+
+def test_build_hypothesize_prompt_has_diagnose_framing() -> None:
+    """The hypothesize prompt asks for causes, not "should I automate this?"."""
+    insight = _make_insight()
+    prompt = build_hypothesize_prompt(insight, insight.payload)
+    lower = prompt.lower()
+    assert "cause" in lower or "causes" in lower
+    # Numbered list cue so the model returns scannable output
+    assert "numbered" in lower
+    # Should not parrot the explain framing
+    assert "worth automating" not in lower
+
+
+def test_build_hypothesize_prompt_includes_payload_summary() -> None:
+    insight = _make_insight()
+    prompt = build_hypothesize_prompt(insight, insight.payload)
+    # Payload summary helper carries the trigger / action info into the prompt
+    assert "06:47:00" in prompt or "light.kitchen" in prompt
+
+
+@pytest.mark.asyncio
+async def test_explain_insight_uses_hypothesize_prompt(store: InsightStore) -> None:
+    """When prompt_kind='hypothesize', the user_prompt sent to HA changes."""
+    insight = _make_insight()
+    redactor = Redactor(store, mode=RedactionMode.AGGRESSIVE)
+    hass = MagicMock()
+    hass.config.version = "2025.4.2"
+
+    sent_text: str | None = None
+
+    async def fake_converse(*_args, text: str, **_kwargs) -> SimpleNamespace:
+        nonlocal sent_text
+        sent_text = text
+        return _mock_conversation_result("1. Battery dead. 2. Stuck contact.")
+
+    with patch(
+        "homeassistant.components.conversation.async_converse",
+        new=AsyncMock(side_effect=fake_converse),
+        create=True,
+    ):
+        result = await explain_insight(
+            hass,
+            agent_id="ollama",
+            insight=insight,
+            redactor=redactor,
+            prompt_kind="hypothesize",
+        )
+
+    assert sent_text is not None
+    assert "cause" in sent_text.lower() or "causes" in sent_text.lower()
+    assert "worth automating" not in sent_text.lower()
+    assert result.success is True
 
 
 # --- explain_insight ---
