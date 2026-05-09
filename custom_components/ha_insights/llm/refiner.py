@@ -84,17 +84,47 @@ def _yaml_dump(payload: dict[str, Any]) -> str:
     return yaml.safe_dump(payload, default_flow_style=False, sort_keys=False).strip()
 
 
-def _collect_entity_ids(value: Any, accumulator: set[str]) -> None:
-    """Walk a payload and gather every entity_id-shaped string into `accumulator`."""
+_ENTITY_ID_FIELDS: frozenset[str] = frozenset(
+    {"entity_id", "entity_ids"}
+)
+
+
+def _collect_entity_ids(
+    value: Any,
+    accumulator: set[str],
+    *,
+    in_entity_field: bool = False,
+) -> None:
+    """Walk a payload and gather entity_id values in entity-id-bearing fields.
+
+    Only string values reached via known entity_id keys (`entity_id`,
+    `entity_ids`) are collected. This avoids false-positives like
+    `light.turn_off` (a service name in `service:`) being treated as a
+    hallucinated entity_id during refinement validation.
+
+    For free-text fields like `alias`, `description`, or `message`, we
+    don't scan — refinements may legitimately mention services or new
+    descriptive text without the entity-id constraint applying.
+    """
     if isinstance(value, str):
+        if not in_entity_field:
+            return
         for match in re.finditer(r"\b([a-z_]+)\.([a-z0-9_]+)\b", value):
             accumulator.add(match.group(0))
     elif isinstance(value, dict):
-        for sub in value.values():
-            _collect_entity_ids(sub, accumulator)
+        for key, sub in value.items():
+            sub_in_entity_field = (
+                in_entity_field
+                or (isinstance(key, str) and key in _ENTITY_ID_FIELDS)
+            )
+            _collect_entity_ids(
+                sub, accumulator, in_entity_field=sub_in_entity_field
+            )
     elif isinstance(value, list):
         for item in value:
-            _collect_entity_ids(item, accumulator)
+            _collect_entity_ids(
+                item, accumulator, in_entity_field=in_entity_field
+            )
 
 
 def build_refine_prompt(

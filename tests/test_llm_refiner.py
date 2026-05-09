@@ -281,6 +281,48 @@ async def test_refine_happy_path(store: InsightStore) -> None:
 
 
 @pytest.mark.asyncio
+async def test_refine_allows_new_service_calls(store: InsightStore) -> None:
+    """A refinement that introduces a new service (e.g. light.turn_off
+    when the original used light.turn_on) should NOT be flagged as a
+    hallucinated entity. Services and entity_ids share a `domain.something`
+    shape; the validator must distinguish them by field context."""
+    insight = _make_insight()
+    redactor = Redactor(store, mode=RedactionMode.AGGRESSIVE)
+    hass = MagicMock()
+
+    door_pseudo = await store.get_or_create_pseudonym("binary_sensor.front_door")
+    porch_pseudo = await store.get_or_create_pseudonym("light.porch")
+    # Refined automation adds a delayed light.turn_off. The original used
+    # light.turn_on. light.turn_off is a NEW service but not a new entity.
+    fake_yaml = (
+        "RATIONALE: Add a 2-minute auto-off after motion clears.\n"
+        "YAML:\n"
+        "alias: Porch follow-on\n"
+        "trigger:\n"
+        f"  - platform: state\n    entity_id: {door_pseudo}\n    to: 'on'\n"
+        "action:\n"
+        f"  - service: light.turn_on\n    target:\n      entity_id: {porch_pseudo}\n"
+        "  - delay: '00:02:00'\n"
+        f"  - service: light.turn_off\n    target:\n      entity_id: {porch_pseudo}\n"
+        "mode: single\n"
+    )
+    with patch(
+        "homeassistant.components.conversation.async_converse",
+        new=AsyncMock(return_value=_conv(fake_yaml)),
+        create=True,
+    ):
+        result = await refine_insight(
+            hass, agent_id="ollama", insight=insight, redactor=redactor
+        )
+
+    assert result.success is True, f"unexpected failure: {result.error}"
+    assert result.refined_payload is not None
+    # The refined payload references only the original entity_ids
+    actions = result.refined_payload["action"]
+    assert any(a.get("service") == "light.turn_off" for a in actions)
+
+
+@pytest.mark.asyncio
 async def test_refine_rejects_hallucinated_entity(store: InsightStore) -> None:
     """LLM proposes an entity that wasn't in the original — must reject."""
     insight = _make_insight()
