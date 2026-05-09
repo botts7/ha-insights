@@ -460,6 +460,20 @@ def _extract_speech(result: object) -> str | None:
     return None
 
 
+def _extract_conversation_id(result: object) -> str | None:
+    """Pull `conversation_id` off a ConversationResult, if present.
+
+    HA's conversation API echoes back (and assigns) a conversation_id on
+    each call. Threading this id back into a follow-up call lets the
+    agent maintain context — turning one-shot Refine into a multi-turn
+    iterative dialogue. Tolerant of slight shape drift.
+    """
+    cid = getattr(result, "conversation_id", None)
+    if isinstance(cid, str) and cid:
+        return cid
+    return None
+
+
 def _extract_response_type(result: object) -> str | None:
     """Get the response_type as a lowercase string ('action_done', 'error', etc.)."""
     response = getattr(result, "response", None)

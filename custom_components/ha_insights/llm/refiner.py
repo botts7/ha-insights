@@ -18,6 +18,7 @@ import yaml
 
 from ..apply.validator import validate_automation
 from .agent_client import (
+    _extract_conversation_id,
     _extract_response_type,
     _extract_speech,
     _list_agent_candidates,
@@ -85,6 +86,11 @@ class RefinementResult:
     error: str | None = None
     raw_response: str | None = None
     chosen_agent_id: str | None = None
+    # v1.0 RC #2: agent's conversation_id from HA's Conversation API.
+    # Threading this back on follow-up Refine calls turns the one-shot
+    # exchange into a multi-turn dialogue (the agent remembers what it
+    # proposed last time and what feedback led to changes).
+    conversation_id: str | None = None
 
 
 def _yaml_dump(payload: dict[str, Any]) -> str:
@@ -378,6 +384,7 @@ async def refine_insight(
     prior_explanation: str | None = None,
     feedback: str | None = None,
     preferred_agent_id: str | None = None,
+    conversation_id: str | None = None,
 ) -> RefinementResult:
     """Ask the configured Conversation agent for a refined version of the automation.
 
@@ -414,7 +421,11 @@ async def refine_insight(
         hass, requested=agent_id, preferred=preferred_agent_id
     )
     last_result: RefinementResult | None = None
-    for candidate in candidates:
+    for idx, candidate in enumerate(candidates):
+        # Conversation_id is tied to a specific agent; if failover walks
+        # to a different agent on attempt 2+, the prior id is meaningless
+        # there. Only thread it on the first attempt.
+        thread_id = conversation_id if idx == 0 else None
         last_result = await _refine_one_attempt(
             hass,
             chosen_agent_id=candidate,
@@ -422,6 +433,7 @@ async def refine_insight(
             bytes_sent=bytes_sent,
             redaction_map=redaction_map,
             insight=insight,
+            conversation_id=thread_id,
         )
         if last_result.success:
             return last_result
@@ -439,6 +451,7 @@ async def _refine_one_attempt(
     bytes_sent: int,
     redaction_map: RedactionMap,
     insight: Insight,
+    conversation_id: str | None = None,
 ) -> RefinementResult:
     """Single-shot Refine: converse, parse, deref, validate, return."""
     from homeassistant.components import conversation as ha_conversation
@@ -447,7 +460,7 @@ async def _refine_one_attempt(
         result = await ha_conversation.async_converse(
             hass,
             text=prompt,
-            conversation_id=None,
+            conversation_id=conversation_id,
             context=None,
             language=None,
             agent_id=chosen_agent_id,
@@ -468,6 +481,7 @@ async def _refine_one_attempt(
     response_type = _extract_response_type(result)
     speech = _extract_speech(result)
     bytes_received = len(speech.encode("utf-8")) if speech else 0
+    new_conversation_id = _extract_conversation_id(result) or conversation_id
 
     if response_type and "error" in response_type.lower():
         is_llm_agent = (
@@ -619,4 +633,5 @@ async def _refine_one_attempt(
         bytes_received=bytes_received,
         success=True,
         chosen_agent_id=chosen_agent_id,
+        conversation_id=new_conversation_id,
     )

@@ -546,6 +546,9 @@ async def ws_apply(
         vol.Required("insight_id"): str,
         vol.Optional("agent_id"): vol.Any(str, None),
         vol.Optional("feedback"): vol.Any(str, None),
+        # v1.0 RC #2: thread conversation_id from prior Refine on same
+        # insight so the agent retains context across turns.
+        vol.Optional("conversation_id"): vol.Any(str, None),
     }
 )
 @websocket_api.async_response
@@ -603,6 +606,7 @@ async def ws_refine(
         prior_explanation=insight.explanation,
         feedback=msg.get("feedback"),
         preferred_agent_id=preferred,
+        conversation_id=msg.get("conversation_id"),
     )
 
     # Audit against the agent that actually responded — failover may have
@@ -642,6 +646,8 @@ async def ws_refine(
             "diff_summary": result.diff_summary,
             "bytes_sent": result.bytes_sent,
             "bytes_received": result.bytes_received,
+            # Card threads this back on the next Refine for context.
+            "conversation_id": result.conversation_id,
         },
     )
 
