@@ -341,8 +341,21 @@ async def ws_apply(
     in place of the original. The override is validated identically and
     stamped with `description: "Refined by HA Insights"` so the lineage is
     visible in HA's automation editor.
+
+    Validation runs in two layers:
+      L1 — offline schema check (required keys, types, mode enum)
+      L2 — HA's own automation config validator (services exist,
+           entities resolvable, trigger/condition/action shapes valid)
+    Both must pass before we write. L2 catches "service light.turn_oN
+    doesn't exist" (typo'd refinement) before it lands in
+    automations.yaml as a broken automation.
     """
-    from .apply import AutomationWriter, hash_config, validate_automation
+    from .apply import (
+        AutomationWriter,
+        hash_config,
+        validate_automation,
+        validate_automation_online,
+    )
 
     store = _get_store(hass)
     if store is None:
@@ -374,6 +387,15 @@ async def ws_apply(
     errors = validate_automation(payload)
     if errors:
         connection.send_error(msg["id"], "invalid_payload", "; ".join(errors))
+        return
+
+    online_errors = await validate_automation_online(hass, payload)
+    if online_errors:
+        connection.send_error(
+            msg["id"],
+            "ha_validation_failed",
+            "; ".join(online_errors),
+        )
         return
 
     writer = AutomationWriter(hass)

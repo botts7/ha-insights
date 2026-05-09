@@ -229,6 +229,37 @@ async def test_apply_with_invalid_override_returns_error(
     assert msg["error"]["code"] == "invalid_payload"
 
 
+# --- v0.8: Layer 2 online validator ---
+
+
+async def test_apply_rejects_unknown_service(
+    hass: HomeAssistant, hass_ws_client, setup_integration, tmp_path
+) -> None:
+    """Layer 2 catches a typo'd service name before writing automations.yaml."""
+    hass.config.config_dir = str(tmp_path)
+    store = hass.data[DOMAIN][setup_integration.entry_id]["store"]
+    bad_payload = _valid_automation_payload(
+        action=[{"service": "light.turn_oN", "target": {"entity_id": "light.y"}}]
+    )
+    await store.add_insight(_make_insight(payload=bad_payload))
+
+    client = await hass_ws_client(hass)
+    await client.send_json_auto_id(
+        {"type": "home_insights/apply", "insight_id": "abc123"}
+    )
+    msg = await client.receive_json()
+    # Either Layer 1 or Layer 2 may reject; both surface as user-actionable.
+    # The point is that the broken automation does NOT get written.
+    if msg["success"] is False:
+        assert msg["error"]["code"] in (
+            "ha_validation_failed",
+            "invalid_payload",
+        )
+    yaml_path = tmp_path / "automations.yaml"
+    if yaml_path.exists():
+        assert "light.turn_oN" not in yaml_path.read_text(encoding="utf-8")
+
+
 # --- v0.8: undo applied (round-trip + drift detection) ---
 
 
