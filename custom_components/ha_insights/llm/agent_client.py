@@ -190,23 +190,34 @@ async def explain_insight(
     response_type = _extract_response_type(result)
     speech = _extract_speech(result)
 
-    # HA's default agent returns ResponseType.ERROR for unrecognized commands —
-    # that's the "Sorry, I'm not aware of any device called X" path. It means
-    # the user has no LLM-backed Conversation integration active. Return a
-    # friendly hint so the card can surface installation instructions instead
-    # of leaking the rule-based fallback message.
+    # Handle agent error responses — but distinguish:
+    #   1. We routed to an LLM agent and IT failed (rate limit, API down, key
+    #      invalid). Surface the agent's actual speech to the user.
+    #   2. We fell back to HA's default rule-based agent and it returned
+    #      "I don't understand". Surface install instructions for an LLM.
     if response_type and "error" in response_type.lower():
+        is_llm_agent = (
+            chosen_agent_id is not None
+            and chosen_agent_id != "conversation.home_assistant"
+        )
+        if is_llm_agent:
+            error_msg = (
+                f"LLM agent ({chosen_agent_id}) returned an error: "
+                f"{speech or '(no message)'}"
+            )
+        else:
+            error_msg = (
+                "Active Conversation agent isn't an LLM (rule-based fallback). "
+                "Install an LLM Conversation integration like Anthropic, OpenAI, "
+                "Google Generative AI, or Ollama, then select it as your agent."
+            )
         return ExplanationResult(
             explanation=None,
             redaction_map=redaction_map,
             bytes_sent=bytes_sent,
             bytes_received=len(speech.encode("utf-8")) if speech else 0,
             success=False,
-            error=(
-                "Active Conversation agent isn't an LLM (rule-based fallback). "
-                "Install an LLM Conversation integration like Anthropic, OpenAI, "
-                "Google Generative AI, or Ollama, then select it as your agent."
-            ),
+            error=error_msg,
         )
 
     if speech is None:
