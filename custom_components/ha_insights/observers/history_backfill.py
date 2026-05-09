@@ -70,13 +70,38 @@ async def backfill(
     end = datetime.now(tz=UTC).replace(microsecond=0)
     start = end - timedelta(days=lookback_days)
 
-    # Resolve entity_id -> area_id once via the entity registry.
+    # Resolve entity_id -> area_id once via the entity registry. Also use it
+    # to enumerate which entities to query — modern recorder API requires
+    # entity_ids to be passed explicitly (None is no longer accepted).
     from homeassistant.helpers import entity_registry as er
 
     entity_reg = er.async_get(hass)
+    candidate_entity_ids = [
+        entry.entity_id
+        for entry in entity_reg.entities.values()
+        if entry.entity_id.split(".", 1)[0] in domains
+    ]
+    # Also include states known to hass that aren't in the registry (yaml-only
+    # entities) — they still appear in recorder.
+    for state_eid in hass.states.async_entity_ids():
+        if (
+            state_eid not in entity_reg.entities
+            and state_eid.split(".", 1)[0] in domains
+        ):
+            candidate_entity_ids.append(state_eid)
+
+    if not candidate_entity_ids:
+        return {
+            "events_added": 0,
+            "entities_seen": 0,
+            "events_skipped": 0,
+            "duration_seconds": 0.0,
+            "lookback_days": lookback_days,
+            "started_at": start.isoformat(),
+        }
 
     started = time.monotonic()
-    states_by_entity = await _fetch_history(hass, start, end)
+    states_by_entity = await _fetch_history(hass, start, end, candidate_entity_ids)
 
     events_added = 0
     events_skipped = 0
@@ -132,13 +157,14 @@ async def _fetch_history(
     hass: HomeAssistant,
     start: datetime,
     end: datetime,
+    entity_ids: list[str],
 ) -> dict[str, list[State]]:
     """Pull significant states from the recorder, executor-bound.
 
     `get_significant_states` returns a dict keyed by entity_id with lists
-    of State objects sorted by `last_changed`. We don't pass entity_ids
-    so we get every entity's significant states in one call — recorder
-    handles batching internally.
+    of State objects sorted by `last_changed`. Modern HA requires the
+    entity_ids list to be explicit; the caller passes the domain-allowed
+    set so recorder doesn't waste work on excluded entities.
     """
     from homeassistant.components.recorder import get_instance, history
 
@@ -148,5 +174,5 @@ async def _fetch_history(
         hass,
         start,
         end,
-        None,  # entity_ids — None = all
+        entity_ids,
     )

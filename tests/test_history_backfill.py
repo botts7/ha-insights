@@ -52,12 +52,20 @@ async def test_backfill_ingests_allowed_domain() -> None:
             _state("light.kitchen", "off", end - timedelta(days=1)),
         ],
     }
+    # Build a fake entity registry that returns one entry per seeded entity_id,
+    # so candidate_entity_ids is non-empty and _fetch_history is reached.
+    fake_entries = {eid: SimpleNamespace(entity_id=eid, area_id=None) for eid in states}
+    fake_registry = MagicMock(
+        entities=fake_entries,
+        async_get=lambda eid: fake_entries.get(eid),
+    )
+    hass.states = MagicMock(async_entity_ids=lambda: list(states.keys()))
     with patch(
         "custom_components.ha_insights.observers.history_backfill._fetch_history",
         new=AsyncMock(return_value=states),
     ), patch(
         "homeassistant.helpers.entity_registry.async_get",
-        return_value=MagicMock(async_get=lambda _: None),
+        return_value=fake_registry,
         create=True,
     ):
         summary = await backfill(hass, buf, lookback_days=14)
@@ -81,12 +89,20 @@ async def test_backfill_skips_disallowed_domain() -> None:
             _state("light.kitchen", "on", end - timedelta(days=1)),
         ],
     }
+    # Build a fake entity registry that returns one entry per seeded entity_id,
+    # so candidate_entity_ids is non-empty and _fetch_history is reached.
+    fake_entries = {eid: SimpleNamespace(entity_id=eid, area_id=None) for eid in states}
+    fake_registry = MagicMock(
+        entities=fake_entries,
+        async_get=lambda eid: fake_entries.get(eid),
+    )
+    hass.states = MagicMock(async_entity_ids=lambda: list(states.keys()))
     with patch(
         "custom_components.ha_insights.observers.history_backfill._fetch_history",
         new=AsyncMock(return_value=states),
     ), patch(
         "homeassistant.helpers.entity_registry.async_get",
-        return_value=MagicMock(async_get=lambda _: None),
+        return_value=fake_registry,
         create=True,
     ):
         summary = await backfill(hass, buf, lookback_days=14)
@@ -109,12 +125,20 @@ async def test_backfill_skips_unavailable_states() -> None:
             _state("light.kitchen", "unknown", end - timedelta(hours=1)),
         ],
     }
+    # Build a fake entity registry that returns one entry per seeded entity_id,
+    # so candidate_entity_ids is non-empty and _fetch_history is reached.
+    fake_entries = {eid: SimpleNamespace(entity_id=eid, area_id=None) for eid in states}
+    fake_registry = MagicMock(
+        entities=fake_entries,
+        async_get=lambda eid: fake_entries.get(eid),
+    )
+    hass.states = MagicMock(async_entity_ids=lambda: list(states.keys()))
     with patch(
         "custom_components.ha_insights.observers.history_backfill._fetch_history",
         new=AsyncMock(return_value=states),
     ), patch(
         "homeassistant.helpers.entity_registry.async_get",
-        return_value=MagicMock(async_get=lambda _: None),
+        return_value=fake_registry,
         create=True,
     ):
         summary = await backfill(hass, buf, lookback_days=14)
@@ -134,12 +158,20 @@ async def test_backfill_records_old_state_as_prior() -> None:
             _state("binary_sensor.door", "on", end - timedelta(days=2, minutes=-1)),
         ],
     }
+    # Build a fake entity registry that returns one entry per seeded entity_id,
+    # so candidate_entity_ids is non-empty and _fetch_history is reached.
+    fake_entries = {eid: SimpleNamespace(entity_id=eid, area_id=None) for eid in states}
+    fake_registry = MagicMock(
+        entities=fake_entries,
+        async_get=lambda eid: fake_entries.get(eid),
+    )
+    hass.states = MagicMock(async_entity_ids=lambda: list(states.keys()))
     with patch(
         "custom_components.ha_insights.observers.history_backfill._fetch_history",
         new=AsyncMock(return_value=states),
     ), patch(
         "homeassistant.helpers.entity_registry.async_get",
-        return_value=MagicMock(async_get=lambda _: None),
+        return_value=fake_registry,
         create=True,
     ):
         await backfill(hass, buf, lookback_days=14)
@@ -176,12 +208,20 @@ async def test_custom_domain_allowlist() -> None:
         "switch.fan": [_state("switch.fan", "on", end - timedelta(days=1))],
         "light.kitchen": [_state("light.kitchen", "on", end - timedelta(days=1))],
     }
+    # Build a fake entity registry that returns one entry per seeded entity_id,
+    # so candidate_entity_ids is non-empty and _fetch_history is reached.
+    fake_entries = {eid: SimpleNamespace(entity_id=eid, area_id=None) for eid in states}
+    fake_registry = MagicMock(
+        entities=fake_entries,
+        async_get=lambda eid: fake_entries.get(eid),
+    )
+    hass.states = MagicMock(async_entity_ids=lambda: list(states.keys()))
     with patch(
         "custom_components.ha_insights.observers.history_backfill._fetch_history",
         new=AsyncMock(return_value=states),
     ), patch(
         "homeassistant.helpers.entity_registry.async_get",
-        return_value=MagicMock(async_get=lambda _: None),
+        return_value=fake_registry,
         create=True,
     ):
         # Restrict to light only
