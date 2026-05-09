@@ -136,6 +136,17 @@ def parse_refine_response(text: str) -> tuple[str | None, dict[str, Any] | None,
             "non-thinking model that uses tokens more efficiently."
         )
 
+    # Detect provider safety / policy refusals before treating "no YAML"
+    # as a parser failure. These are model-side decisions to refuse the
+    # task, not user errors. Common phrasings across Gemini, Claude, GPT.
+    if _looks_like_refusal(text):
+        return None, None, (
+            "LLM declined to refine this automation (safety / policy "
+            "refusal from the model). Try a different agent, rephrase "
+            "your considerations, or switch the conversation integration "
+            "to a model with looser policies."
+        )
+
     rationale_match = re.search(r"RATIONALE:\s*(.+?)(?=\n\s*YAML:|\Z)", text, re.DOTALL)
     yaml_match = re.search(r"YAML:\s*(.+)", text, re.DOTALL)
 
@@ -166,6 +177,50 @@ def parse_refine_response(text: str) -> tuple[str | None, dict[str, Any] | None,
         return rationale, None, "YAML did not parse to a mapping"
 
     return rationale, parsed, None
+
+
+_REFUSAL_PHRASES: tuple[str, ...] = (
+    "i cannot help",
+    "i can't help",
+    "i can not help",
+    "i'm not able to",
+    "i am not able to",
+    "i'm unable",
+    "i am unable",
+    "i won't",
+    "i will not",
+    "i must decline",
+    "i refuse",
+    "as an ai",
+    "i don't have the ability",
+    "i do not have the ability",
+    "cannot generate",
+    "can't generate",
+    "cannot modify",
+    "can't modify",
+    "cannot assist",
+    "can't assist",
+    "against my",
+    "i'm sorry, but i can",
+    "i am sorry, but i can",
+)
+
+
+def _looks_like_refusal(text: str) -> bool:
+    """Provider-side safety refusal — no YAML, no rationale, just a no.
+
+    We check the first ~300 chars (refusals come up front; YAML always
+    later if at all). Case-insensitive substring match against a list of
+    common refusal openers across major LLM providers.
+    """
+    if not text:
+        return False
+    head = text[:300].lower()
+    # If there's a YAML section, the model isn't refusing; it generated
+    # something. Skip the refusal check.
+    if "yaml:" in head:
+        return False
+    return any(phrase in head for phrase in _REFUSAL_PHRASES)
 
 
 def _looks_truncated(yaml_body: str) -> bool:
