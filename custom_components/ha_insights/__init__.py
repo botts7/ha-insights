@@ -12,7 +12,7 @@ from homeassistant.core import Event, HomeAssistant, ServiceCall, State, callbac
 from homeassistant.helpers import entity_registry as er
 
 from . import ws_api
-from .config_flow import get_lookback_days
+from .config_flow import get_lookback_days, get_notify_settings
 from .const import DOMAIN
 from .observers.history_backfill import backfill as backfill_history
 from .observers.state_event_buffer import StateEvent, StateEventBuffer
@@ -89,11 +89,33 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "entity_registry_updated", _on_entity_registry_updated
     )
 
+    # Notification listener: fire persistent_notification.create when a
+    # high-confidence insight is added to the store. Gated by the
+    # notify_on_insight + notify_threshold config options.
+    notify_enabled, notify_threshold = get_notify_settings(entry)
+
+    @callback
+    def _on_store_event(event_type: str, insight_obj) -> None:
+        if event_type != "added" or insight_obj is None:
+            return
+        if not notify_enabled:
+            return
+        if insight_obj.confidence < notify_threshold:
+            return
+        # Fire the notification asynchronously so the listener stays sync
+        hass.async_create_task(
+            _notify_insight(hass, insight_obj),
+            name=f"{DOMAIN}_notify_{insight_obj.id}",
+        )
+
+    unsub_store = store.add_listener(_on_store_event)
+
     hass.data[DOMAIN][entry.entry_id] = {
         "store": store,
         "buffer": buffer_,
         "unsub_state": unsub_state,
         "unsub_registry": unsub_registry,
+        "unsub_store": unsub_store,
         "last_backfill": None,
         "backfill_running": False,
     }
@@ -120,6 +142,33 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             name=f"{DOMAIN}_initial_backfill_{entry.entry_id}",
         )
     return True
+
+
+async def _notify_insight(hass: HomeAssistant, insight) -> None:
+    """Fire a persistent_notification announcing a new high-confidence insight.
+
+    notification_id includes the insight id so re-emissions of the same
+    insight (e.g. on a re-scan) replace the existing notification rather
+    than stacking.
+    """
+    confidence_pct = round(insight.confidence * 100)
+    try:
+        await hass.services.async_call(
+            "persistent_notification",
+            "create",
+            {
+                "title": f"HA Insights: {insight.detector}",
+                "message": (
+                    f"{insight.title}\n\n"
+                    f"Confidence: {confidence_pct}% — open the HA Insights "
+                    "panel to review, refine, or apply."
+                ),
+                "notification_id": f"ha_insights_{insight.id}",
+            },
+            blocking=False,
+        )
+    except Exception:
+        _LOGGER.exception("Failed to fire HA Insights notification")
 
 
 async def _run_initial_backfill(
@@ -278,6 +327,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         data["unsub_state"]()
     if "unsub_registry" in data:
         data["unsub_registry"]()
+    if "unsub_store" in data:
+        data["unsub_store"]()
     if "store" in data:
         await data["store"].close()
     # Unregister the panel only when the LAST entry unloads (other entries

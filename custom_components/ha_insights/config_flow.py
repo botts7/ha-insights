@@ -26,8 +26,12 @@ CONF_LLM_MODE = "llm_mode"
 CONF_CLOUD_CONSENT = "cloud_consent"
 CONF_LOOKBACK_DAYS = "lookback_days"
 CONF_LLM_BLOCK_ENTITIES = "llm_block_entities"
+CONF_NOTIFY_ON_INSIGHT = "notify_on_insight"
+CONF_NOTIFY_THRESHOLD = "notify_threshold"
 DEFAULT_LOOKBACK_DAYS = 14
 LOOKBACK_DAYS_RANGE = (0, 30)  # 0 disables backfill entirely
+DEFAULT_NOTIFY_ON_INSIGHT = True
+DEFAULT_NOTIFY_THRESHOLD = 0.8
 
 
 class LlmMode(StrEnum):
@@ -64,6 +68,28 @@ def get_lookback_days(entry: ConfigEntry) -> int:
         return DEFAULT_LOOKBACK_DAYS
     lo, hi = LOOKBACK_DAYS_RANGE
     return max(lo, min(hi, value))
+
+
+def get_notify_settings(entry: ConfigEntry) -> tuple[bool, float]:
+    """Resolve notification settings: (enabled, threshold).
+
+    Threshold is clamped to [0, 1]. enabled defaults to True; users opt
+    out via the OptionsFlow.
+    """
+    enabled_raw = entry.options.get(
+        CONF_NOTIFY_ON_INSIGHT,
+        entry.data.get(CONF_NOTIFY_ON_INSIGHT, DEFAULT_NOTIFY_ON_INSIGHT),
+    )
+    threshold_raw = entry.options.get(
+        CONF_NOTIFY_THRESHOLD,
+        entry.data.get(CONF_NOTIFY_THRESHOLD, DEFAULT_NOTIFY_THRESHOLD),
+    )
+    try:
+        threshold = float(threshold_raw)
+    except (TypeError, ValueError):
+        threshold = DEFAULT_NOTIFY_THRESHOLD
+    threshold = max(0.0, min(1.0, threshold))
+    return bool(enabled_raw), threshold
 
 
 def get_blocked_entities(entry: ConfigEntry) -> frozenset[str]:
@@ -140,6 +166,8 @@ class HaInsightsConfigFlow(ConfigFlow, domain=DOMAIN):
             data={
                 CONF_LLM_MODE: mode.value,
                 CONF_LOOKBACK_DAYS: DEFAULT_LOOKBACK_DAYS,
+                CONF_NOTIFY_ON_INSIGHT: DEFAULT_NOTIFY_ON_INSIGHT,
+                CONF_NOTIFY_THRESHOLD: DEFAULT_NOTIFY_THRESHOLD,
             },
         )
 
@@ -154,17 +182,28 @@ class HaInsightsOptionsFlow(OptionsFlow):
     def __init__(self) -> None:
         self._mode: LlmMode | None = None
         self._lookback: int = DEFAULT_LOOKBACK_DAYS
+        self._notify_on: bool = DEFAULT_NOTIFY_ON_INSIGHT
+        self._notify_threshold: float = DEFAULT_NOTIFY_THRESHOLD
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Mode + lookback picker, defaulting to whatever the user currently has."""
+        """Mode + lookback + notification picker."""
         current_mode = get_active_mode(self.config_entry)
         current_lookback = get_lookback_days(self.config_entry)
+        current_notify_on, current_notify_threshold = get_notify_settings(
+            self.config_entry
+        )
 
         if user_input is not None:
             self._mode = LlmMode(user_input[CONF_LLM_MODE])
             self._lookback = int(user_input.get(CONF_LOOKBACK_DAYS, current_lookback))
+            self._notify_on = bool(
+                user_input.get(CONF_NOTIFY_ON_INSIGHT, current_notify_on)
+            )
+            self._notify_threshold = float(
+                user_input.get(CONF_NOTIFY_THRESHOLD, current_notify_threshold)
+            )
             if self._mode is LlmMode.CLOUD and current_mode != LlmMode.CLOUD.value:
                 # Only require fresh consent if switching INTO cloud
                 return await self.async_step_cloud_consent()
@@ -173,6 +212,8 @@ class HaInsightsOptionsFlow(OptionsFlow):
                 data={
                     CONF_LLM_MODE: self._mode.value,
                     CONF_LOOKBACK_DAYS: self._lookback,
+                    CONF_NOTIFY_ON_INSIGHT: self._notify_on,
+                    CONF_NOTIFY_THRESHOLD: self._notify_threshold,
                 },
             )
 
@@ -183,6 +224,15 @@ class HaInsightsOptionsFlow(OptionsFlow):
                 vol.Required(
                     CONF_LOOKBACK_DAYS, default=current_lookback
                 ): vol.All(vol.Coerce(int), vol.Range(min=lo, max=hi)),
+                # Notification settings are Optional so existing config-flow
+                # callers (and tests written before they were added) continue
+                # to work without specifying them; defaults track current.
+                vol.Optional(
+                    CONF_NOTIFY_ON_INSIGHT, default=current_notify_on
+                ): bool,
+                vol.Optional(
+                    CONF_NOTIFY_THRESHOLD, default=current_notify_threshold
+                ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=1.0)),
             }
         )
         return self.async_show_form(step_id="init", data_schema=schema)
@@ -198,6 +248,8 @@ class HaInsightsOptionsFlow(OptionsFlow):
                     data={
                         CONF_LLM_MODE: LlmMode.CLOUD.value,
                         CONF_LOOKBACK_DAYS: self._lookback,
+                        CONF_NOTIFY_ON_INSIGHT: self._notify_on,
+                        CONF_NOTIFY_THRESHOLD: self._notify_threshold,
                     },
                 )
             self._mode = None
