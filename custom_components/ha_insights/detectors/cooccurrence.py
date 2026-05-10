@@ -59,6 +59,13 @@ class CooccurrenceDetector(Detector):
     # entity churn. Users can raise via subclass if they really want
     # the long tail.
     MAX_INSIGHTS_PER_SCAN = 50
+    # Maximum unique followers per leader before treating the whole
+    # leader as a "cascade event" (HA restart, scene activation,
+    # integration reload). One leader → 40 followers is system noise,
+    # not user-decided causation. Real automations target 1-3 entities;
+    # a "leave home" scene targets ~5-8. 10 is a safe upper bound that
+    # admits multi-target scenes without admitting full restart waves.
+    MAX_FANOUT_PER_LEADER = 10
 
     async def scan(self, ctx: DetectorContext) -> list[Insight]:
         if ctx.event_buffer is None:
@@ -178,9 +185,41 @@ class CooccurrenceDetector(Detector):
             if insight.confidence < self.MIN_CONFIDENCE_TO_EMIT:
                 continue
             insights.append(insight)
+        # Cascade-event filter: when a single leader fans out to many
+        # distinct followers in the same window, that's a system event
+        # (HA restart, scene activation, integration reload) — not a
+        # causal pattern. A real automation rarely targets 10+ unrelated
+        # entities; a "everything goes off" macro is one user action,
+        # not 40 independent suggestions to make. Drop all pairs whose
+        # leader exceeds the fan-out threshold.
+        leader_followers: dict[tuple[str, str], set[tuple[str, str]]] = (
+            defaultdict(set)
+        )
+        for (l_eid, l_state, f_eid, f_state), _ in pairs.items():
+            leader_followers[(l_eid, l_state)].add((f_eid, f_state))
+        cascade_leaders = {
+            ls
+            for ls, fs in leader_followers.items()
+            if len(fs) > self.MAX_FANOUT_PER_LEADER
+        }
+        if cascade_leaders:
+            import logging as _logging
+            _logging.getLogger(__name__).info(
+                "Cooccurrence: dropping %d cascade leaders with >%d followers "
+                "(likely HA restart / scene / system event, not causation)",
+                len(cascade_leaders),
+                self.MAX_FANOUT_PER_LEADER,
+            )
+
         # Cap by confidence — keep top N, drop the rest. Users sort by
         # confidence anyway; the 51st-most-confident insight is rarely
         # worth the panel real estate.
+        insights = [
+            i
+            for i in insights
+            if (i.fingerprint["leader_entity_id"], i.fingerprint["leader_state"])
+            not in cascade_leaders
+        ]
         insights.sort(key=lambda i: i.confidence, reverse=True)
         return insights[: self.MAX_INSIGHTS_PER_SCAN]
 

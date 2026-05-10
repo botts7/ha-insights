@@ -453,29 +453,39 @@ def _build_entity_dependencies(
     """
     from collections import defaultdict
 
+    # Attribute names HA integrations use for "list of member entities":
+    #   - entity_id: legacy group component, group_light, group_cover,
+    #     binary_sensor.group, universal_media_player
+    #   - group_members: media_player groups (Sonos, etc) per HA 2024+
+    #   - lights: some Hue/zigbee2mqtt group lights expose this instead
+    GROUP_MEMBER_ATTRS = ("entity_id", "group_members", "lights")
     raw: dict[str, set[str]] = defaultdict(set)
     try:
         for state in hass.states.async_all():
-            # Group-style children
-            members_attr = state.attributes.get("entity_id")
-            if isinstance(members_attr, (list, tuple)):
+            # Group-style children — try every attribute name HA
+            # integrations might use for the member list.
+            for attr_name in GROUP_MEMBER_ATTRS:
+                members_attr = state.attributes.get(attr_name)
+                if not isinstance(members_attr, (list, tuple)):
+                    continue
                 members = [
                     m
                     for m in members_attr
                     if isinstance(m, str) and "." in m
                 ]
-                if members:
-                    # Parent ↔ child edge always (regardless of group size)
+                if not members:
+                    continue
+                # Parent ↔ child edge always (regardless of group size)
+                for m in members:
+                    raw[state.entity_id].add(m)
+                    raw[m].add(state.entity_id)
+                # Sibling ↔ sibling edge only for SMALL groups —
+                # otherwise an all-house aggregate filters away every
+                # legitimate cross-room cooccurrence pair.
+                if 1 < len(members) <= _MAX_GROUP_SIZE_FOR_SIBLING_FILTER:
+                    member_set = set(members)
                     for m in members:
-                        raw[state.entity_id].add(m)
-                        raw[m].add(state.entity_id)
-                    # Sibling ↔ sibling edge only for SMALL groups —
-                    # otherwise an all-house aggregate filters away every
-                    # legitimate cross-room cooccurrence pair.
-                    if 1 < len(members) <= _MAX_GROUP_SIZE_FOR_SIBLING_FILTER:
-                        member_set = set(members)
-                        for m in members:
-                            raw[m] |= member_set - {m}
+                        raw[m] |= member_set - {m}
             # Source-style derived (always, no size cap — it's a
             # one-to-one source/derived relationship by definition)
             for attr in ("source", "source_entity_id"):
