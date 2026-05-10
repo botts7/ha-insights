@@ -70,6 +70,13 @@ class DetectorContext:
     # Any pair sharing a dependency edge is treated as "same root event,
     # observed twice" and dropped at the cooccurrence pair-discovery step.
     entity_dependencies: dict[str, frozenset[str]] = field(default_factory=dict)
+    # Strict parent → members map (NOT symmetric). A subset of
+    # entity_dependencies that captures only the container → contents
+    # direction. Used by the RedundantTargetDetector to identify
+    # automations targeting both a group AND its members. Values are
+    # the entities the key entity contains; reverse lookup needs to
+    # check entity_dependencies (which IS symmetric).
+    container_to_members: dict[str, frozenset[str]] = field(default_factory=dict)
 
 
 class Detector(ABC):

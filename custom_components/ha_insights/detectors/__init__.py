@@ -229,14 +229,17 @@ async def run_all_detectors(
     # "responding to" the first, it's just reflecting the same underlying
     # event.
     entity_dependencies = _build_entity_dependencies(hass)
+    container_to_members = _build_container_map(hass)
     if entity_dependencies:
         # Count edges so a one-line log gives a sense of scale; helps
         # diagnose "why is cooccurrence still finding this pair?"
         edge_count = sum(len(v) for v in entity_dependencies.values()) // 2
         _LOGGER.info(
-            "HA Insights: built dependency map for %d entities (~%d edges)",
+            "HA Insights: built dependency map for %d entities (~%d edges, "
+            "%d containers)",
             len(entity_dependencies),
             edge_count,
+            len(container_to_members),
         )
 
     # Load existing automations once per scan so we can:
@@ -262,6 +265,7 @@ async def run_all_detectors(
         device_id_by_entity=device_id_by_entity,
         existing_automations=existing_automations,
         entity_dependencies=entity_dependencies,
+        container_to_members=container_to_members,
     )
     if ctx.event_buffer is not None:
         snapshot = ctx.event_buffer.snapshot()
@@ -356,7 +360,9 @@ async def run_all_detectors(
         # tagged with "(+N similar members of <parent>)". Catches the
         # 7 garden lights all firing the same 17:34 streak — they
         # belong to one user routine, not seven.
-        insights = _dedup_grouped_insights(insights, entity_dependencies)
+        insights = _dedup_grouped_insights(
+            insights, entity_dependencies, container_to_members
+        )
         for insight in insights:
             # Annotate (don't suppress) insights that match an existing
             # automation — the user might want to know HA noticed the
@@ -448,6 +454,7 @@ _MAX_GROUP_SIZE_FOR_SIBLING_FILTER = 6
 def _find_common_container(
     entity_ids: list[str],
     entity_dependencies: dict[str, frozenset[str]],
+    container_to_members: dict[str, frozenset[str]] | None = None,
 ) -> str | None:
     """Return a parent (scene, group, group_light) that contains every
     entity in entity_ids — or None if no single container covers them all.
@@ -457,10 +464,32 @@ def _find_common_container(
     sibling for small groups), but a TRUE container's dep set will
     contain ALL the input entities — siblings only have one of them
     (themselves). That distinguishes parents from siblings.
+
+    Two cases handled:
+      1. One of the inputs IS itself the parent of the others. E.g.,
+         [light.porch_lights, light.porch] — porch_lights is the
+         container, porch is its member. Returns light.porch_lights.
+      2. A third-party container holds all inputs. E.g.,
+         [light.lamp_a, light.lamp_b] both members of light.bedroom_group
+         (which isn't itself in the input list). Returns
+         light.bedroom_group.
     """
     if len(entity_ids) < 2:
         return None
-    # Intersection of all dep sets — entities present in every input's deps
+
+    # Case 1: one input is the parent of the others. Use the strict
+    # container_to_members map so we know it's a real parent (not a
+    # sibling false-positive).
+    if container_to_members:
+        for candidate in entity_ids:
+            members = container_to_members.get(candidate, frozenset())
+            if not members:
+                continue
+            if all(eid == candidate or eid in members for eid in entity_ids):
+                return candidate
+
+    # Case 2: third-party container. Intersection of dep sets, then pick
+    # the one whose own deps contain every input.
     common: frozenset[str] | None = None
     for eid in entity_ids:
         deps = entity_dependencies.get(eid, frozenset())
@@ -472,9 +501,6 @@ def _find_common_container(
             return None
     if common is None:
         return None
-    # Among common entities, find one whose own dep set contains every
-    # input entity_id. That's the parent. Iterate sorted for stable
-    # output across re-scans.
     for candidate in sorted(common):
         cand_deps = entity_dependencies.get(candidate, frozenset())
         if all(eid in cand_deps for eid in entity_ids):
@@ -485,6 +511,7 @@ def _find_common_container(
 def _dedup_grouped_insights(
     insights: list,
     entity_dependencies: dict[str, frozenset[str]],
+    container_to_members: dict[str, frozenset[str]] | None = None,
 ) -> list:
     """Collapse insights that share a fingerprint (mod entity_id) AND
     whose entities live under the same group/scene container.
@@ -523,14 +550,14 @@ def _dedup_grouped_insights(
         sig_key = _json.dumps(sig, sort_keys=True, default=str)
         by_signature[sig_key].append(ins)
 
-    # Threshold for the heuristic fallback. With 3+ entities sharing an
-    # identical fingerprint AND the same domain at the same exact pattern
-    # (e.g., 5 lights all showing "→ on 4 days in a row at ~17:34"),
-    # the chance of coincidence is vanishingly small — they're almost
-    # certainly part of one user routine, even if HA's data model
-    # doesn't expose a shared parent. A 2-entity coincidence is more
-    # plausible (two related sensors, e.g.), so 3 is the safe floor.
-    HEURISTIC_MERGE_THRESHOLD = 3
+    # Threshold for the heuristic fallback. User's observation
+    # ("multiple devices with the same long_tail duration are probably
+    # part of the same routine/automation") matches reality: when 2+
+    # entities share an EXACT fingerprint signature AND the same domain,
+    # the timing/duration/threshold collision is so specific that
+    # coincidence is implausible. Lowered from 3 → 2 to match user
+    # intuition; reverse if false-positive merges show up in practice.
+    HEURISTIC_MERGE_THRESHOLD = 2
 
     result: list = []
     for group in by_signature.values():
@@ -546,7 +573,9 @@ def _dedup_grouped_insights(
             result.extend(group)
             continue
         # Primary path: discover a real shared container in the dep map.
-        parent = _find_common_container(eids, entity_dependencies)
+        parent = _find_common_container(
+            eids, entity_dependencies, container_to_members
+        )
         merge_label: str | None = None
         if parent is not None:
             merge_label = parent
@@ -591,6 +620,48 @@ def _dedup_grouped_insights(
         result.append(merged)
 
     return result
+
+
+def _build_container_map(
+    hass: HomeAssistant,
+) -> dict[str, frozenset[str]]:
+    """Strict parent → members map (NOT symmetric).
+
+    A companion to _build_entity_dependencies, but unidirectional:
+    only `container.entity_id → set of its members`. Used by
+    RedundantTargetDetector to identify a container with confidence
+    ("X has Y in its container map" definitively means Y is a member,
+    vs the symmetric dep map where Y could just be a sibling).
+
+    Source includes the same state-machine attributes as the dep map
+    (entity_id / group_members / lights) plus script targets.
+    """
+    out: dict[str, set[str]] = {}
+    try:
+        for state in hass.states.async_all():
+            for attr_name in ("entity_id", "group_members", "lights"):
+                members_attr = state.attributes.get(attr_name)
+                if not isinstance(members_attr, (list, tuple)):
+                    continue
+                members = {
+                    m for m in members_attr
+                    if isinstance(m, str) and "." in m
+                }
+                if members:
+                    out.setdefault(state.entity_id, set()).update(members)
+        # Scripts
+        try:
+            from .._script_targets import collect_script_targets
+
+            for sid, targets in collect_script_targets(hass).items():
+                if targets:
+                    out.setdefault(sid, set()).update(targets)
+        except Exception:  # pragma: no cover
+            pass
+    except Exception:  # pragma: no cover
+        _LOGGER.exception("Failed to build container map")
+        return {}
+    return {k: frozenset(v) for k, v in out.items()}
 
 
 def _build_entity_dependencies(
