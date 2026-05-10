@@ -523,6 +523,15 @@ def _dedup_grouped_insights(
         sig_key = _json.dumps(sig, sort_keys=True, default=str)
         by_signature[sig_key].append(ins)
 
+    # Threshold for the heuristic fallback. With 3+ entities sharing an
+    # identical fingerprint AND the same domain at the same exact pattern
+    # (e.g., 5 lights all showing "→ on 4 days in a row at ~17:34"),
+    # the chance of coincidence is vanishingly small — they're almost
+    # certainly part of one user routine, even if HA's data model
+    # doesn't expose a shared parent. A 2-entity coincidence is more
+    # plausible (two related sensors, e.g.), so 3 is the safe floor.
+    HEURISTIC_MERGE_THRESHOLD = 3
+
     result: list = []
     for group in by_signature.values():
         if len(group) < 2:
@@ -536,8 +545,25 @@ def _dedup_grouped_insights(
         if len(eids) < 2:
             result.extend(group)
             continue
+        # Primary path: discover a real shared container in the dep map.
         parent = _find_common_container(eids, entity_dependencies)
-        if parent is None:
+        merge_label: str | None = None
+        if parent is not None:
+            merge_label = parent
+        elif len(eids) >= HEURISTIC_MERGE_THRESHOLD:
+            # Fallback: same-domain co-fingerprint heuristic. The
+            # garden lights case from a real install — 7 lights all
+            # firing at 17:34 on 4 days in a row, no shared state-
+            # machine parent because the user's setup uses separate
+            # automations / sub-scripts / Adaptive Lighting / similar
+            # external coordination my dep map can't see. Merging is
+            # still the right move; the user's intent is "evening
+            # outdoor lights" even if HA doesn't know that.
+            domains = {eid.split(".", 1)[0] for eid in eids if "." in eid}
+            if len(domains) == 1:
+                merge_label = f"{next(iter(domains))}.* (cohort)"
+
+        if merge_label is None:
             result.extend(group)
             continue
 
@@ -548,13 +574,13 @@ def _dedup_grouped_insights(
         new_fp = {
             **rep.fingerprint,
             # Stable id across re-scans: parent + sorted-members list
-            "_grouped_under": parent,
+            "_grouped_under": merge_label,
             "_member_entities": sorted_eids,
         }
         new_id = _Insight.compute_id(rep.kind, new_fp)
         new_title = (
             f"{rep.title} "
-            f"(+{others} similar members of {parent})"
+            f"(+{others} similar entities: {merge_label})"
         )
         merged = replace(
             rep,
