@@ -929,7 +929,9 @@ async def ws_scan_now(
     msg: dict[str, Any],
 ) -> None:
     """Run all registered detectors immediately. Returns count of new insights."""
-    from .detectors import DETECTORS, DetectorContext
+    # Always go through run_all_detectors() — see detectors/__init__.py
+    # for the event-loop-yield discipline + setup-phase guard.
+    from .detectors import DETECTORS, DetectorContext, run_all_detectors
 
     store = _get_store(hass)
     buffer_ = _get_buffer(hass)
@@ -938,20 +940,12 @@ async def ws_scan_now(
         return
 
     ctx = DetectorContext(hass=hass, event_buffer=buffer_)
-    new_count = 0
-    detector_names: list[str] = []
-    for name, detector_cls in DETECTORS.items():
-        detector = detector_cls()
-        insights = await detector.scan(ctx)
-        for insight in insights:
-            await store.add_insight(insight)
-            new_count += 1
-        detector_names.append(name)
+    new_count = await run_all_detectors(hass, ctx, store)
 
     connection.send_result(
         msg["id"],
         {
-            "detectors_run": detector_names,
+            "detectors_run": list(DETECTORS.keys()),
             "insights_emitted": new_count,
         },
     )
