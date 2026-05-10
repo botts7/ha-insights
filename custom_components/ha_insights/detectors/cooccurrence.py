@@ -32,10 +32,14 @@ class CooccurrenceDetector(Detector):
 
     LOOKBACK_DAYS = 14
     WINDOW_SECONDS = 30
-    # Pairs closer than this don't count. Subclasses (LaggedCorrelationDetector)
-    # raise this to carve out their own "delayed reaction" niche without
-    # double-firing on what cooccurrence already catches.
-    MIN_DELTA_SECONDS = 0.0
+    # Pairs closer than this don't count. Two state changes <0.5s apart
+    # are virtually always two views of the same physical event (relay
+    # channels firing together, multi-endpoint Zigbee, sensor packs)
+    # rather than user-decided causation. Real cause→effect on the HA
+    # event bus has at minimum a few hundred ms of latency. Subclasses
+    # (LaggedCorrelationDetector) raise this further to carve out their
+    # "delayed reaction" niche without double-firing on cooccurrence.
+    MIN_DELTA_SECONDS = 0.5
     # Raised from 5 → 15 after the user reported 3000+ noisy cooccurrence
     # insights on a 1000-entity install. Five co-occurrences in 14 days is
     # genuinely just coincidence on a busy install; 15 is "this is probably
@@ -89,12 +93,22 @@ class CooccurrenceDetector(Detector):
             tuple[str, str, str, str], list[float]
         ] = defaultdict(list)  # (leader_eid, leader_state, follower_eid, follower_state) -> deltas
 
+        # Same-device pair filter — pulls (entity_id -> device_id) from
+        # ctx (populated once at scan start). Pairs whose entities share
+        # a device_id are virtually always two views of the same physical
+        # hardware event (relay board with input + relay channel,
+        # multi-endpoint Zigbee, sensor pack reporting all readings
+        # together). Filter at pair-discovery time so they never even
+        # reach the dedup dict.
+        device_id_by_entity = ctx.device_id_by_entity
+
         for i, follower in enumerate(events):
             if follower.entity_id not in busy_entities:
                 continue
             if not self._is_candidate(follower):
                 continue
             window_start = follower.timestamp - timedelta(seconds=self.WINDOW_SECONDS)
+            follower_device = device_id_by_entity.get(follower.entity_id)
             for j in range(i - 1, max(-1, i - self.MAX_LOOKBACK_EVENTS), -1):
                 leader = events[j]
                 if leader.timestamp < window_start:
@@ -104,6 +118,16 @@ class CooccurrenceDetector(Detector):
                 if leader.entity_id not in busy_entities:
                     continue
                 if not self._is_candidate(leader):
+                    continue
+                # Same-device skip: applies only when both entities have
+                # a non-None device_id AND they match. Two unrelated
+                # devices both with `device_id=None` would still pair.
+                leader_device = device_id_by_entity.get(leader.entity_id)
+                if (
+                    leader_device is not None
+                    and follower_device is not None
+                    and leader_device == follower_device
+                ):
                     continue
                 delta = (follower.timestamp - leader.timestamp).total_seconds()
                 if delta <= 0:

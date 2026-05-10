@@ -204,12 +204,31 @@ async def run_all_detectors(
     implicit_blocked = await build_implicit_blocklist(hass)
     effective_blocked: frozenset[str] = ctx.blocked_entities | implicit_blocked
 
+    # entity_id -> device_id map for "same-device pair" filtering in
+    # cooccurrence detectors. A relay board's two channels firing
+    # together produces 5 noisy "B follows A" insights at ~0s delta
+    # that are really one hardware event. With this map the cooccurrence
+    # detector can drop pairs that share a device_id.
+    device_id_by_entity: dict[str, str | None] = {}
+    try:
+        from homeassistant.helpers import entity_registry as er
+
+        registry = er.async_get(hass)
+        for ent in registry.entities.values():
+            device_id_by_entity[ent.entity_id] = ent.device_id
+    except Exception:  # pragma: no cover — defensive
+        pass  # cooccurrence falls back to its sub-second-delta filter
+
     # Snapshot the buffer ONCE on the loop, then hand the immutable
     # view to every detector. ~50 MB tuple-copy at the 500K cap — fast
     # enough to do on the loop, since it's a single memcpy of pointers.
     # The view also enforces blocked_entities and area_filter, so every
     # detector gets the same scoped data without per-detector code.
-    snapshot_ctx = replace(ctx, blocked_entities=effective_blocked)
+    snapshot_ctx = replace(
+        ctx,
+        blocked_entities=effective_blocked,
+        device_id_by_entity=device_id_by_entity,
+    )
     if ctx.event_buffer is not None:
         snapshot = ctx.event_buffer.snapshot()
         _LOGGER.info(
@@ -227,6 +246,7 @@ async def run_all_detectors(
                 blocked_entities=effective_blocked,
                 area_filter=ctx.area_filter,
             ),
+            device_id_by_entity=device_id_by_entity,
         )
 
     enabled = None

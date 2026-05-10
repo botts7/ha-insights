@@ -42,6 +42,13 @@ class DetectorContext:
     area_filter: frozenset[str] = field(default_factory=frozenset)
     blocked_entities: frozenset[str] = field(default_factory=frozenset)
     event_buffer: StateEventBuffer | None = None
+    # entity_id -> device_id map, populated once per scan from the entity
+    # registry. Detectors use it to filter out "same-device" pairs that
+    # are really just two views of the same physical hardware event
+    # (relay channels firing together, multi-endpoint Zigbee devices,
+    # sensor packs reporting simultaneously). None for entities without
+    # a device (template sensors, helpers).
+    device_id_by_entity: dict[str, str | None] = field(default_factory=dict)
 
 
 class Detector(ABC):
