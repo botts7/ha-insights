@@ -103,14 +103,18 @@ def test_loads_valid_detector_into_registry(tmp_path: Path) -> None:
 def test_syntax_error_does_not_break_loader(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """A broken module is logged and skipped — others still load."""
+    """A broken module is logged and skipped — others still load.
+
+    With the v1.0 sandbox in place, syntax errors are caught at AST-parse
+    time (before exec_module would have crashed), so the rejection logs
+    at WARNING level rather than the old ERROR level.
+    """
     _write(tmp_path / "broken.py", "this is not valid python ::: !!\n")
     _write(tmp_path / "good.py", _VALID_DETECTOR_BODY)
-    with caplog.at_level(logging.ERROR):
+    with caplog.at_level(logging.WARNING):
         count = load_user_detectors(tmp_path)
     assert count == 1
     assert "user_test_alpha" in DETECTORS
-    # The broken module gets logged at exception level (covers ERROR + traceback)
     assert any("broken.py" in record.message for record in caplog.records)
 
 
