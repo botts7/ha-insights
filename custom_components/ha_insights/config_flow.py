@@ -272,6 +272,62 @@ def get_scan_interval_hours(entry: ConfigEntry) -> int:
     return max(lo, min(hi, hours))
 
 
+def _detector_multiselect(hass: Any, current: list[str] | None) -> Any:
+    """Schema field for "which detectors to run" — multi-select dropdown.
+
+    Populated from the live DETECTORS registry. Defaults to "all enabled"
+    if the user hasn't customized (None == all). Returns a SelectSelector
+    so HA renders it as a multi-pick dropdown with friendly labels.
+    """
+    try:
+        from homeassistant.helpers import selector
+
+        # Lazy import to avoid circular: detectors -> config_flow -> detectors
+        from .detectors import DETECTORS
+
+        options = [
+            selector.SelectOptionDict(value=name, label=_DETECTOR_LABELS.get(name, name))
+            for name in sorted(DETECTORS.keys())
+        ]
+        return selector.SelectSelector(
+            selector.SelectSelectorConfig(
+                options=options,
+                mode=selector.SelectSelectorMode.DROPDOWN,
+                multiple=True,
+            )
+        )
+    except Exception:  # pragma: no cover — defensive fallback
+        return list
+
+
+def _area_multiselect(hass: Any) -> Any:
+    """Schema field for "which areas to scan" — empty selection = all.
+
+    AreaSelector handles all the registry lookups + label rendering for
+    free; we just configure it for multi-pick.
+    """
+    try:
+        from homeassistant.helpers import selector
+
+        return selector.AreaSelector(
+            selector.AreaSelectorConfig(multiple=True)
+        )
+    except Exception:  # pragma: no cover
+        return list
+
+
+_DETECTOR_LABELS: dict[str, str] = {
+    "schedule": "Schedule (time-of-day routines)",
+    "seasonality": "Seasonality (weekly patterns)",
+    "frequency_anomaly": "Frequency Anomaly (today vs baseline)",
+    "streak": "Streak (consecutive on/off days)",
+    "long_tail": "Long Tail (entities left on too long)",
+    "orphan_device": "Orphan Device (silent for too long)",
+    "cooccurrence": "Co-occurrence (B follows A within seconds)",
+    "lagged_correlation": "Lagged Correlation (B follows A within minutes)",
+}
+
+
 def _conversation_agent_selector(hass: Any) -> Any:
     """Schema field for the preferred conversation agent.
 
@@ -423,6 +479,9 @@ class HaInsightsOptionsFlow(OptionsFlow):
         self._preferred_agent_id: str | None = None
         self._refine_cost_threshold: float = DEFAULT_REFINE_COST_THRESHOLD_USD
         self._allow_user_detectors: bool = DEFAULT_ALLOW_USER_DETECTORS
+        self._enabled_detectors: list[str] | None = None
+        self._scan_areas: list[str] = []
+        self._scan_interval_hours: int = DEFAULT_SCAN_INTERVAL_HOURS
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
@@ -439,6 +498,24 @@ class HaInsightsOptionsFlow(OptionsFlow):
         current_preferred = get_preferred_agent_id(self.config_entry) or ""
         current_refine_threshold = get_refine_cost_threshold(self.config_entry)
         current_allow_user_detectors = get_allow_user_detectors(self.config_entry)
+        # Phase B/C/D scan controls. Default to "all detectors run" when the
+        # user hasn't customized (preserve v1.0 → v1.1 upgrade behavior).
+        current_enabled_detectors = get_enabled_detectors(self.config_entry)
+        current_scan_areas = sorted(get_scan_areas(self.config_entry))
+        current_scan_interval = get_scan_interval_hours(self.config_entry)
+        # When the user has never customized, present "all checked" so they
+        # can clearly see what's on; the underlying CONF_ENABLED_DETECTORS
+        # remains None (== all) until they explicitly drop a checkbox.
+        try:
+            from .detectors import DETECTORS as _DETECTORS  # noqa: N811
+
+            all_detector_names = sorted(_DETECTORS.keys())
+        except Exception:
+            all_detector_names = []
+        if current_enabled_detectors is None:
+            enabled_default = all_detector_names
+        else:
+            enabled_default = sorted(current_enabled_detectors)
 
         if user_input is not None:
             self._mode = LlmMode(user_input[CONF_LLM_MODE])
@@ -473,6 +550,30 @@ class HaInsightsOptionsFlow(OptionsFlow):
                     CONF_ALLOW_USER_DETECTORS, current_allow_user_detectors
                 )
             )
+            # Phase B: enabled detectors. If the user submits exactly the
+            # same set as "all known detectors", store None to keep the
+            # back-compat semantics (None == all). Otherwise store the
+            # user's explicit list.
+            raw_enabled = user_input.get(CONF_ENABLED_DETECTORS, enabled_default)
+            if isinstance(raw_enabled, (list, tuple, set, frozenset)):
+                normalized = sorted(str(s) for s in raw_enabled)
+                if normalized == all_detector_names:
+                    self._enabled_detectors = None
+                else:
+                    self._enabled_detectors = normalized
+            else:
+                self._enabled_detectors = None
+            # Phase C: area scope.
+            raw_areas = user_input.get(CONF_SCAN_AREAS, current_scan_areas)
+            self._scan_areas = (
+                [str(s) for s in raw_areas]
+                if isinstance(raw_areas, (list, tuple, set, frozenset))
+                else []
+            )
+            # Phase D: scan interval (hours).
+            self._scan_interval_hours = int(
+                user_input.get(CONF_SCAN_INTERVAL_HOURS, current_scan_interval)
+            )
             if self._mode is LlmMode.CLOUD and current_mode != LlmMode.CLOUD.value:
                 # Only require fresh consent if switching INTO cloud
                 return await self.async_step_cloud_consent()
@@ -488,6 +589,9 @@ class HaInsightsOptionsFlow(OptionsFlow):
                     CONF_PREFERRED_AGENT_ID: self._preferred_agent_id or "",
                     CONF_REFINE_COST_THRESHOLD_USD: self._refine_cost_threshold,
                     CONF_ALLOW_USER_DETECTORS: self._allow_user_detectors,
+                    CONF_ENABLED_DETECTORS: self._enabled_detectors,
+                    CONF_SCAN_AREAS: self._scan_areas,
+                    CONF_SCAN_INTERVAL_HOURS: self._scan_interval_hours,
                 },
             )
 
@@ -541,6 +645,29 @@ class HaInsightsOptionsFlow(OptionsFlow):
                     CONF_ALLOW_USER_DETECTORS,
                     default=current_allow_user_detectors,
                 ): bool,
+                # Phase B: per-detector enable/disable. Defaults to the
+                # full set when the user hasn't customized; explicit
+                # selection persists their choice. If the user selects
+                # exactly all known detectors, we treat that as "default"
+                # (stores None) so future-added detectors are auto-enabled.
+                vol.Optional(
+                    CONF_ENABLED_DETECTORS, default=enabled_default
+                ): _detector_multiselect(self.hass, enabled_default),
+                # Phase C: area scope. Empty = all areas (default).
+                vol.Optional(
+                    CONF_SCAN_AREAS, default=current_scan_areas
+                ): _area_multiselect(self.hass),
+                # Phase D: periodic auto-scan. 0 = manual only (default
+                # for v1.0 → v1.1 upgrades). 1 = every hour, etc.
+                vol.Optional(
+                    CONF_SCAN_INTERVAL_HOURS, default=current_scan_interval
+                ): vol.All(
+                    vol.Coerce(int),
+                    vol.Range(
+                        min=SCAN_INTERVAL_HOURS_RANGE[0],
+                        max=SCAN_INTERVAL_HOURS_RANGE[1],
+                    ),
+                ),
             }
         )
         return self.async_show_form(step_id="init", data_schema=schema)
@@ -562,12 +689,15 @@ class HaInsightsOptionsFlow(OptionsFlow):
                         CONF_DIGEST_HOUR: self._digest_hour,
                         CONF_PREFERRED_AGENT_ID: self._preferred_agent_id or "",
                         CONF_REFINE_COST_THRESHOLD_USD: self._refine_cost_threshold,
-                        # v1.0 review #3 follow-up: this branch was missing
-                        # _allow_user_detectors. A user toggling the
-                        # "allow detectors" flag in the same Configure
-                        # visit as switching INTO Cloud mode would lose
-                        # the toggle silently.
+                        # v1.0 review #3 follow-up: this branch must mirror
+                        # every field set in the init persist branch above.
+                        # Forgetting one silently drops a setting whenever
+                        # a user toggles it AND switches into Cloud mode in
+                        # the same visit.
                         CONF_ALLOW_USER_DETECTORS: self._allow_user_detectors,
+                        CONF_ENABLED_DETECTORS: self._enabled_detectors,
+                        CONF_SCAN_AREAS: self._scan_areas,
+                        CONF_SCAN_INTERVAL_HOURS: self._scan_interval_hours,
                     },
                 )
             self._mode = None

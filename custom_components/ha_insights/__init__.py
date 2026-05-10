@@ -17,6 +17,7 @@ from .config_flow import (
     get_digest_settings,
     get_lookback_days,
     get_notify_settings,
+    get_scan_interval_hours,
 )
 from .const import DOMAIN
 from .notifications.digest import schedule_digest
@@ -257,7 +258,72 @@ async def _setup_entry_body(
             name=f"{DOMAIN}_initial_backfill_{entry.entry_id}",
         )
         hass.data[DOMAIN][entry.entry_id]["backfill_task"] = backfill_task
+
+    # Phase D: periodic scan scheduler. Only registered when the user has
+    # configured a non-zero CONF_SCAN_INTERVAL_HOURS, AND only fires after
+    # EVENT_HOMEASSISTANT_STARTED so we don't kick a heavy scan during
+    # startup (the 2026-05-10 incident class). Cancel handle stashed in
+    # entry_data so unload tears it down cleanly.
+    scan_interval = get_scan_interval_hours(entry)
+    if scan_interval > 0:
+        from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
+        from homeassistant.helpers.event import async_track_time_interval
+
+        async def _scheduled_scan(_now=None) -> None:
+            await _run_scheduled_scan(hass, entry.entry_id)
+
+        async def _register_scheduler(_event=None) -> None:
+            cancel = async_track_time_interval(
+                hass, _scheduled_scan, timedelta(hours=scan_interval)
+            )
+            entry_data = hass.data.get(DOMAIN, {}).get(entry.entry_id)
+            if isinstance(entry_data, dict):
+                entry_data["scan_scheduler_cancel"] = cancel
+            _LOGGER.info(
+                "HA Insights periodic scan registered (every %dh)", scan_interval
+            )
+
+        if hass.is_running:
+            await _register_scheduler()
+        else:
+            hass.bus.async_listen_once(
+                EVENT_HOMEASSISTANT_STARTED, _register_scheduler
+            )
+
     return True
+
+
+async def _run_scheduled_scan(hass: HomeAssistant, entry_id: str) -> None:
+    """Run a single scan pass for the given config entry. Logs + swallows.
+
+    Used by the Phase D periodic scheduler. We never want a runaway
+    detector or transient store error to break the recurring schedule —
+    the next interval should still fire cleanly.
+    """
+    from .config_flow import get_blocked_entities, get_scan_areas
+    from .detectors import DetectorContext, run_all_detectors
+
+    entry_data = hass.data.get(DOMAIN, {}).get(entry_id)
+    if not isinstance(entry_data, dict):
+        return
+    buffer_ = entry_data.get("buffer")
+    store = entry_data.get("store")
+    if buffer_ is None or store is None:
+        return
+    entry = hass.config_entries.async_get_entry(entry_id)
+    if entry is None:
+        return
+    try:
+        ctx = DetectorContext(
+            hass=hass,
+            event_buffer=buffer_,
+            blocked_entities=get_blocked_entities(entry),
+            area_filter=get_scan_areas(entry),
+        )
+        added = await run_all_detectors(hass, ctx, store, entry=entry)
+        _LOGGER.info("HA Insights scheduled scan complete: %d new insights", added)
+    except Exception:  # noqa: BLE001
+        _LOGGER.exception("HA Insights scheduled scan failed")
 
 
 async def _notify_insight(hass: HomeAssistant, insight) -> None:
@@ -467,6 +533,10 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         data["unsub_store"]()
     if data.get("unsub_digest") is not None:
         data["unsub_digest"]()
+    # Phase D scheduler cleanup. Cancelling unregisters the time-interval
+    # listener so we don't keep firing scans after unload.
+    if data.get("scan_scheduler_cancel") is not None:
+        data["scan_scheduler_cancel"]()
     # Cancel any in-flight initial backfill before closing the store —
     # otherwise it'll write to a closed connection on its next flush.
     backfill_task = data.get("backfill_task")
