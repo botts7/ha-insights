@@ -504,6 +504,8 @@ def _dedup_grouped_insights(
     if not insights or not entity_dependencies:
         return insights
 
+    from collections import defaultdict as _defaultdict
+
     from ..insight import Insight as _Insight  # local to avoid cycle
 
     # Group by fingerprint signature with entity_id stripped. Insights
@@ -511,7 +513,7 @@ def _dedup_grouped_insights(
     # singleton bucket and pass through unchanged.
     import json as _json
 
-    by_signature: dict[str, list] = defaultdict(list)
+    by_signature: dict[str, list] = _defaultdict(list)
     for ins in insights:
         if "entity_id" not in ins.fingerprint:
             # Use a unique key so it doesn't merge with anything
