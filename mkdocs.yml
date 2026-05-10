@@ -1,0 +1,71 @@
+site_name: HA Insights
+site_description: Proactive routine detection and AI-assisted automation suggestions for Home Assistant.
+site_url: https://botts7.github.io/ha-insights/
+repo_url: https://github.com/botts7/ha-insights
+repo_name: botts7/ha-insights
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.sections
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.action.edit
+  icon:
+    repo: fontawesome/brands/github
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - def_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.tasklist:
+      custom_checkbox: true
+
+plugins:
+  - search
+
+nav:
+  - Home: index.md
+  - Architecture: ARCHITECTURE.md
+  - Privacy: privacy.md
+  - Writing a detector: writing-a-detector.md
+  - WebSocket API: ws-api.md
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/botts7/ha-insights

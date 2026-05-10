@@ -1,0 +1,44 @@
+name: Docs
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docs/**"
+      - "mkdocs.yml"
+      - ".github/workflows/docs.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install mkdocs-material
+        run: |
+          python -m pip install --upgrade pip
+          pip install mkdocs-material
+
+      - name: Build site
+        run: mkdocs build --strict
+
+      - name: Deploy to gh-pages
+        # mkdocs gh-deploy publishes to a branch named gh-pages on the same
+        # repo. Once the repo is flipped public and Pages is enabled (Settings
+        # -> Pages -> Source: gh-pages branch), the site goes live at
+        # https://botts7.github.io/ha-insights/.
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          mkdocs gh-deploy --force --message "docs: deploy {sha}"
