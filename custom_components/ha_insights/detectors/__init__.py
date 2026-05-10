@@ -350,6 +350,13 @@ async def run_all_detectors(
         # This detector ran end-to-end. Track its name + emitted ids so
         # the post-loop sweep can replace its prior active insights.
         completed_detectors.add(name)
+        # Group dedup: if N insights from this detector share fingerprint
+        # (modulo entity_id) AND their entities all live under a common
+        # scene/group, collapse them into one representative insight
+        # tagged with "(+N similar members of <parent>)". Catches the
+        # 7 garden lights all firing the same 17:34 streak — they
+        # belong to one user routine, not seven.
+        insights = _dedup_grouped_insights(insights, entity_dependencies)
         for insight in insights:
             # Annotate (don't suppress) insights that match an existing
             # automation — the user might want to know HA noticed the
@@ -436,6 +443,126 @@ async def run_all_detectors(
 # about. The cutoff should be wider than typical room groups but
 # narrower than house-wide aggregates.
 _MAX_GROUP_SIZE_FOR_SIBLING_FILTER = 6
+
+
+def _find_common_container(
+    entity_ids: list[str],
+    entity_dependencies: dict[str, frozenset[str]],
+) -> str | None:
+    """Return a parent (scene, group, group_light) that contains every
+    entity in entity_ids — or None if no single container covers them all.
+
+    A "container" of entity X is any entity whose dependency set lists X
+    as a member. The dep map is symmetric (parent ↔ child + sibling ↔
+    sibling for small groups), but a TRUE container's dep set will
+    contain ALL the input entities — siblings only have one of them
+    (themselves). That distinguishes parents from siblings.
+    """
+    if len(entity_ids) < 2:
+        return None
+    # Intersection of all dep sets — entities present in every input's deps
+    common: frozenset[str] | None = None
+    for eid in entity_ids:
+        deps = entity_dependencies.get(eid, frozenset())
+        if common is None:
+            common = deps
+        else:
+            common = common & deps
+        if not common:
+            return None
+    if common is None:
+        return None
+    # Among common entities, find one whose own dep set contains every
+    # input entity_id. That's the parent. Iterate sorted for stable
+    # output across re-scans.
+    for candidate in sorted(common):
+        cand_deps = entity_dependencies.get(candidate, frozenset())
+        if all(eid in cand_deps for eid in entity_ids):
+            return candidate
+    return None
+
+
+def _dedup_grouped_insights(
+    insights: list,
+    entity_dependencies: dict[str, frozenset[str]],
+) -> list:
+    """Collapse insights that share a fingerprint (mod entity_id) AND
+    whose entities live under the same group/scene container.
+
+    Most detectors put a primary `entity_id` in their fingerprint
+    (schedule, seasonality, streak, long_tail, frequency_anomaly).
+    Co-occurrence uses leader/follower keys — those don't dedup here
+    by design; co-occurrence's same-device + dependency filters already
+    handle group fan-out at pair-discovery time.
+
+    The merged output keeps the highest-confidence insight as the
+    representative, with a "(+N similar members of <parent>)" suffix
+    on its title so the user can see the rollup. The rest are dropped.
+    Re-scans produce the same merged id (fingerprint includes the
+    parent + sorted member list) so dedup is stable across runs.
+    """
+    if not insights or not entity_dependencies:
+        return insights
+
+    from ..insight import Insight as _Insight  # local to avoid cycle
+
+    # Group by fingerprint signature with entity_id stripped. Insights
+    # without an entity_id key (cooccurrence) sit alone in their own
+    # singleton bucket and pass through unchanged.
+    import json as _json
+
+    by_signature: dict[str, list] = defaultdict(list)
+    for ins in insights:
+        if "entity_id" not in ins.fingerprint:
+            # Use a unique key so it doesn't merge with anything
+            by_signature[f"_solo_{id(ins)}"].append(ins)
+            continue
+        sig = {k: v for k, v in ins.fingerprint.items() if k != "entity_id"}
+        sig_key = _json.dumps(sig, sort_keys=True, default=str)
+        by_signature[sig_key].append(ins)
+
+    result: list = []
+    for group in by_signature.values():
+        if len(group) < 2:
+            result.extend(group)
+            continue
+        eids = [
+            g.fingerprint["entity_id"]
+            for g in group
+            if isinstance(g.fingerprint.get("entity_id"), str)
+        ]
+        if len(eids) < 2:
+            result.extend(group)
+            continue
+        parent = _find_common_container(eids, entity_dependencies)
+        if parent is None:
+            result.extend(group)
+            continue
+
+        # Merge: keep highest-confidence as representative, suffix title.
+        rep = max(group, key=lambda g: g.confidence)
+        others = len(group) - 1
+        sorted_eids = sorted(eids)
+        new_fp = {
+            **rep.fingerprint,
+            # Stable id across re-scans: parent + sorted-members list
+            "_grouped_under": parent,
+            "_member_entities": sorted_eids,
+        }
+        new_id = _Insight.compute_id(rep.kind, new_fp)
+        new_title = (
+            f"{rep.title} "
+            f"(+{others} similar members of {parent})"
+        )
+        merged = replace(
+            rep,
+            id=new_id,
+            fingerprint=new_fp,
+            title=new_title,
+        )
+        result.append(merged)
+
+    return result
 
 
 def _build_entity_dependencies(

@@ -296,13 +296,48 @@ async def ws_list(
                         members
                     )
 
+        # Build script.X → set of entities the script touches. An automation
+        # action `service: script.evening_lights` should be treated as if
+        # it directly touched whatever entities the script's own actions
+        # target. Without this expansion, calling a script breaks the
+        # automation→entity reference chain and the 🤖 pill goes missing.
+        script_targets: dict[str, set[str]] = {}
+        try:
+            script_component = hass.data.get("script")
+            script_iter = None
+            if hasattr(script_component, "entities"):
+                script_iter = script_component.entities
+            elif isinstance(script_component, dict):
+                script_iter = script_component.values()
+            if script_iter is not None:
+                for ent in script_iter:
+                    raw = (
+                        getattr(ent, "raw_config", None)
+                        or getattr(ent, "_raw_config", None)
+                    )
+                    if not isinstance(raw, dict):
+                        continue
+                    sid = getattr(ent, "entity_id", None)
+                    if not isinstance(sid, str) or "." not in sid:
+                        continue
+                    # Script config has `sequence` (or `action`) at the top
+                    actions = raw.get("sequence") or raw.get("action") or []
+                    targets = _extract_target_entities(actions)
+                    if targets:
+                        script_targets[sid] = targets
+        except Exception:  # noqa: BLE001
+            pass  # script expansion is best-effort
+
         def _expand(refs: set[str]) -> set[str]:
-            """One-hop expansion: parent containers → members. Catches the
-            common case (scene → lights, group_light → bulbs); doesn't
-            recurse into nested groups, which is rare and adds complexity."""
+            """Expand parent containers → members AND script.X → its targets.
+            One-hop only; doesn't recurse into nested groups or script
+            chains. Covers the common case where automations call a
+            scene OR a script."""
             out = set(refs)
             for eid in list(refs):
                 out |= container_to_members.get(eid, set())
+                if eid.startswith("script."):
+                    out |= script_targets.get(eid, set())
             return out
 
         autos = await _load_existing_automations(hass)
@@ -320,7 +355,16 @@ async def ws_list(
                     referenced.update(e for e in ti if isinstance(e, str))
             # Action target references — reuse the conflict scanner helper
             referenced |= _extract_target_entities(auto.get("action"))
-            # Expand: scene → its members, group light → its bulbs
+            # Action SERVICE calls — `service: script.X` doesn't appear as
+            # a target so _extract_target_entities misses it. Add explicitly.
+            for action in _as_list(auto.get("action")):
+                if not isinstance(action, dict):
+                    continue
+                svc = action.get("service")
+                if isinstance(svc, str) and svc.startswith("script."):
+                    # script.evening_lights → script.evening_lights (entity_id form)
+                    referenced.add(svc)
+            # Expand: scene → members, group light → bulbs, script → targets
             referenced = _expand(referenced)
             for eid in referenced:
                 entity_to_automations.setdefault(eid, []).append(label)
