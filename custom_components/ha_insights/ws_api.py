@@ -992,6 +992,8 @@ async def ws_scan_now(
     # Resolve which entry to read config from. With multi-entry installs
     # we apply per-entry filters; for single-entry the loop runs once.
     new_count = 0
+    swept_stale = 0
+    suppressed_as_duplicate = 0
     detectors_actually_run: list[str] = []
     for entry_id, entry_data in hass.data.get(DOMAIN, {}).items():
         if not isinstance(entry_data, dict) or "buffer" not in entry_data:
@@ -1012,15 +1014,21 @@ async def ws_scan_now(
             area_filter=get_scan_areas(entry),
         )
         try:
-            new_count += await run_all_detectors(
+            summary = await run_all_detectors(
                 hass,
                 ctx,
                 entry_data["store"],
                 entry=entry,
                 cancel_event=cancel_event,
+                return_summary=True,
             )
         finally:
             entry_data.pop("scan_cancel_event", None)
+        # summary is a dict when return_summary=True
+        if isinstance(summary, dict):
+            new_count += summary.get("added", 0)
+            swept_stale += summary.get("swept_stale", 0)
+            suppressed_as_duplicate += summary.get("suppressed_as_duplicate", 0)
         enabled = get_enabled_detectors(entry)
         names = (
             list(DETECTORS.keys())
@@ -1036,6 +1044,8 @@ async def ws_scan_now(
         {
             "detectors_run": detectors_actually_run,
             "insights_emitted": new_count,
+            "swept_stale": swept_stale,
+            "suppressed_as_duplicate": suppressed_as_duplicate,
             "canceled": all(
                 d.get("scan_canceled", False)
                 for d in hass.data.get(DOMAIN, {}).values()

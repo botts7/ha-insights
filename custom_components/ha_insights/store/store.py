@@ -240,6 +240,77 @@ class InsightStore:
         await self._c.commit()
         self._notify("applied", await self.get_insight(insight_id))
 
+    async def replace_active_insights_for_detectors(
+        self,
+        completed_detectors: frozenset[str],
+        emitted_ids: frozenset[str],
+    ) -> int:
+        """Sweep stale ACTIVE insights from a set of detectors.
+
+        Called once at the end of run_all_detectors. The contract:
+          For every detector that ran end-to-end this scan, any insight
+          PREVIOUSLY in the store from that detector that wasn't re-emitted
+          is now stale and gets deleted — UNLESS the user has acted on it
+          (applied / dismissed) or it's currently snoozed. Insights from
+          detectors that didn't run (disabled, canceled, timed-out) are
+          untouched, since we have no fresh signal about them.
+
+        This makes the store a "current truth" snapshot rather than an
+        unbounded log. Adds zero user-visible state — applied / dismissed
+        / snoozed semantics are preserved exactly.
+
+        Returns the count of stale rows removed for telemetry.
+        """
+        if not completed_detectors:
+            return 0
+        # Build the placeholder lists on the fly (SQLite doesn't support
+        # parameterized IN with arbitrary cardinality). Detector names and
+        # insight IDs are integration-controlled (no user input), so this
+        # is safe from SQL injection — but we still parameterize the
+        # values to be defensive.
+        det_marks = ",".join("?" * len(completed_detectors))
+        params: list[object] = list(completed_detectors)
+        emitted_clause = ""
+        if emitted_ids:
+            id_marks = ",".join("?" * len(emitted_ids))
+            emitted_clause = f"AND id NOT IN ({id_marks})"
+            params.extend(emitted_ids)
+
+        async with self._c.execute(
+            f"SELECT COUNT(*) FROM insights "
+            f"WHERE detector IN ({det_marks}) "
+            f"  {emitted_clause} "
+            f"  AND applied_at IS NULL "
+            f"  AND dismissed_at IS NULL "
+            f"  AND (snoozed_until IS NULL "
+            f"       OR snoozed_until <= strftime('%s','now')) ",
+            params,
+        ) as cur:
+            row = await cur.fetchone()
+        before = int(row[0]) if row else 0
+        if before == 0:
+            return 0
+
+        await self._c.execute(
+            f"DELETE FROM insights "
+            f"WHERE detector IN ({det_marks}) "
+            f"  {emitted_clause} "
+            f"  AND applied_at IS NULL "
+            f"  AND dismissed_at IS NULL "
+            f"  AND (snoozed_until IS NULL "
+            f"       OR snoozed_until <= strftime('%s','now')) ",
+            params,
+        )
+        await self._c.commit()
+
+        # Live subscribers don't get per-row removal events here — the
+        # panel triggers a list-refresh right after scan_now completes
+        # (its post-scan handler refetches the full list), so the cleanup
+        # is reflected within ~100ms of the scan finishing. Adding a
+        # bulk "swept" event type is a follow-up if scheduled-scan
+        # deletes need to land live in already-open panels.
+        return before
+
     async def purge_observations(self) -> dict[str, int]:
         """Wipe insights + outbound_calls audit log.
 

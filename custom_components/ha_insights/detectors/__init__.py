@@ -149,7 +149,8 @@ async def run_all_detectors(
     allow_during_setup: bool = False,
     entry: "ConfigEntry | None" = None,  # noqa: F821 — string forward-ref
     cancel_event: "asyncio.Event | None" = None,
-) -> int:
+    return_summary: bool = False,
+) -> int | dict[str, int]:
     """Fan out a single scan pass across every registered detector.
 
     THE single chokepoint for running detectors against a buffer. All
@@ -256,6 +257,13 @@ async def run_all_detectors(
 
     added = 0
     suppressed_as_duplicate = 0
+    # Track which detectors completed end-to-end + the IDs they emitted.
+    # After the loop we hand both to the store so it can sweep stale
+    # active insights from JUST those detectors. Detectors that didn't
+    # run (disabled, timed out, ceiling-skipped, canceled) keep their
+    # historical insights — we have no fresh signal that those are stale.
+    completed_detectors: set[str] = set()
+    emitted_ids: set[str] = set()
     for name, detector_cls in DETECTORS.items():
         if cancel_event is not None and cancel_event.is_set():
             _LOGGER.info("HA Insights scan canceled by user before %r", name)
@@ -295,6 +303,9 @@ async def run_all_detectors(
             _LOGGER.exception("HA Insights detector %r failed", name)
             continue
 
+        # This detector ran end-to-end. Track its name + emitted ids so
+        # the post-loop sweep can replace its prior active insights.
+        completed_detectors.add(name)
         for insight in insights:
             # Suppress insights that duplicate an existing automation —
             # the user already has the automation, so suggesting they
@@ -308,6 +319,7 @@ async def run_all_detectors(
                     suppressed_as_duplicate += 1
                     continue
             await store.add_insight(insight)
+            emitted_ids.add(insight.id)
             added += 1
 
     if suppressed_as_duplicate:
@@ -317,6 +329,28 @@ async def run_all_detectors(
             suppressed_as_duplicate,
         )
 
+    # Sweep stale active insights from the detectors that ran. Applied,
+    # dismissed, and unexpired-snoozed insights are preserved (user
+    # actions outweigh staleness). Detectors that didn't run keep their
+    # prior insights untouched (no fresh signal).
+    swept = await store.replace_active_insights_for_detectors(
+        completed_detectors=frozenset(completed_detectors),
+        emitted_ids=frozenset(emitted_ids),
+    )
+    if swept:
+        _LOGGER.info(
+            "HA Insights scan: swept %d stale active insights "
+            "(no longer emitted by their detector)",
+            swept,
+        )
+
+    if return_summary:
+        return {
+            "added": added,
+            "swept_stale": swept,
+            "suppressed_as_duplicate": suppressed_as_duplicate,
+            "completed_detectors": len(completed_detectors),
+        }
     return added
 
 
