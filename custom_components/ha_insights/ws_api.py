@@ -259,6 +259,62 @@ async def ws_list(
     except Exception:  # noqa: BLE001
         pass  # fall through with empty dict
 
+    # Build entity → list-of-automation-names map so each insight can
+    # surface "🤖 used in 3 automations" with the actual aliases. Reads
+    # the same source as the conflict scanner (HA's automation registry
+    # + automations.yaml), then walks each automation's triggers and
+    # actions to collect every entity_id mentioned. Looser than the
+    # conflict-scanner overlap test (which requires both trigger AND
+    # target to match) — here we just want "is this entity touched by
+    # any automation, anywhere in its config" for context display.
+    entity_to_automations: dict[str, list[str]] = {}
+    try:
+        from .apply.conflict_scanner import _as_list, _extract_target_entities
+        from .detectors import _load_existing_automations
+
+        autos = await _load_existing_automations(hass)
+        for auto in autos:
+            label = auto.get("alias") or auto.get("id") or "(unnamed automation)"
+            referenced: set[str] = set()
+            # Trigger entity references
+            for t in _as_list(auto.get("trigger")):
+                if not isinstance(t, dict):
+                    continue
+                ti = t.get("entity_id")
+                if isinstance(ti, str):
+                    referenced.add(ti)
+                elif isinstance(ti, list):
+                    referenced.update(e for e in ti if isinstance(e, str))
+            # Action target references — reuse the conflict scanner helper
+            referenced |= _extract_target_entities(auto.get("action"))
+            for eid in referenced:
+                entity_to_automations.setdefault(eid, []).append(label)
+    except Exception:  # noqa: BLE001
+        pass  # additive enrichment; missing values just become empty lists
+
+    def _entities_in_insight(ins) -> set[str]:
+        """All entity_ids that appear in an insight's fingerprint or payload.
+        Used to look up which existing automations reference any of them."""
+        out: set[str] = set()
+        for key in (
+            "entity_id",
+            "leader_entity_id",
+            "follower_entity_id",
+            "target_entity_id",
+        ):
+            v = ins.fingerprint.get(key)
+            if isinstance(v, str) and "." in v:
+                out.add(v)
+        # Also walk action.target.entity_id in payload (long_tail, schedule, etc.)
+        if isinstance(ins.payload, dict):
+            try:
+                from .apply.conflict_scanner import _extract_target_entities
+
+                out |= _extract_target_entities(ins.payload.get("action"))
+            except Exception:  # noqa: BLE001
+                pass
+        return out
+
     enriched: list[dict[str, Any]] = []
     for ins in insights:
         d = ins.to_dict()
@@ -275,6 +331,16 @@ async def ws_list(
         else:
             d["domain"] = None
             d["device_class"] = None
+        # Which existing automations reference any of this insight's
+        # entities? De-dup'd list of aliases. Empty when none.
+        referenced_in: list[str] = []
+        seen: set[str] = set()
+        for ent in _entities_in_insight(ins):
+            for label in entity_to_automations.get(ent, []):
+                if label not in seen:
+                    seen.add(label)
+                    referenced_in.append(label)
+        d["referenced_in_automations"] = referenced_in
         enriched.append(d)
 
     connection.send_result(msg["id"], {"insights": enriched})
