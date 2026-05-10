@@ -36,9 +36,25 @@ class CooccurrenceDetector(Detector):
     # raise this to carve out their own "delayed reaction" niche without
     # double-firing on what cooccurrence already catches.
     MIN_DELTA_SECONDS = 0.0
-    MIN_OCCURRENCES = 5
-    DELTA_STDDEV_MAX_SECONDS = 12.0
+    # Raised from 5 → 15 after the user reported 3000+ noisy cooccurrence
+    # insights on a 1000-entity install. Five co-occurrences in 14 days is
+    # genuinely just coincidence on a busy install; 15 is "this is probably
+    # a real pattern." Tunable via subclass override.
+    MIN_OCCURRENCES = 15
+    # Tightened from 12s → 6s. Co-occurrences whose timing is loose are
+    # almost always coincidence, not causal. Requiring tight timing
+    # consistency (stddev under 6s) culls the long tail of spurious pairs.
+    DELTA_STDDEV_MAX_SECONDS = 6.0
     MAX_LOOKBACK_EVENTS = 200  # cap pair search per follower for perf
+    # Floor for emitted insight confidence — anything below this is
+    # dropped at scan time. Stops insights with `confidence=0.32` from
+    # spamming the panel; users sort by confidence anyway.
+    MIN_CONFIDENCE_TO_EMIT = 0.55
+    # Hard cap on insights emitted per scan, sorted by confidence
+    # descending. Prevents a 3000-pair explosion on installs with high
+    # entity churn. Users can raise via subclass if they really want
+    # the long tail.
+    MAX_INSIGHTS_PER_SCAN = 50
 
     async def scan(self, ctx: DetectorContext) -> list[Insight]:
         if ctx.event_buffer is None:
@@ -119,9 +135,16 @@ class CooccurrenceDetector(Detector):
             if len(deltas) < self.MIN_OCCURRENCES:
                 continue
             insight = self._evaluate_pair(key, deltas, events, leader_counts)
-            if insight is not None:
-                insights.append(insight)
-        return insights
+            if insight is None:
+                continue
+            if insight.confidence < self.MIN_CONFIDENCE_TO_EMIT:
+                continue
+            insights.append(insight)
+        # Cap by confidence — keep top N, drop the rest. Users sort by
+        # confidence anyway; the 51st-most-confident insight is rarely
+        # worth the panel real estate.
+        insights.sort(key=lambda i: i.confidence, reverse=True)
+        return insights[: self.MAX_INSIGHTS_PER_SCAN]
 
     def _is_candidate(self, ev: StateEvent) -> bool:
         if ev.new_state is None or ev.new_state == ev.old_state:

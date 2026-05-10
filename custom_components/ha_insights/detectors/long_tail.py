@@ -53,6 +53,13 @@ class LongTailDetector(Detector):
     # Cap span duration so a permanently-on entity doesn't produce a
     # one-shot multi-day "insight" before any state change at all.
     MAX_REASONABLE_HOURS = 48
+    # Floor for emitted insight confidence — anything below is dropped.
+    MIN_CONFIDENCE_TO_EMIT = 0.5
+    # Hard cap per scan to keep the panel usable on large installs.
+    # Sorted by confidence desc; the user's worst-offender entities
+    # show first. Was producing 500+ "left on too long" insights on a
+    # 1000-entity install before this cap.
+    MAX_INSIGHTS_PER_SCAN = 30
 
     async def scan(self, ctx: DetectorContext) -> list[Insight]:
         if ctx.event_buffer is None:
@@ -90,9 +97,13 @@ class LongTailDetector(Detector):
             insight = self._build_insight(
                 entity_id, domain, long_spans, threshold_min
             )
-            if insight is not None:
-                insights.append(insight)
-        return insights
+            if insight is None:
+                continue
+            if insight.confidence < self.MIN_CONFIDENCE_TO_EMIT:
+                continue
+            insights.append(insight)
+        insights.sort(key=lambda i: i.confidence, reverse=True)
+        return insights[: self.MAX_INSIGHTS_PER_SCAN]
 
     def _compute_active_spans(self, events: list[StateEvent]) -> list[float]:
         """Walk an entity's chronological event list, return active-span lengths.

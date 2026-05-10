@@ -35,6 +35,7 @@ SUPPORTED_METHODS = (
     "apply",
     "undo",
     "scan_now",
+    "cancel_scan",
     "purge_all",
     "explain",
     "refine",
@@ -58,6 +59,7 @@ def async_register(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_snooze)
     websocket_api.async_register_command(hass, ws_apply)
     websocket_api.async_register_command(hass, ws_scan_now)
+    websocket_api.async_register_command(hass, ws_cancel_scan)
     websocket_api.async_register_command(hass, ws_purge_all)
     websocket_api.async_register_command(hass, ws_explain)
     websocket_api.async_register_command(hass, ws_refine)
@@ -928,9 +930,15 @@ async def ws_scan_now(
     connection: websocket_api.ActiveConnection,
     msg: dict[str, Any],
 ) -> None:
-    """Run all registered detectors immediately. Returns count of new insights."""
-    # Always go through run_all_detectors() — see detectors/__init__.py
-    # for the event-loop-yield discipline + setup-phase guard.
+    """Run all registered detectors immediately. Returns count of new insights.
+
+    Cancellable via the home_insights/cancel_scan WS endpoint — that
+    sets an asyncio.Event stashed in entry_data, which run_all_detectors
+    checks between detectors and exits early on. Insights from already-
+    completed detectors are kept.
+    """
+    import asyncio as _asyncio
+
     from .config_flow import (
         get_blocked_entities,
         get_enabled_detectors,
@@ -954,15 +962,28 @@ async def ws_scan_now(
         entry = hass.config_entries.async_get_entry(entry_id)
         if entry is None:
             continue
+        # Per-entry cancel event. Stashed in entry_data so the cancel
+        # endpoint can find + set it. Cleared when the scan finishes
+        # so a stale signal from a previous scan doesn't insta-cancel
+        # the next one.
+        cancel_event = _asyncio.Event()
+        entry_data["scan_cancel_event"] = cancel_event
         ctx = DetectorContext(
             hass=hass,
             event_buffer=entry_data["buffer"],
             blocked_entities=get_blocked_entities(entry),
             area_filter=get_scan_areas(entry),
         )
-        new_count += await run_all_detectors(
-            hass, ctx, entry_data["store"], entry=entry
-        )
+        try:
+            new_count += await run_all_detectors(
+                hass,
+                ctx,
+                entry_data["store"],
+                entry=entry,
+                cancel_event=cancel_event,
+            )
+        finally:
+            entry_data.pop("scan_cancel_event", None)
         enabled = get_enabled_detectors(entry)
         names = (
             list(DETECTORS.keys())
@@ -978,8 +999,41 @@ async def ws_scan_now(
         {
             "detectors_run": detectors_actually_run,
             "insights_emitted": new_count,
+            "canceled": all(
+                d.get("scan_canceled", False)
+                for d in hass.data.get(DOMAIN, {}).values()
+                if isinstance(d, dict)
+            ),
         },
     )
+
+
+@websocket_api.websocket_command(
+    {vol.Required("type"): "home_insights/cancel_scan"}
+)
+@websocket_api.require_admin
+@callback
+def ws_cancel_scan(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Signal any in-flight scan to stop after the current detector returns.
+
+    Python can't safely cancel a running thread, so the in-flight detector
+    runs to completion (its result is still applied). All later detectors
+    are skipped. The user gets back to a working UI within seconds rather
+    than waiting out the full scan budget.
+    """
+    canceled_for = []
+    for entry_id, entry_data in hass.data.get(DOMAIN, {}).items():
+        if not isinstance(entry_data, dict):
+            continue
+        event = entry_data.get("scan_cancel_event")
+        if event is not None:
+            event.set()
+            canceled_for.append(entry_id)
+    connection.send_result(msg["id"], {"canceled_for": canceled_for})
 
 
 @websocket_api.websocket_command(

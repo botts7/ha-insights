@@ -148,6 +148,7 @@ async def run_all_detectors(
     *,
     allow_during_setup: bool = False,
     entry: "ConfigEntry | None" = None,  # noqa: F821 — string forward-ref
+    cancel_event: "asyncio.Event | None" = None,
 ) -> int:
     """Fan out a single scan pass across every registered detector.
 
@@ -231,8 +232,24 @@ async def run_all_detectors(
     # cheap (~3ms at 340K events). Avoids threading the size through the
     # snapshot_ctx wrap above, which is harder to read.
 
+    # Load existing automations once so we can suppress insights that
+    # duplicate them. Reads automations.yaml via executor to avoid
+    # blocking the loop. Exceptions are non-fatal — if we can't read
+    # the file, we just don't filter.
+    existing_automations = await _load_existing_automations(hass)
+    if existing_automations:
+        _LOGGER.info(
+            "HA Insights scan: %d existing automations loaded for "
+            "duplicate suppression",
+            len(existing_automations),
+        )
+
     added = 0
+    suppressed_as_duplicate = 0
     for name, detector_cls in DETECTORS.items():
+        if cancel_event is not None and cancel_event.is_set():
+            _LOGGER.info("HA Insights scan canceled by user before %r", name)
+            break
         if enabled is not None and name not in enabled:
             _LOGGER.debug("Detector %r disabled by config; skipping", name)
             continue
@@ -269,10 +286,60 @@ async def run_all_detectors(
             continue
 
         for insight in insights:
+            # Suppress insights that duplicate an existing automation —
+            # the user already has the automation, so suggesting they
+            # set it up again is noise. Conflicts list is preserved on
+            # the insight if you want to surface "shadowed by X" later.
+            if existing_automations:
+                from ..apply.conflict_scanner import find_conflicts
+
+                conflicts = find_conflicts(insight, existing_automations)
+                if conflicts:
+                    suppressed_as_duplicate += 1
+                    continue
             await store.add_insight(insight)
             added += 1
 
+    if suppressed_as_duplicate:
+        _LOGGER.info(
+            "HA Insights scan: suppressed %d insights duplicating existing "
+            "automations",
+            suppressed_as_duplicate,
+        )
+
     return added
+
+
+async def _load_existing_automations(hass: HomeAssistant) -> list[dict]:
+    """Read user's automations.yaml off the loop, return as a list of dicts.
+
+    Returns [] if the file doesn't exist, can't be parsed, or any I/O
+    error — the conflict-scan filter is best-effort and shouldn't fail
+    the whole scan if it can't read the file.
+    """
+    import os
+
+    def _read_yaml() -> list[dict]:
+        try:
+            import yaml
+
+            path = os.path.join(hass.config.config_dir, "automations.yaml")
+            if not os.path.exists(path):
+                return []
+            with open(path, encoding="utf-8") as f:
+                loaded = yaml.safe_load(f)
+            if loaded is None:
+                return []
+            if isinstance(loaded, list):
+                return [item for item in loaded if isinstance(item, dict)]
+            if isinstance(loaded, dict):
+                return [loaded]
+            return []
+        except Exception:  # noqa: BLE001 — best-effort read
+            _LOGGER.exception("Could not load automations.yaml for conflict scan")
+            return []
+
+    return await hass.async_add_executor_job(_read_yaml)
 
 
 __all__ = [
