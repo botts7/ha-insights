@@ -219,6 +219,26 @@ async def run_all_detectors(
     except Exception:  # pragma: no cover — defensive
         pass  # cooccurrence falls back to its sub-second-delta filter
 
+    # Entity dependency map. Walks the state machine looking for entities
+    # that reference other entities via standard HA conventions:
+    #   - attributes.entity_id is a list (groups, group_light, group_cover)
+    #   - attributes.source / source_entity_id (statistics, utility_meter,
+    #     integration sensors, derive sensors)
+    # Pairs of entities connected by ANY dependency edge are dropped from
+    # cooccurrence at pair-discovery — the second entity isn't really
+    # "responding to" the first, it's just reflecting the same underlying
+    # event.
+    entity_dependencies = _build_entity_dependencies(hass)
+    if entity_dependencies:
+        # Count edges so a one-line log gives a sense of scale; helps
+        # diagnose "why is cooccurrence still finding this pair?"
+        edge_count = sum(len(v) for v in entity_dependencies.values()) // 2
+        _LOGGER.info(
+            "HA Insights: built dependency map for %d entities (~%d edges)",
+            len(entity_dependencies),
+            edge_count,
+        )
+
     # Load existing automations once per scan so we can:
     #   1. Pass to TriggerDriftDetector etc via ctx.existing_automations
     #   2. Mark detector emissions with conflicts_with after the run
@@ -241,6 +261,7 @@ async def run_all_detectors(
         blocked_entities=effective_blocked,
         device_id_by_entity=device_id_by_entity,
         existing_automations=existing_automations,
+        entity_dependencies=entity_dependencies,
     )
     if ctx.event_buffer is not None:
         snapshot = ctx.event_buffer.snapshot()
@@ -261,6 +282,7 @@ async def run_all_detectors(
             ),
             device_id_by_entity=device_id_by_entity,
             existing_automations=existing_automations,
+            entity_dependencies=entity_dependencies,
         )
 
     enabled = None
@@ -387,6 +409,62 @@ async def run_all_detectors(
             "completed_detectors": len(completed_detectors),
         }
     return added
+
+
+def _build_entity_dependencies(
+    hass: HomeAssistant,
+) -> dict[str, frozenset[str]]:
+    """Walk the state machine, return a symmetric entity → related-set map.
+
+    Captures HA's standard entity-dependency conventions so cooccurrence
+    can drop pairs that aren't really independent observations:
+
+    1. Group membership (`attributes.entity_id` is a list of members).
+       Used by `group.*`, `light.*` (group_light), `cover.*`, `binary_sensor.*`
+       (binary_sensor.group), `media_player.*` (universal_media_player), etc.
+       Each member ↔ parent edge AND each member ↔ sibling edge is added.
+
+    2. Derived sensors (`attributes.source` / `attributes.source_entity_id`).
+       Used by statistics, utility_meter, integration, derivative,
+       template, and most "transform existing entity" sensors.
+
+    Returns a symmetric dict: if A depends on B, both directions are
+    represented. Frozenset values keep the inner-loop lookup cheap.
+    """
+    from collections import defaultdict
+
+    raw: dict[str, set[str]] = defaultdict(set)
+    try:
+        for state in hass.states.async_all():
+            # Group-style children
+            members_attr = state.attributes.get("entity_id")
+            if isinstance(members_attr, (list, tuple)):
+                members = [
+                    m
+                    for m in members_attr
+                    if isinstance(m, str) and "." in m
+                ]
+                if members:
+                    for m in members:
+                        # parent ↔ child
+                        raw[state.entity_id].add(m)
+                        raw[m].add(state.entity_id)
+                    # siblings: every pair of children of the same parent
+                    if len(members) > 1:
+                        member_set = set(members)
+                        for m in members:
+                            raw[m] |= member_set - {m}
+            # Source-style derived
+            for attr in ("source", "source_entity_id"):
+                src = state.attributes.get(attr)
+                if isinstance(src, str) and "." in src:
+                    raw[state.entity_id].add(src)
+                    raw[src].add(state.entity_id)
+    except Exception:  # pragma: no cover — defensive
+        _LOGGER.exception("Failed to build entity dependency map")
+        return {}
+
+    return {k: frozenset(v) for k, v in raw.items()}
 
 
 async def _load_existing_automations(hass: HomeAssistant) -> list[dict]:

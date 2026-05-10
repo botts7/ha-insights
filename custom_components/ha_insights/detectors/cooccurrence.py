@@ -101,6 +101,12 @@ class CooccurrenceDetector(Detector):
         # together). Filter at pair-discovery time so they never even
         # reach the dedup dict.
         device_id_by_entity = ctx.device_id_by_entity
+        # Entity dependency map (groups, derived sensors, aggregates) —
+        # see docstring on DetectorContext.entity_dependencies. Pairs
+        # connected by any dependency edge are dropped: they aren't
+        # "responding to" each other, they're reflecting the same
+        # underlying event.
+        entity_dependencies = ctx.entity_dependencies
 
         for i, follower in enumerate(events):
             if follower.entity_id not in busy_entities:
@@ -127,6 +133,14 @@ class CooccurrenceDetector(Detector):
                     leader_device is not None
                     and follower_device is not None
                     and leader_device == follower_device
+                ):
+                    continue
+                # Dependency-graph skip: parent group fires its members,
+                # member fires sibling members, derived sensor reflects
+                # source. None of these are useful "B follows A" patterns.
+                if (
+                    follower.entity_id
+                    in entity_dependencies.get(leader.entity_id, frozenset())
                 ):
                     continue
                 delta = (follower.timestamp - leader.timestamp).total_seconds()

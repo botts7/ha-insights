@@ -55,6 +55,21 @@ class DetectorContext:
     # dead action, stale condition) and by run_all_detectors itself to
     # mark insights with conflicts_with.
     existing_automations: list[dict[str, Any]] = field(default_factory=list)
+    # entity_id -> set of related entity_ids via DEPENDENCY relationships.
+    # Built once per scan from the state machine. Captures multiple kinds
+    # of entity-to-entity dependencies that all produce false-positive
+    # co-occurrence patterns:
+    #
+    #   - Group membership: light.living_room (group) contains light.lamp_1,
+    #     light.lamp_2 — children fire ~1s after the parent group action
+    #   - Derived sensors: statistics, utility_meter, integration sensors
+    #     report their source entity in attributes.source / source_entity_id
+    #   - Aggregate binary sensors: byd_sealion_7_windows is an OR of all
+    #     individual window sensors and changes when any of them does
+    #
+    # Any pair sharing a dependency edge is treated as "same root event,
+    # observed twice" and dropped at the cooccurrence pair-discovery step.
+    entity_dependencies: dict[str, frozenset[str]] = field(default_factory=dict)
 
 
 class Detector(ABC):

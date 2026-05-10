@@ -50,15 +50,23 @@ def find_conflicts(
 def _automations_overlap(
     a: dict[str, Any], b: dict[str, Any], time_window_min: int
 ) -> bool:
-    """Either time-trigger or state-trigger overlap counts as a conflict.
+    """Detect overlap between two automations: target + trigger pattern.
 
-    Both checks require BOTH trigger overlap AND action-target overlap.
+    All checks require BOTH trigger overlap AND action-target overlap.
     Without the action check we'd flag any two automations triggered by
     the same entity as conflicts — but two automations on `motion -> on`
     that turn on different things (light vs notification vs scene) are
-    independent, not duplicates. v1.1 tightening after a 1000-entity
-    install where every long_tail insight was dropped because the user
-    happened to have any pre-existing automation on that entity.
+    independent, not duplicates.
+
+    Trigger overlap branches (in order of strictness):
+      1. Time-trigger: both `platform: time`, time strings within ±N min
+      2. State-trigger: same source entity_id + target state
+      3. Schedule-like fallback: both triggers are schedule-y in any way
+         (time / time_pattern / sun / calendar / template), targets match.
+         This catches morning-routine automations triggered by `sun`
+         that the user reports as "missing" because the streak detector
+         sees the resulting state change at a fixed clock time but the
+         automation triggers on a celestial event.
     """
     a_triggers = _as_list(a.get("trigger"))
     b_triggers = _as_list(b.get("trigger"))
@@ -80,13 +88,39 @@ def _automations_overlap(
                 return True
 
     # State-trigger overlap: same trigger signature AND same target entity.
-    # Action targets already overlap (gate above), so we only need the
-    # state-trigger source to match.
     a_states = _state_trigger_signatures(a_triggers)
     b_states = _state_trigger_signatures(b_triggers)
     if a_states & b_states:
         return True
 
+    # Schedule-like fallback: when target overlaps AND BOTH automations
+    # have a schedule-driven trigger of any kind, we can't compare exact
+    # times (the existing automation triggers on sun, the insight on a
+    # learned clock time), but the intent is the same. Flag as conflict.
+    if _has_schedule_like_trigger(a_triggers) and _has_schedule_like_trigger(
+        b_triggers
+    ):
+        return True
+
+    return False
+
+
+_SCHEDULE_LIKE_PLATFORMS: frozenset[str] = frozenset(
+    {
+        "time",
+        "time_pattern",
+        "sun",
+        "calendar",
+        "homeassistant",  # startup / shutdown trigger
+    }
+)
+
+
+def _has_schedule_like_trigger(triggers: list[Any]) -> bool:
+    """Whether any trigger fires on a schedule-driven event."""
+    for t in triggers:
+        if isinstance(t, dict) and t.get("platform") in _SCHEDULE_LIKE_PLATFORMS:
+            return True
     return False
 
 
