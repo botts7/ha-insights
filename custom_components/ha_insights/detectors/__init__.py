@@ -194,26 +194,36 @@ async def run_all_detectors(
             "if you accept the event-loop-starvation risk."
         )
 
+    # Layer 1 implicit blocklist: auto-skip diagnostic/config/noise-class
+    # entities so a fresh install isn't immediately drowned in heartbeat
+    # patterns and battery drift. Merged with the user's explicit blocklist
+    # so explicit + implicit work additively.
+    from .implicit_blocklist import build_implicit_blocklist
+
+    implicit_blocked = await build_implicit_blocklist(hass)
+    effective_blocked: frozenset[str] = ctx.blocked_entities | implicit_blocked
+
     # Snapshot the buffer ONCE on the loop, then hand the immutable
     # view to every detector. ~50 MB tuple-copy at the 500K cap — fast
     # enough to do on the loop, since it's a single memcpy of pointers.
     # The view also enforces blocked_entities and area_filter, so every
     # detector gets the same scoped data without per-detector code.
-    snapshot_ctx = ctx
+    snapshot_ctx = replace(ctx, blocked_entities=effective_blocked)
     if ctx.event_buffer is not None:
         snapshot = ctx.event_buffer.snapshot()
         _LOGGER.info(
             "HA Insights scan: snapshotted %d events for thread-safe scan "
-            "(blocked=%d, area_filter=%d)",
+            "(blocked=%d explicit + %d implicit, area_filter=%d)",
             len(snapshot),
             len(ctx.blocked_entities),
+            len(implicit_blocked),
             len(ctx.area_filter),
         )
         snapshot_ctx = replace(
-            ctx,
+            snapshot_ctx,
             event_buffer=_FrozenBufferView(
                 snapshot,
-                blocked_entities=ctx.blocked_entities,
+                blocked_entities=effective_blocked,
                 area_filter=ctx.area_filter,
             ),
         )

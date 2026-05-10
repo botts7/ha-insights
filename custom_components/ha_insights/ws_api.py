@@ -227,7 +227,13 @@ async def ws_list(
     connection: websocket_api.ActiveConnection,
     msg: dict[str, Any],
 ) -> None:
-    """List insights from the store."""
+    """List insights from the store, enriched with domain + device_class.
+
+    Domain is split from the entity_id in each insight's fingerprint;
+    device_class is looked up against the entity registry. Both feed
+    the panel's filter-chip UI and are derived (not stored) so we don't
+    need a schema migration.
+    """
     store = _get_store(hass)
     if store is None:
         connection.send_error(msg["id"], "not_set_up", "Store not initialized")
@@ -237,10 +243,41 @@ async def ws_list(
         include_applied=msg["include_applied"],
         include_snoozed=msg["include_snoozed"],
     )
-    connection.send_result(
-        msg["id"],
-        {"insights": [i.to_dict() for i in insights]},
-    )
+
+    # Build a quick (entity_id -> device_class) lookup so we don't hit the
+    # registry once per insight. Empty dict if registry is unavailable —
+    # the enrichment is purely additive; missing values just become null.
+    device_class_by_entity: dict[str, str | None] = {}
+    try:
+        from homeassistant.helpers import entity_registry as er
+
+        registry = er.async_get(hass)
+        for ent_entry in registry.entities.values():
+            device_class_by_entity[ent_entry.entity_id] = (
+                ent_entry.device_class or ent_entry.original_device_class
+            )
+    except Exception:  # noqa: BLE001
+        pass  # fall through with empty dict
+
+    enriched: list[dict[str, Any]] = []
+    for ins in insights:
+        d = ins.to_dict()
+        # Pull primary entity_id from fingerprint. Different detectors use
+        # different keys (entity_id, leader_entity_id, follower_entity_id).
+        eid = (
+            ins.fingerprint.get("entity_id")
+            or ins.fingerprint.get("follower_entity_id")
+            or ins.fingerprint.get("leader_entity_id")
+        )
+        if isinstance(eid, str) and "." in eid:
+            d["domain"] = eid.split(".", 1)[0]
+            d["device_class"] = device_class_by_entity.get(eid)
+        else:
+            d["domain"] = None
+            d["device_class"] = None
+        enriched.append(d)
+
+    connection.send_result(msg["id"], {"insights": enriched})
 
 
 @websocket_api.websocket_command(
