@@ -90,7 +90,7 @@ The `lock` domain stays blocked regardless — never emit an insight that would 
 
 `tests/test_<your_detector>.py` — construct a `StateEventBuffer` directly with synthetic events, build a `DetectorContext` with a `MagicMock` hass, call `await detector.scan(ctx)` and assert on the returned insights.
 
-See [`tests/test_schedule_detector.py`](../tests/test_schedule_detector.py) for the full pattern.
+See [`tests/test_schedule_detector.py`](https://github.com/botts7/ha-insights/blob/main/tests/test_schedule_detector.py) for the full pattern.
 
 ## Submitting
 

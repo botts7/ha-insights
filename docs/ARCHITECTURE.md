@@ -1,6 +1,6 @@
 # HA Insights — Architecture
 
-> **Status:** Drafted 2026-05-08 as the v0.1 implementation charter. The architectural invariants below remain authoritative across releases; phase callouts ("v0.1 ships X", "deferred to v0.2") describe the original roadmap and don't always match what actually shipped. The [README](../README.md) and [CHANGELOG](../CHANGELOG.md) reflect the current state (currently **v0.7.0**); a release-history table at the bottom of this doc covers actual ship versus plan.
+> **Status:** Drafted 2026-05-08 as the v0.1 implementation charter. The architectural invariants below remain authoritative across releases; phase callouts ("v0.1 ships X", "deferred to v0.2") describe the original roadmap and don't always match what actually shipped. The [README](https://github.com/botts7/ha-insights/blob/main/README.md) and [CHANGELOG](https://github.com/botts7/ha-insights/blob/main/CHANGELOG.md) reflect the current state (currently **v0.9.0**); a release-history table at the bottom of this doc covers actual ship versus plan.
 
 ## Project frame
 
