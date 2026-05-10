@@ -640,6 +640,28 @@ def _build_entity_dependencies(
                 if isinstance(src, str) and "." in src:
                     raw[state.entity_id].add(src)
                     raw[src].add(state.entity_id)
+
+        # Script targets — same parent ↔ child + sibling treatment as
+        # state-machine groups. A script that turns on 7 lights groups
+        # those lights logically even if they don't share a HA group
+        # entity. Without this, the dedup helper can't merge insights
+        # from entities co-targeted by a single script.
+        try:
+            from .._script_targets import collect_script_targets
+
+            for script_eid, targets in collect_script_targets(hass).items():
+                if not targets:
+                    continue
+                target_list = sorted(targets)
+                for t in target_list:
+                    raw[script_eid].add(t)
+                    raw[t].add(script_eid)
+                if 1 < len(targets) <= _MAX_GROUP_SIZE_FOR_SIBLING_FILTER:
+                    target_set = set(targets)
+                    for t in target_list:
+                        raw[t] |= target_set - {t}
+        except Exception:  # pragma: no cover — script expansion is best-effort
+            pass
     except Exception:  # pragma: no cover — defensive
         _LOGGER.exception("Failed to build entity dependency map")
         return {}

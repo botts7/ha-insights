@@ -301,32 +301,12 @@ async def ws_list(
         # it directly touched whatever entities the script's own actions
         # target. Without this expansion, calling a script breaks the
         # automation→entity reference chain and the 🤖 pill goes missing.
-        script_targets: dict[str, set[str]] = {}
+        from ._script_targets import collect_script_targets as _cst
+
         try:
-            script_component = hass.data.get("script")
-            script_iter = None
-            if hasattr(script_component, "entities"):
-                script_iter = script_component.entities
-            elif isinstance(script_component, dict):
-                script_iter = script_component.values()
-            if script_iter is not None:
-                for ent in script_iter:
-                    raw = (
-                        getattr(ent, "raw_config", None)
-                        or getattr(ent, "_raw_config", None)
-                    )
-                    if not isinstance(raw, dict):
-                        continue
-                    sid = getattr(ent, "entity_id", None)
-                    if not isinstance(sid, str) or "." not in sid:
-                        continue
-                    # Script config has `sequence` (or `action`) at the top
-                    actions = raw.get("sequence") or raw.get("action") or []
-                    targets = _extract_target_entities(actions)
-                    if targets:
-                        script_targets[sid] = targets
+            script_targets: dict[str, set[str]] = _cst(hass)
         except Exception:  # noqa: BLE001
-            pass  # script expansion is best-effort
+            script_targets = {}
 
         def _expand(refs: set[str]) -> set[str]:
             """Expand parent containers → members AND script.X → its targets.
