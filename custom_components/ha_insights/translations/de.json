@@ -6,6 +6,9 @@
         "description": "HA Insights beobachtet den Zustand deines Smart Homes, um Automatisierungen vorzuschlagen. Wähle, wie (oder ob) die LLM-Anreicherung arbeiten soll. Du kannst dies später unter Konfigurieren ändern.",
         "data": {
           "llm_mode": "LLM-Modus"
+        },
+        "data_description": {
+          "llm_mode": "Aus: nur Mustererkennung, keine LLM-Aufrufe. Lokal: Explain / Refine / Hypothesize läuft über ein lokales LLM (Ollama, Wyoming) — Daten verlassen dein Netzwerk nicht. Cloud: pseudonymisierte Daten werden an dein konfiguriertes Cloud-LLM (Anthropic, OpenAI, Google) gesendet. Echte Namen verlassen das Netz nie; sensible Attribute werden entfernt."
         }
       },
       "cloud_consent": {
@@ -13,6 +16,9 @@
         "description": "Cloud-LLMs (Anthropic, OpenAI, Google) laufen außerhalb deines Heimnetzwerks. Mit standardmäßig aktivierter Pseudonymisierung verlassen echte Entitäts- und Bereichsnamen niemals dein Netz; numerische Werte werden in Bereiche eingruppiert; sensible Attribute (GPS, MAC, Tokens, Passwörter) werden stets entfernt. Jeder ausgehende Aufruf wird im Datenschutz-Log-Sensor protokolliert.\n\nLokales LLM wird empfohlen, falls verfügbar. Trotzdem mit Cloud fortfahren?",
         "data": {
           "cloud_consent": "Ich verstehe und möchte die Cloud-LLM-Anreicherung aktivieren"
+        },
+        "data_description": {
+          "cloud_consent": "Erforderlich, um den Cloud-Modus zu aktivieren. Du kannst jederzeit auf Aus oder Lokal zurückwechseln."
         }
       }
     },
@@ -34,6 +40,16 @@
           "digest_hour": "Stunde der Zusammenfassung (0 - 23, lokale Zeit)",
           "preferred_agent_id": "Bevorzugter LLM-Agent (leer = automatische Auswahl)",
           "refine_cost_threshold_usd": "Bestätigungs-Schwelle für Refine-Kosten (USD)"
+        },
+        "data_description": {
+          "llm_mode": "Aus: nur Mustererkennung. Lokal: Daten bleiben im Netzwerk. Cloud: pseudonymisierte Daten werden außerhalb des Netzes gesendet.",
+          "lookback_days": "Wie viele Tage HA-Recorder-Verlauf beim Start nachgeladen werden, damit Detektoren sofort Daten haben. 0 deaktiviert Backfill. Bereich 0-30; Standard 14 deckt Schedule- und Saisonalitäts-Detektoren ab.",
+          "notify_on_insight": "Sendet eine persistent_notification, sobald ein neues Insight oberhalb der unten festgelegten Konfidenz-Schwelle eintrifft.",
+          "notify_threshold": "Minimale Konfidenz (0.0-1.0), ab der ein Insight sofort benachrichtigt. Standard 0.8 bedeutet, dass nur sehr sichere Vorschläge benachrichtigen; senke den Wert für mehr Hinweise.",
+          "digest_enabled": "Sendet einmal pro Tag eine persistent_notification mit einer Zusammenfassung neuer und noch offener Insights. Wird unterdrückt, wenn nichts zu melden ist.",
+          "digest_hour": "Stunde des Tages (0-23, lokale Zeit), zu der die Zusammenfassung gesendet wird. Standard 9 = 9 Uhr morgens.",
+          "preferred_agent_id": "Welcher Conversation-Agent zuerst für Explain, Refine und Hypothesize verwendet wird. Failover probiert die anderen installierten Agenten, falls dieser fehlschlägt. Leer lassen für automatische Auswahl (Assist-Standard zuerst, dann Registrierungsreihenfolge).",
+          "refine_cost_threshold_usd": "Wenn die geschätzten USD-Kosten eines Refine-Aufrufs diesen Wert überschreiten, zeigt die Karte vor dem Senden einen Bestätigungsdialog. 0 = immer bestätigen, 10 = praktisch nie. Lokale Agenten kosten immer 0 USD und lösen den Dialog nie aus."
         }
       },
       "cloud_consent": {
@@ -41,6 +57,9 @@
         "description": "Pseudonymisierte Daten werden an den konfigurierten Cloud-LLM-Agenten gesendet. Echte Namen verlassen das Netz niemals; sensible Attribute werden entfernt.",
         "data": {
           "cloud_consent": "Ich verstehe und möchte die Cloud-LLM-Anreicherung aktivieren"
+        },
+        "data_description": {
+          "cloud_consent": "Erforderlich beim Wechsel IN den Cloud-Modus. Du kannst jederzeit auf Aus oder Lokal zurückwechseln."
         }
       }
     }

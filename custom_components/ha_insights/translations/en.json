@@ -6,6 +6,9 @@
         "description": "HA Insights observes your home state to suggest automations. Pick how (or whether) the LLM enrichment surface works. You can change this later in Configure.",
         "data": {
           "llm_mode": "LLM mode"
+        },
+        "data_description": {
+          "llm_mode": "Off: pattern detection only, no LLM calls. Local: route Explain / Refine / Hypothesize to a local LLM (Ollama, Wyoming) — data stays on your network. Cloud: pseudonymized data is sent to your configured cloud LLM (Anthropic, OpenAI, Google). Real names never leave; sensitive attributes are stripped."
         }
       },
       "cloud_consent": {
@@ -13,6 +16,9 @@
         "description": "Cloud LLMs (Anthropic, OpenAI, Google) live outside your home network. With pseudonymization on by default, real entity names and area names never leave; numeric values are bucketed; sensitive attributes (GPS, MAC, tokens, passwords) are always stripped. Every outbound call is recorded in the privacy log sensor.\n\nLocal LLM is recommended if available. Continue with cloud anyway?",
         "data": {
           "cloud_consent": "I understand and want to enable cloud LLM enrichment"
+        },
+        "data_description": {
+          "cloud_consent": "Required to enable cloud mode. You can switch back to Off or Local at any time."
         }
       }
     },
@@ -34,6 +40,16 @@
           "digest_hour": "Digest hour (0 - 23, local time)",
           "preferred_agent_id": "Preferred LLM agent (auto-pick if blank)",
           "refine_cost_threshold_usd": "Refine cost confirm threshold (USD)"
+        },
+        "data_description": {
+          "llm_mode": "Off: pattern detection only. Local: data stays on your network. Cloud: pseudonymized data sent off-network.",
+          "lookback_days": "How many days of HA recorder history to backfill at startup so detectors have data immediately. 0 disables backfill. Range 0-30; default 14 covers the schedule and seasonality detectors.",
+          "notify_on_insight": "Fire a persistent_notification the moment a new insight lands above the confidence threshold below.",
+          "notify_threshold": "Minimum confidence (0.0-1.0) for an insight to trigger an immediate notification. Default 0.8 means only very confident proposals notify; lower it to be alerted on more.",
+          "digest_enabled": "Send one persistent_notification per day with a rollup of new and still-open insights. Auto-suppressed when there is nothing to report.",
+          "digest_hour": "Hour of day (0-23, local time) to fire the daily digest. Default 9 = 9 AM.",
+          "preferred_agent_id": "Which conversation agent to try first for Explain, Refine, and Hypothesize. Failover walks the other installed agents if it fails. Leave blank to auto-pick (Assist default first, then registry order).",
+          "refine_cost_threshold_usd": "When a Refine call's estimated USD cost exceeds this, the card shows a confirm dialog before sending. 0 = always confirm, 10 = effectively never. Local agents always cost $0 and never trigger the confirm."
         }
       },
       "cloud_consent": {
@@ -41,6 +57,9 @@
         "description": "Pseudonymized data will be sent to your configured Cloud LLM agent. Real names never leave; sensitive attributes are stripped.",
         "data": {
           "cloud_consent": "I understand and want to enable cloud LLM enrichment"
+        },
+        "data_description": {
+          "cloud_consent": "Required when switching INTO cloud mode. You can switch back to Off or Local at any time."
         }
       }
     }
