@@ -1,10 +1,17 @@
-"""Tests for FrequencyAnomalyDetector (v0.9 phase 2)."""
+"""Tests for FrequencyAnomalyDetector (v0.9 phase 2).
+
+Detector buckets by HA-local midnight (v1.0 timezone fix). Test setup
+builds today_start as a LOCAL midnight, then converts to UTC for
+buffer storage so the today/baseline split aligns with what the
+detector computes.
+"""
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock
 
 import pytest
+from homeassistant.util import dt as dt_util
 
 from custom_components.ha_insights.detectors.base import DetectorContext
 from custom_components.ha_insights.detectors.frequency_anomaly import (
@@ -59,7 +66,15 @@ def _seed_today(
 
 
 def _today_start(now: datetime) -> datetime:
-    return now.replace(hour=0, minute=0, second=0, microsecond=0)
+    """Return today's local midnight as a UTC datetime for buffer comparison.
+
+    Detector computes today_start_local then `.astimezone(UTC)`; tests
+    must do the same so seeded events land on the right side of the
+    today/baseline cut.
+    """
+    local_now = dt_util.as_local(now) if now.tzinfo else now
+    today_start_local = local_now.replace(hour=0, minute=0, second=0, microsecond=0)
+    return today_start_local.astimezone(UTC)
 
 
 # --- Empty / no-op ---

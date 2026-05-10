@@ -1,10 +1,20 @@
-"""Tests for SeasonalityDetector (v0.9 phase 4)."""
+"""Tests for SeasonalityDetector (v0.9 phase 4).
+
+Events are stored as UTC inside the StateEventBuffer (production passes
+UTC timestamps from HA's state_changed events). Detectors convert to
+HA's local timezone before bucketing — so test setup builds events in
+LOCAL time (.weekday() / .replace(hour=...)) then converts to UTC for
+storage. dt_util.now() returns the test env's local time; helpers walk
+back by local weekday so "Friday at 7pm" tests behave identically
+regardless of the host's TZ.
+"""
 from __future__ import annotations
 
 from datetime import UTC, datetime, time, timedelta
 from unittest.mock import MagicMock
 
 import pytest
+from homeassistant.util import dt as dt_util
 
 from custom_components.ha_insights.detectors.base import DetectorContext
 from custom_components.ha_insights.detectors.seasonality import SeasonalityDetector
@@ -31,7 +41,12 @@ def _ev(ts: datetime, entity_id: str, new_state: str = "on") -> StateEvent:
 
 
 def _last_n_weekdays(target_weekday: int, n: int, base: datetime) -> list[datetime]:
-    """Return the last `n` occurrences of `target_weekday` (0=Mon) prior to base."""
+    """Return the last `n` occurrences of `target_weekday` (0=Mon) prior to base.
+
+    `base` and returned datetimes are in HA's local timezone — callers
+    must `.astimezone(UTC)` before passing to buf.add() since the buffer
+    stores UTC timestamps just like the production state_changed listener.
+    """
     out: list[datetime] = []
     cur = base
     while len(out) < n:
@@ -39,6 +54,11 @@ def _last_n_weekdays(target_weekday: int, n: int, base: datetime) -> list[dateti
             out.append(cur)
         cur -= timedelta(days=1)
     return out
+
+
+def _to_utc(dt: datetime) -> datetime:
+    """Convert a tz-aware local-time datetime to UTC for buffer storage."""
+    return dt.astimezone(UTC)
 
 
 # --- Empty / no-op ---
@@ -55,10 +75,10 @@ async def test_no_buffer_returns_empty() -> None:
 async def test_too_few_events() -> None:
     """Below MIN_DOMINANT_HITS=3 -> no insight."""
     buf = StateEventBuffer(max_age=timedelta(days=40))
-    base = datetime.now(tz=UTC).replace(microsecond=0)
+    base = dt_util.now().replace(microsecond=0)
     fridays = _last_n_weekdays(4, 2, base)
     for d in fridays:
-        buf.add(_ev(d.replace(hour=19, minute=30), "media_player.living_room"))
+        buf.add(_ev(_to_utc(d.replace(hour=19, minute=30)), "media_player.living_room"))
     detector = SeasonalityDetector()
     assert await detector.scan(_ctx(buf)) == []
 
@@ -70,10 +90,10 @@ async def test_too_few_events() -> None:
 async def test_strict_friday_pattern_detected() -> None:
     """4 Fridays at 7pm => strong weekly pattern."""
     buf = StateEventBuffer(max_age=timedelta(days=40))
-    base = datetime.now(tz=UTC).replace(microsecond=0)
+    base = dt_util.now().replace(microsecond=0)
     fridays = _last_n_weekdays(4, 4, base)  # weekday 4 = Friday
     for d in fridays:
-        buf.add(_ev(d.replace(hour=19, minute=30), "media_player.living_room"))
+        buf.add(_ev(_to_utc(d.replace(hour=19, minute=30)), "media_player.living_room"))
     detector = SeasonalityDetector()
     insights = await detector.scan(_ctx(buf))
     assert len(insights) == 1
@@ -94,15 +114,15 @@ async def test_strict_friday_pattern_detected() -> None:
 async def test_dominance_ratio_filter() -> None:
     """If non-Friday firings are >30% of total, skip — not a clean weekly pattern."""
     buf = StateEventBuffer(max_age=timedelta(days=40))
-    base = datetime.now(tz=UTC).replace(microsecond=0)
+    base = dt_util.now().replace(microsecond=0)
     # 3 Fridays + 3 random other days (50/50)
     fridays = _last_n_weekdays(4, 3, base)
     for d in fridays:
-        buf.add(_ev(d.replace(hour=19), "switch.party"))
+        buf.add(_ev(_to_utc(d.replace(hour=19)), "switch.party"))
     # 3 Tuesdays
     tuesdays = _last_n_weekdays(1, 3, base)
     for d in tuesdays:
-        buf.add(_ev(d.replace(hour=19), "switch.party"))
+        buf.add(_ev(_to_utc(d.replace(hour=19)), "switch.party"))
     detector = SeasonalityDetector()
     assert await detector.scan(_ctx(buf)) == []
 
@@ -111,11 +131,11 @@ async def test_dominance_ratio_filter() -> None:
 async def test_loose_time_drift_within_30min() -> None:
     """Saturday 7pm, 7:15, 7:30, 8pm => stddev ~22 min, still emits."""
     buf = StateEventBuffer(max_age=timedelta(days=40))
-    base = datetime.now(tz=UTC).replace(microsecond=0)
+    base = dt_util.now().replace(microsecond=0)
     saturdays = _last_n_weekdays(5, 4, base)
     times = [time(19, 0), time(19, 15), time(19, 30), time(20, 0)]
     for d, t in zip(saturdays, times, strict=True):
-        buf.add(_ev(d.replace(hour=t.hour, minute=t.minute), "switch.bbq"))
+        buf.add(_ev(_to_utc(d.replace(hour=t.hour, minute=t.minute)), "switch.bbq"))
     detector = SeasonalityDetector()
     insights = await detector.scan(_ctx(buf))
     assert len(insights) == 1
@@ -126,11 +146,11 @@ async def test_loose_time_drift_within_30min() -> None:
 async def test_excessive_time_drift_rejected() -> None:
     """Sunday 9am, 12pm, 3pm, 9pm => stddev > 30 min, no pattern."""
     buf = StateEventBuffer(max_age=timedelta(days=40))
-    base = datetime.now(tz=UTC).replace(microsecond=0)
+    base = dt_util.now().replace(microsecond=0)
     sundays = _last_n_weekdays(6, 4, base)
     hours = [9, 12, 15, 21]
     for d, h in zip(sundays, hours, strict=True):
-        buf.add(_ev(d.replace(hour=h, minute=0), "light.porch"))
+        buf.add(_ev(_to_utc(d.replace(hour=h, minute=0)), "light.porch"))
     detector = SeasonalityDetector()
     assert await detector.scan(_ctx(buf)) == []
 
@@ -139,10 +159,10 @@ async def test_excessive_time_drift_rejected() -> None:
 async def test_blocked_domain_skipped() -> None:
     """device_tracker is in domains_default_blocked => never emit."""
     buf = StateEventBuffer(max_age=timedelta(days=40))
-    base = datetime.now(tz=UTC).replace(microsecond=0)
+    base = dt_util.now().replace(microsecond=0)
     fridays = _last_n_weekdays(4, 4, base)
     for d in fridays:
-        buf.add(_ev(d.replace(hour=18), "device_tracker.car", "home"))
+        buf.add(_ev(_to_utc(d.replace(hour=18)), "device_tracker.car", "home"))
     detector = SeasonalityDetector()
     assert await detector.scan(_ctx(buf)) == []
 
@@ -151,10 +171,10 @@ async def test_blocked_domain_skipped() -> None:
 async def test_idempotent_rescan() -> None:
     """Two scans on the same data => same insight id."""
     buf = StateEventBuffer(max_age=timedelta(days=40))
-    base = datetime.now(tz=UTC).replace(microsecond=0)
+    base = dt_util.now().replace(microsecond=0)
     fridays = _last_n_weekdays(4, 4, base)
     for d in fridays:
-        buf.add(_ev(d.replace(hour=19, minute=30), "switch.movie_lights"))
+        buf.add(_ev(_to_utc(d.replace(hour=19, minute=30)), "switch.movie_lights"))
     detector = SeasonalityDetector()
     first = await detector.scan(_ctx(buf))
     second = await detector.scan(_ctx(buf))
@@ -171,10 +191,10 @@ async def test_scheduledetector_overlap_skipped() -> None:
     no dominance, no insight.
     """
     buf = StateEventBuffer(max_age=timedelta(days=40))
-    base = datetime.now(tz=UTC).replace(microsecond=0)
-    # 14 daily events
+    base = dt_util.now().replace(microsecond=0)
+    # 14 daily events at LOCAL 19:00, stored as UTC
     for i in range(14):
-        ts = (base - timedelta(days=i)).replace(hour=19, minute=0)
-        buf.add(_ev(ts, "light.evening"))
+        local_ts = (base - timedelta(days=i)).replace(hour=19, minute=0)
+        buf.add(_ev(_to_utc(local_ts), "light.evening"))
     detector = SeasonalityDetector()
     assert await detector.scan(_ctx(buf)) == []

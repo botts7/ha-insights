@@ -1,10 +1,17 @@
-"""Tests for the ScheduleDetector v0.1 hero."""
+"""Tests for the ScheduleDetector v0.1 hero.
+
+Events stored as UTC; detector converts to local before bucketing
+(v1.0 timezone fix). Test setup builds events at LOCAL hour/minute
+then converts to UTC for buffer storage so .weekday() and
+_minute_of_day reflect the user's calendar regardless of host TZ.
+"""
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock
 
 import pytest
+from homeassistant.util import dt as dt_util
 
 from custom_components.ha_insights.detectors.base import DetectorContext
 from custom_components.ha_insights.detectors.schedule import ScheduleDetector
@@ -31,17 +38,23 @@ def _seed_weekday_routine(
     days: int = 14,
     end_now: datetime | None = None,
 ) -> int:
-    """Seed weekday-only events at hour:minute over the last `days`. Returns count added."""
-    end = end_now or datetime.now(tz=UTC)
+    """Seed weekday-only events at hour:minute over the last `days`. Returns count added.
+
+    `end_now` and the per-event `when` are constructed in HA's local
+    timezone (so .weekday() identifies local weekdays), then
+    `.astimezone(UTC)` for buffer storage to mirror the production
+    state_changed listener.
+    """
+    end = end_now or dt_util.now()
     added = 0
     for offset in range(days):
-        when = (end - timedelta(days=offset)).replace(
+        local_when = (end - timedelta(days=offset)).replace(
             hour=hour, minute=minute, second=0, microsecond=0
         )
-        if when.weekday() >= 5:  # skip weekend
+        if local_when.weekday() >= 5:  # skip weekend (local)
             continue
         ev = StateEvent(
-            timestamp=when,
+            timestamp=local_when.astimezone(UTC),
             entity_id=entity_id,
             domain=domain,
             area_id=area_id,
@@ -119,7 +132,7 @@ async def test_insight_payload_is_valid_automation_shape() -> None:
 async def test_scattered_times_rejected_by_stddev() -> None:
     """Events spread over a 30-minute window should fail the stddev threshold."""
     buf = StateEventBuffer()
-    end = datetime.now(tz=UTC).replace(microsecond=0)
+    end = dt_util.now().replace(microsecond=0)
     # Seed events at varying times to ensure stddev > 8 min
     times_minutes = [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55]
     for offset, m in enumerate(times_minutes):
@@ -145,7 +158,7 @@ async def test_scattered_times_rejected_by_stddev() -> None:
 async def test_weekend_only_routine_classifies_as_weekends() -> None:
     """Routine that only fires Sat/Sun should produce a weekends insight."""
     buf = StateEventBuffer()
-    end = datetime.now(tz=UTC).replace(hour=10, minute=0, second=0, microsecond=0)
+    end = dt_util.now().replace(hour=10, minute=0, second=0, microsecond=0)
     for offset in range(60):  # extend lookback to capture enough weekends
         when = end - timedelta(days=offset)
         if when.weekday() < 5:
@@ -172,7 +185,7 @@ async def test_weekend_only_routine_classifies_as_weekends() -> None:
 @pytest.mark.asyncio
 async def test_safety_blocked_domain_lock_skipped() -> None:
     buf = StateEventBuffer()
-    end = datetime.now(tz=UTC).replace(hour=22, minute=0, second=0, microsecond=0)
+    end = dt_util.now().replace(hour=22, minute=0, second=0, microsecond=0)
     for offset in range(14):
         when = end - timedelta(days=offset)
         if when.weekday() >= 5:
@@ -196,7 +209,7 @@ async def test_safety_blocked_domain_lock_skipped() -> None:
 async def test_non_enum_state_skipped() -> None:
     """Numeric / decimal states should not be treated as routines."""
     buf = StateEventBuffer()
-    end = datetime.now(tz=UTC).replace(hour=14, minute=30, second=0, microsecond=0)
+    end = dt_util.now().replace(hour=14, minute=30, second=0, microsecond=0)
     for offset in range(14):
         when = end - timedelta(days=offset)
         if when.weekday() >= 5:
