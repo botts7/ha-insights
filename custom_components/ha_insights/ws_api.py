@@ -1021,7 +1021,19 @@ async def ws_scan_now(
                 entry=entry,
                 cancel_event=cancel_event,
                 return_summary=True,
+                # User clicked the button. The setup-phase guard exists
+                # to prevent AUTOMATIC scans during boot (the original
+                # 2026-05-10 freeze). User-initiated scans are safe
+                # under threading + watchdog + ceiling, so we let them
+                # through even while hass.state==STARTING.
+                allow_during_setup=True,
             )
+        except RuntimeError as err:
+            # Defensive: if a future code path forgets allow_during_setup,
+            # surface a clean error instead of "Unknown error" via the
+            # decorator's generic handler.
+            connection.send_error(msg["id"], "scan_failed", str(err))
+            return
         finally:
             entry_data.pop("scan_cancel_event", None)
         # summary is a dict when return_summary=True

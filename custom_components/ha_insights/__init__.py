@@ -425,7 +425,13 @@ def _async_register_services(hass: HomeAssistant) -> None:
                 blocked_entities=blocked,
                 area_filter=areas,
             )
-            await run_all_detectors(hass, ctx, store, entry=entry)
+            # User invoked the service directly — same logic as the WS
+            # button: setup-phase guard exists for AUTOMATIC paths, not
+            # explicit user action. Threading + watchdog keep it safe
+            # even during HA startup.
+            await run_all_detectors(
+                hass, ctx, store, entry=entry, allow_during_setup=True
+            )
 
     async def _backfill(call: ServiceCall) -> None:
         """Manual recorder backfill — re-runs for every active config entry."""
