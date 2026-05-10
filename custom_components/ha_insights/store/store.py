@@ -28,9 +28,16 @@ class InsightStore:
     """Async SQLite store with idempotent migrations + change-event bus."""
 
     def __init__(self, path: Path | str) -> None:
+        import asyncio
+
         self._path = Path(path)
         self._conn: aiosqlite.Connection | None = None
         self._listeners: list[StoreListener] = []
+        # v1.0 review #10: per-store apply lock. ws_apply / ws_undo /
+        # bulk-apply pipelines acquire this around the
+        # validate+write+record_applied sequence so two near-simultaneous
+        # applies on overlapping entities can't race in automations.yaml.
+        self.apply_lock = asyncio.Lock()
 
     async def open(self) -> None:
         """Open the database; apply pending migrations."""

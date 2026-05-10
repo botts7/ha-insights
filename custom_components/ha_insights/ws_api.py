@@ -550,31 +550,38 @@ async def ws_apply(
     else:
         payload = insight.payload
 
-    errors = validate_automation(payload)
-    if errors:
-        connection.send_error(msg["id"], "invalid_payload", "; ".join(errors))
-        return
+    # v1.0 review #10: serialize the validate -> write -> record_applied
+    # pipeline so two near-simultaneous applies on overlapping entities
+    # can't race in automations.yaml. Per-store lock is acquired by
+    # bulk-apply too (the card iterates apply calls).
+    async with store.apply_lock:
+        errors = validate_automation(payload)
+        if errors:
+            connection.send_error(
+                msg["id"], "invalid_payload", "; ".join(errors)
+            )
+            return
 
-    online_errors = await validate_automation_online(hass, payload)
-    if online_errors:
-        connection.send_error(
-            msg["id"],
-            "ha_validation_failed",
-            "; ".join(online_errors),
+        online_errors = await validate_automation_online(hass, payload)
+        if online_errors:
+            connection.send_error(
+                msg["id"],
+                "ha_validation_failed",
+                "; ".join(online_errors),
+            )
+            return
+
+        writer = AutomationWriter(hass)
+        auto_id = await writer.write(payload)
+        snapshot = await writer.read(auto_id) or payload
+
+        await store.record_applied(
+            insight.id,
+            artifact_kind="automation",
+            artifact_id=auto_id,
+            snapshot=snapshot,
+            snapshot_hash=hash_config(snapshot),
         )
-        return
-
-    writer = AutomationWriter(hass)
-    auto_id = await writer.write(payload)
-    snapshot = await writer.read(auto_id) or payload
-
-    await store.record_applied(
-        insight.id,
-        artifact_kind="automation",
-        artifact_id=auto_id,
-        snapshot=snapshot,
-        snapshot_hash=hash_config(snapshot),
-    )
     connection.send_result(
         msg["id"],
         {"automation_id": auto_id, "refined": override is not None},
@@ -819,45 +826,54 @@ async def ws_undo(
         return
 
     insight_id = msg["insight_id"]
-    history = await store.get_applied_history(insight_id)
-    if history is None:
-        connection.send_error(
-            msg["id"], "not_applied", f"Insight {insight_id!r} has no applied history"
-        )
-        return
+    # v1.0 review #10: serialize against ws_apply / bulk-apply through
+    # the same per-store lock. Without it, an undo racing with a fresh
+    # apply on the same artifact could leave automations.yaml in a
+    # half-written state.
+    async with store.apply_lock:
+        history = await store.get_applied_history(insight_id)
+        if history is None:
+            connection.send_error(
+                msg["id"],
+                "not_applied",
+                f"Insight {insight_id!r} has no applied history",
+            )
+            return
 
-    artifact_id = str(history["artifact_id"])
-    snapshot = history["snapshot"]
-    if not isinstance(snapshot, dict):
-        connection.send_error(
-            msg["id"], "corrupt_snapshot", "Stored snapshot is malformed"
-        )
-        return
+        artifact_id = str(history["artifact_id"])
+        snapshot = history["snapshot"]
+        if not isinstance(snapshot, dict):
+            connection.send_error(
+                msg["id"], "corrupt_snapshot", "Stored snapshot is malformed"
+            )
+            return
 
-    writer = AutomationWriter(hass)
-    current = await writer.read(artifact_id)
-    drift_detected = current is not None and detect_drift(snapshot, current)
-    if drift_detected and not msg.get("force"):
-        connection.send_error(
-            msg["id"],
-            "drift",
-            (
-                "Automation has been edited since it was applied. Pass "
-                "force=true to undo anyway and lose those edits."
-            ),
-        )
-        return
+        writer = AutomationWriter(hass)
+        current = await writer.read(artifact_id)
+        drift_detected = current is not None and detect_drift(snapshot, current)
+        if drift_detected and not msg.get("force"):
+            connection.send_error(
+                msg["id"],
+                "drift",
+                (
+                    "Automation has been edited since it was applied. Pass "
+                    "force=true to undo anyway and lose those edits."
+                ),
+            )
+            return
 
-    deleted = await writer.delete(artifact_id) if current is not None else True
-    if not deleted:
-        connection.send_error(
-            msg["id"],
-            "delete_failed",
-            f"Could not remove automation {artifact_id!r}",
+        deleted = (
+            await writer.delete(artifact_id) if current is not None else True
         )
-        return
+        if not deleted:
+            connection.send_error(
+                msg["id"],
+                "delete_failed",
+                f"Could not remove automation {artifact_id!r}",
+            )
+            return
 
-    cleared = await store.clear_applied(insight_id)
+        cleared = await store.clear_applied(insight_id)
     connection.send_result(
         msg["id"],
         {
