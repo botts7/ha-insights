@@ -519,6 +519,20 @@ class InsightStore:
         await self._c.commit()
         return cur.rowcount > 0
 
+    async def delete_entity_pseudonym(self, entity_id: str) -> bool:
+        """Drop the pseudonym row for `entity_id`. Idempotent.
+
+        Called from the entity_registry "remove" handler so a deleted
+        entity's pseudonym doesn't linger forever and isn't accidentally
+        inherited by a re-created entity_id with a different unique_id.
+        Returns True if a row was deleted.
+        """
+        cur = await self._c.execute(
+            "DELETE FROM pseudonym_map WHERE entity_id = ?", (entity_id,)
+        )
+        await self._c.commit()
+        return cur.rowcount > 0
+
     @staticmethod
     def _generate_pseudonym(entity_id: str) -> str:
         domain = entity_id.split(".", 1)[0] if "." in entity_id else "entity"

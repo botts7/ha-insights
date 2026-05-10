@@ -48,8 +48,8 @@
           "notify_threshold": "Minimale Konfidenz (0.0-1.0), ab der ein Insight sofort benachrichtigt. Standard 0.8 bedeutet, dass nur sehr sichere Vorschläge benachrichtigen; senke den Wert für mehr Hinweise.",
           "digest_enabled": "Sendet einmal pro Tag eine persistent_notification mit einer Zusammenfassung neuer und noch offener Insights. Wird unterdrückt, wenn nichts zu melden ist.",
           "digest_hour": "Stunde des Tages (0-23, lokale Zeit), zu der die Zusammenfassung gesendet wird. Standard 9 = 9 Uhr morgens.",
-          "preferred_agent_id": "Welcher Conversation-Agent zuerst für Explain, Refine und Hypothesize verwendet wird. Failover probiert die anderen installierten Agenten, falls dieser fehlschlägt. Leer lassen für automatische Auswahl (Assist-Standard zuerst, dann Registrierungsreihenfolge).",
-          "refine_cost_threshold_usd": "Wenn die geschätzten USD-Kosten eines Refine-Aufrufs diesen Wert überschreiten, zeigt die Karte vor dem Senden einen Bestätigungsdialog. 0 = immer bestätigen, 10 = praktisch nie. Lokale Agenten kosten immer 0 USD und lösen den Dialog nie aus."
+          "preferred_agent_id": "Welcher Conversation-Agent zuerst für Explain, Refine und Hypothesize verwendet wird. Failover probiert die anderen installierten Agenten, falls dieser fehlschlägt. Leer lassen für automatische Auswahl (Assist-Standard zuerst, dann Registrierungsreihenfolge). Bei mehreren HA-Insights-Einträgen gewinnt die erste nicht leere Präferenz integrationsweit.",
+          "refine_cost_threshold_usd": "Wenn die geschätzten USD-Kosten eines Refine-Aufrufs diesen Wert überschreiten, zeigt die Karte vor dem Senden einen Bestätigungsdialog. 0 = immer bestätigen, 10 = praktisch nie. Lokale Agenten kosten immer 0 USD und lösen den Dialog nie aus. Bei mehreren HA-Insights-Einträgen gewinnt die niedrigste Schwelle, damit ein vorsichtiger Eintrag nicht durch einen großzügigen umgangen wird."
         }
       },
       "cloud_consent": {

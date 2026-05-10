@@ -38,16 +38,29 @@ class StateEventBuffer:
     """
 
     DEFAULT_MAX_AGE = timedelta(days=7)
+    # v1.0 review #13: hard count cap so a busy install (200+ entities at
+    # 1 Hz state churn) can't OOM by accumulating state events faster
+    # than `prune` runs. 500_000 events ≈ 50 MB of StateEvent objects in
+    # CPython, which is well under what HA itself uses for recorder.
+    # When the deque hits maxlen, deque.append silently drops the oldest;
+    # we log a warning the first time we observe the cap engaging so the
+    # user knows their lookback window is being trimmed by volume.
+    DEFAULT_MAX_EVENTS = 500_000
 
     def __init__(
         self,
         *,
         max_age: timedelta | None = None,
+        max_events: int | None = None,
         area_filter: frozenset[str] | None = None,
     ) -> None:
         self._max_age = max_age if max_age is not None else self.DEFAULT_MAX_AGE
+        self._max_events = (
+            max_events if max_events is not None else self.DEFAULT_MAX_EVENTS
+        )
         self._area_filter = area_filter if area_filter is not None else frozenset()
-        self._events: deque[StateEvent] = deque()
+        self._events: deque[StateEvent] = deque(maxlen=self._max_events)
+        self._cap_warned: bool = False
 
     @property
     def max_age(self) -> timedelta:
@@ -63,9 +76,24 @@ class StateEventBuffer:
         """Add an event if it passes the area filter.
 
         Returns True if accepted, False if filtered out.
+
+        When the buffer is at the count cap, deque.append drops the
+        oldest event silently — the first time this happens we log a
+        warning so the user knows their effective lookback window is
+        being trimmed by volume rather than time.
         """
         if self._area_filter and event.area_id not in self._area_filter:
             return False
+        if not self._cap_warned and len(self._events) >= self._max_events:
+            import logging
+
+            logging.getLogger(__name__).warning(
+                "HA Insights state event buffer hit %d-event cap; oldest "
+                "events will be dropped before they age out. Consider "
+                "narrowing the area filter or shortening lookback_days.",
+                self._max_events,
+            )
+            self._cap_warned = True
         self._events.append(event)
         return True
 

@@ -266,41 +266,6 @@ def _list_agent_candidates(
     return candidates
 
 
-def _pick_llm_agent_id(hass: HomeAssistant, requested: str | None) -> str | None:
-    """Pick an LLM-backed Conversation agent.
-
-    If the caller passed an agent_id explicitly, honor it. Otherwise scan the
-    entity_registry for a `conversation.*` entity not from the built-in
-    `homeassistant` platform — that's an installed LLM Conversation
-    integration (Google AI, OpenAI, Anthropic, Ollama, etc.). Falls back to
-    None (HA's default agent) only if nothing else is installed.
-
-    HA's `conversation.async_converse(agent_id=None)` routes to the
-    conversation-domain default which on most installs is the rule-based
-    `conversation.home_assistant`, even when the user's pipelines are
-    configured to use an LLM agent. Auto-picking saves the user a config
-    step and matches the spirit of their pipeline choice.
-    """
-    if requested is not None:
-        return requested
-
-    try:
-        from homeassistant.helpers import entity_registry as er
-
-        registry = er.async_get(hass)
-        for entry in registry.entities.values():
-            if not entry.entity_id.startswith("conversation."):
-                continue
-            # The built-in rule-based agent registers under platform="homeassistant"
-            # whereas LLM integrations register under their own platform name.
-            if entry.platform in {"homeassistant", "conversation"}:
-                continue
-            return entry.entity_id
-    except Exception:  # pragma: no cover - defensive; fall back to default
-        return None
-    return None
-
-
 async def explain_insight(
     hass: HomeAssistant,
     *,

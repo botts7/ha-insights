@@ -102,20 +102,40 @@ async def _setup_entry_body(
 
     @callback
     def _on_entity_registry_updated(event: Event) -> None:
-        # Migrate buffer + pseudonym map on entity_id rename so detectors and
-        # any cached references survive the rename atomically.
+        # Keep pseudonym map + state buffer in sync with entity registry.
         action = event.data.get("action")
-        if action != "update":
-            return
-        changes = event.data.get("changes") or {}
-        old_entity_id = changes.get("entity_id")
-        new_entity_id = event.data.get("entity_id")
-        if not old_entity_id or not new_entity_id or old_entity_id == new_entity_id:
-            return
-        buffer_.rename_entity(old_entity_id, new_entity_id)
-        hass.async_create_task(
-            store.rename_entity_pseudonym(old_entity_id, new_entity_id)
-        )
+        if action == "update":
+            # Rename: migrate the pseudonym + buffer entries so detectors and
+            # any cached references survive the rename atomically.
+            changes = event.data.get("changes") or {}
+            old_entity_id = changes.get("entity_id")
+            new_entity_id = event.data.get("entity_id")
+            if (
+                not old_entity_id
+                or not new_entity_id
+                or old_entity_id == new_entity_id
+            ):
+                return
+            buffer_.rename_entity(old_entity_id, new_entity_id)
+            # entry-bound so unload cancels in-flight DB writes (review #12)
+            entry.async_create_background_task(
+                hass,
+                store.rename_entity_pseudonym(old_entity_id, new_entity_id),
+                name=f"{DOMAIN}_rename_pseudonym_{new_entity_id}",
+            )
+        elif action == "remove":
+            # v1.0 review #9: a removed entity's pseudonym should not
+            # linger forever. If the user re-creates an entity_id with a
+            # different unique_id later, the new entity would inherit
+            # the old one's pseudonym — confusing on cloud-side LLM logs
+            # and a privacy footgun. Drop the pseudonym row on remove.
+            removed_entity_id = event.data.get("entity_id")
+            if removed_entity_id:
+                entry.async_create_background_task(
+                    hass,
+                    store.delete_entity_pseudonym(removed_entity_id),
+                    name=f"{DOMAIN}_delete_pseudonym_{removed_entity_id}",
+                )
 
     unsub_state = hass.bus.async_listen(EVENT_STATE_CHANGED, _on_state_changed)
     unsub_registry = hass.bus.async_listen(
@@ -135,8 +155,12 @@ async def _setup_entry_body(
             return
         if insight_obj.confidence < notify_threshold:
             return
-        # Fire the notification asynchronously so the listener stays sync
-        hass.async_create_task(
+        # Fire asynchronously so the listener stays sync. Entry-bound so
+        # unload cancels in-flight notify calls (review #12) — otherwise
+        # a notify task spawned moments before unload could outlive the
+        # entry and call into a closed store via _notify_insight's lookups.
+        entry.async_create_background_task(
+            hass,
             _notify_insight(hass, insight_obj),
             name=f"{DOMAIN}_notify_{insight_obj.id}",
         )
@@ -171,7 +195,7 @@ async def _setup_entry_body(
         hass.data[DOMAIN][_SERVICES_REGISTERED_FLAG] = True
 
     if not hass.data[DOMAIN].get(_PANEL_REGISTERED_FLAG):
-        _async_register_panel(hass)
+        await _async_register_panel(hass)
         hass.data[DOMAIN][_PANEL_REGISTERED_FLAG] = True
 
     # User-supplied detectors: scan <config>/ha_insights_detectors/*.py once
@@ -347,8 +371,7 @@ def _async_register_services(hass: HomeAssistant) -> None:
     hass.services.async_register(DOMAIN, "backfill", _backfill)
 
 
-@callback
-def _async_register_panel(hass: HomeAssistant) -> None:
+async def _async_register_panel(hass: HomeAssistant) -> None:
     """Register the HA Insights sidebar panel.
 
     Loads /local/ha-insights-panel.js and mounts <ha-insights-panel>. The
@@ -360,14 +383,22 @@ def _async_register_panel(hass: HomeAssistant) -> None:
     /local/* with a 31-day Cache-Control, so without a fresh query string
     the browser can hold a stale build for weeks. Bumping on every HA
     setup makes "deploy new panel.js + restart HA" a clean update path.
+
+    `os.path.getmtime` is sync I/O so it must run via the executor —
+    HA's blocking-call detector flags every event-loop stat() as a
+    warning otherwise. (v1.0 review #11.)
     """
     from homeassistant.components.frontend import async_register_built_in_panel
 
     panel_path = hass.config.path("www/ha-insights-panel.js")
-    try:
-        cache_bust = int(os.path.getmtime(panel_path))
-    except OSError:
-        cache_bust = int(time.time())
+
+    def _read_mtime() -> int:
+        try:
+            return int(os.path.getmtime(panel_path))
+        except OSError:
+            return int(time.time())
+
+    cache_bust = await hass.async_add_executor_job(_read_mtime)
 
     try:
         async_register_built_in_panel(
