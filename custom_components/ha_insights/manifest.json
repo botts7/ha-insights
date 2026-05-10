@@ -1,11 +1,12 @@
 {
   "domain": "ha_insights",
   "name": "HA Insights",
+  "after_dependencies": ["conversation", "frontend", "recorder"],
   "codeowners": ["@botts7"],
   "config_flow": true,
   "documentation": "https://github.com/botts7/ha-insights",
   "iot_class": "calculated",
   "issue_tracker": "https://github.com/botts7/ha-insights/issues",
   "requirements": ["aiosqlite>=0.19"],
-  "version": "0.8.2"
+  "version": "0.9.0"
 }
