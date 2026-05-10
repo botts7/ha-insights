@@ -316,6 +316,9 @@ class InsightStore:
 
         Per docs/ARCHITECTURE.md: pseudonym_map and applied_history are
         preserved so post-purge undo + cross-restart pseudonyms still work.
+
+        Fires a `purged` event after the delete so subscribed panels can
+        clear their loaded list immediately, no manual page refresh.
         """
         async with self._c.execute("SELECT COUNT(*) FROM insights") as cur:
             row = await cur.fetchone()
@@ -327,6 +330,10 @@ class InsightStore:
         await self._c.execute("DELETE FROM insights")
         await self._c.execute("DELETE FROM outbound_calls")
         await self._c.commit()
+        # Notify subscribers so panels live-update without a page refresh.
+        # Insight payload is None — the action alone tells the card to
+        # drop its local list (no specific id to remove).
+        self._notify("purged", None)
         return {
             "insights_deleted": insights_before,
             "outbound_calls_deleted": calls_before,
