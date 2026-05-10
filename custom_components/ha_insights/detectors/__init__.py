@@ -411,6 +411,15 @@ async def run_all_detectors(
     return added
 
 
+# Maximum group size where members are treated as siblings of each
+# other. A 3-light bathroom group, a 4-cover blinds group: yes,
+# co-firing IS noise to filter. A 50-member "all_motion" aggregate:
+# no, those are independent physical events the user wants to know
+# about. The cutoff should be wider than typical room groups but
+# narrower than house-wide aggregates.
+_MAX_GROUP_SIZE_FOR_SIBLING_FILTER = 6
+
+
 def _build_entity_dependencies(
     hass: HomeAssistant,
 ) -> dict[str, frozenset[str]]:
@@ -419,14 +428,25 @@ def _build_entity_dependencies(
     Captures HA's standard entity-dependency conventions so cooccurrence
     can drop pairs that aren't really independent observations:
 
-    1. Group membership (`attributes.entity_id` is a list of members).
-       Used by `group.*`, `light.*` (group_light), `cover.*`, `binary_sensor.*`
-       (binary_sensor.group), `media_player.*` (universal_media_player), etc.
-       Each member ↔ parent edge AND each member ↔ sibling edge is added.
+    1. Parent ↔ child group membership (always): `attributes.entity_id`
+       lists members. Used by group.*, light.* (group_light), cover.*,
+       binary_sensor.* (binary_sensor.group), universal_media_player, etc.
+       The parent firing AND its members firing seconds later is the
+       SAME root event; filter both directions.
 
-    2. Derived sensors (`attributes.source` / `attributes.source_entity_id`).
-       Used by statistics, utility_meter, integration, derivative,
-       template, and most "transform existing entity" sensors.
+    2. Sibling ↔ sibling membership (small groups only): if the group has
+       ≤ _MAX_GROUP_SIZE_FOR_SIBLING_FILTER members, treat its members as
+       siblings of each other. Catches room-light groups (3-6 lights all
+       firing together when the group switch flips) without nuking
+       cross-room patterns when the user has a house-wide aggregate
+       sensor (all_motion, all_doors). On a power-user install,
+       all_motion.entity_id might list every motion sensor — without
+       this size cap the dependency filter killed 80%+ of real
+       cross-room cooccurrence pairs.
+
+    3. Derived sensors (always): `attributes.source` /
+       `attributes.source_entity_id` from statistics, utility_meter,
+       integration, derivative, template-on-source sensors.
 
     Returns a symmetric dict: if A depends on B, both directions are
     represented. Frozenset values keep the inner-loop lookup cheap.
@@ -445,16 +465,19 @@ def _build_entity_dependencies(
                     if isinstance(m, str) and "." in m
                 ]
                 if members:
+                    # Parent ↔ child edge always (regardless of group size)
                     for m in members:
-                        # parent ↔ child
                         raw[state.entity_id].add(m)
                         raw[m].add(state.entity_id)
-                    # siblings: every pair of children of the same parent
-                    if len(members) > 1:
+                    # Sibling ↔ sibling edge only for SMALL groups —
+                    # otherwise an all-house aggregate filters away every
+                    # legitimate cross-room cooccurrence pair.
+                    if 1 < len(members) <= _MAX_GROUP_SIZE_FOR_SIBLING_FILTER:
                         member_set = set(members)
                         for m in members:
                             raw[m] |= member_set - {m}
-            # Source-style derived
+            # Source-style derived (always, no size cap — it's a
+            # one-to-one source/derived relationship by definition)
             for attr in ("source", "source_entity_id"):
                 src = state.attributes.get(attr)
                 if isinstance(src, str) and "." in src:

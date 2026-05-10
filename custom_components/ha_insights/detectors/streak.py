@@ -18,6 +18,8 @@ from datetime import UTC, date, datetime, time, timedelta
 from itertools import pairwise
 from typing import TYPE_CHECKING
 
+from homeassistant.util import dt as dt_util
+
 from ..insight import Insight, InsightKind
 from .base import Detector, DetectorContext, register_detector
 
@@ -86,10 +88,15 @@ class StreakDetector(Detector):
         new_state: str,
         events: list[StateEvent],
     ) -> Insight | None:
-        # Map each event to its calendar date, keep the earliest per day.
+        # All time-of-day arithmetic happens in HA-LOCAL time. Buffer
+        # timestamps are UTC; using .date()/.hour/.minute on them
+        # produced wrong-day bucketing AND wrong-time titles for every
+        # non-UTC user. A user in UTC+12 reported "evening" lights
+        # showing as "07:34" — that's the UTC equivalent of 19:34 local.
         per_day: dict[date, datetime] = {}
         for ev in events:
-            day = ev.timestamp.date()
+            local_ts = dt_util.as_local(ev.timestamp)
+            day = local_ts.date()
             if day not in per_day or ev.timestamp < per_day[day]:
                 per_day[day] = ev.timestamp
 
@@ -113,10 +120,16 @@ class StreakDetector(Detector):
         if len(longest_run) < _MIN_STREAK_DAYS:
             return None
 
-        # Compute time-of-day stddev within the streak's events
-        streak_times = [per_day[d] for d in longest_run]
+        # Compute time-of-day stddev within the streak's events.
+        # IMPORTANT: convert each timestamp to LOCAL before extracting
+        # hour/minute. Used to read .hour/.minute on UTC datetimes which
+        # showed evening events as morning times for users east of UTC.
+        streak_times_local = [
+            dt_util.as_local(per_day[d]) for d in longest_run
+        ]
         minutes_past_midnight = [
-            t.hour * 60 + t.minute + t.second / 60.0 for t in streak_times
+            t.hour * 60 + t.minute + t.second / 60.0
+            for t in streak_times_local
         ]
         avg = sum(minutes_past_midnight) / len(minutes_past_midnight)
         stddev = math.sqrt(
@@ -127,9 +140,13 @@ class StreakDetector(Detector):
             return None
 
         # If ScheduleDetector would also fire on this group, skip — let
-        # the stronger detector own it.
+        # the stronger detector own it. Same local-time conversion
+        # applies here so the comparison metric matches.
         all_minutes = [
-            ev.timestamp.hour * 60 + ev.timestamp.minute
+            (
+                dt_util.as_local(ev.timestamp).hour * 60
+                + dt_util.as_local(ev.timestamp).minute
+            )
             for ev in events
         ]
         all_avg = sum(all_minutes) / len(all_minutes)
