@@ -374,6 +374,42 @@ async def ws_list(
                 pass
         return out
 
+    # Build alias → id lookup so we can hand the card structured links
+    # (id powers the deep-link URL; alias powers the visible label).
+    alias_to_id: dict[str, str] = {}
+    try:
+        from .detectors import _load_existing_automations as _lea
+
+        autos_for_ids = await _lea(hass)
+        for auto in autos_for_ids:
+            aid = auto.get("id")
+            alias = auto.get("alias")
+            if isinstance(alias, str) and isinstance(aid, str):
+                alias_to_id[alias] = aid
+            elif isinstance(aid, str):
+                # Fallback: id-as-label installs (older YAML)
+                alias_to_id[aid] = aid
+    except Exception:  # noqa: BLE001
+        pass
+
+    def _build_automation_links(labels: "list | tuple") -> list[dict]:
+        """Resolve a list of automation labels (alias or id) into
+        [{id?, alias, url?}] entries the card can render as clickable
+        chips. Skips duplicates within a single insight."""
+        seen_local: set[str] = set()
+        out: list[dict] = []
+        for label in labels:
+            if not isinstance(label, str) or label in seen_local:
+                continue
+            seen_local.add(label)
+            entry: dict[str, str] = {"alias": label}
+            aid = alias_to_id.get(label)
+            if aid:
+                entry["id"] = aid
+                entry["url"] = f"/config/automations/edit/{aid}"
+            out.append(entry)
+        return out
+
     enriched: list[dict[str, Any]] = []
     for ins in insights:
         d = ins.to_dict()
@@ -400,6 +436,16 @@ async def ws_list(
                     seen.add(label)
                     referenced_in.append(label)
         d["referenced_in_automations"] = referenced_in
+        # Structured automation links — both for `conflicts_with` (the
+        # 🔁 strict-duplicate match) AND `referenced_in_automations`
+        # (the 🤖 entity-context match). Card renders each as a
+        # clickable chip → /config/automations/edit/{id} when id is
+        # known, plain text otherwise. This addresses the user ask
+        # "let me edit the existing automation instead of starting over."
+        d["conflicts_with_links"] = _build_automation_links(ins.conflicts_with)
+        d["referenced_in_automations_links"] = _build_automation_links(
+            referenced_in
+        )
         enriched.append(d)
 
     connection.send_result(msg["id"], {"insights": enriched})
