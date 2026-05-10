@@ -51,7 +51,7 @@
           "digest_hour": "Hour of day (0-23, local time) to fire the daily digest. Default 9 = 9 AM.",
           "preferred_agent_id": "Which conversation agent to try first for Explain, Refine, and Hypothesize. Failover walks the other installed agents if it fails. Leave blank to auto-pick (Assist default first, then registry order). With multiple HA Insights entries, the first non-empty preference wins integration-wide.",
           "refine_cost_threshold_usd": "When a Refine call's estimated USD cost exceeds this, the card shows a confirm dialog before sending. 0 = always confirm, 10 = effectively never. Local agents always cost $0 and never trigger the confirm. With multiple HA Insights entries, the lowest threshold wins so a cautious entry isn't bypassed by a permissive one.",
-          "allow_user_detectors": "Off by default. When on, *.py files in <config>/ha_insights_detectors/ load as community detectors. Each file is AST-scanned and rejected if it imports network/filesystem/subprocess modules or uses eval/exec/__import__, but the sandbox is best-effort — only enable for files you trust. See docs/writing-a-detector.md."
+          "allow_user_detectors": "Off by default. When on, *.py files placed under your HA config dir at ha_insights_detectors/ load as community detectors. Each file is AST-scanned and rejected if it imports network/filesystem/subprocess modules or uses eval/exec/__import__, but the sandbox is best-effort — only enable for files you trust. See the writing-a-detector docs."
         }
       },
       "cloud_consent": {
