@@ -45,10 +45,13 @@ class LaggedCorrelationDetector(CooccurrenceDetector):
         key: tuple[str, str, str, str],
         deltas: list[float],
         events: list[object],
+        leader_counts: dict[tuple[str, str], int] | None = None,
     ) -> Insight | None:
         # Reuse parent's stats / consistency / confidence shape, then rebuild
-        # the title and payload to reflect the lag.
-        base = super()._evaluate_pair(key, deltas, events)
+        # the title and payload to reflect the lag. Forward leader_counts
+        # so the parent can do its O(1) lookup instead of re-scanning the
+        # full buffer per pair (the cost that blew the 30s watchdog).
+        base = super()._evaluate_pair(key, deltas, events, leader_counts)
         if base is None:
             return None
 

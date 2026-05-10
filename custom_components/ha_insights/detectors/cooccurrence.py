@@ -78,11 +78,23 @@ class CooccurrenceDetector(Detector):
                 )
                 pairs[key].append(delta)
 
+        # Precompute leader fire counts ONCE in O(N) so _evaluate_pair can
+        # do O(1) lookups instead of re-scanning the full buffer per pair.
+        # Was the dominant cost at scale: with ~1000 candidate pairs and a
+        # 340K-event buffer, the old per-pair scan was 340M+ comparisons,
+        # which blew past the 30s detector watchdog. Now it's a single
+        # 340K-pass + per-pair dict.get(), well within budget.
+        leader_counts: dict[tuple[str, str], int] = defaultdict(int)
+        for ev in events:
+            if not self._is_candidate(ev):
+                continue
+            leader_counts[(ev.entity_id, str(ev.new_state))] += 1
+
         insights: list[Insight] = []
         for key, deltas in pairs.items():
             if len(deltas) < self.MIN_OCCURRENCES:
                 continue
-            insight = self._evaluate_pair(key, deltas, events)
+            insight = self._evaluate_pair(key, deltas, events, leader_counts)
             if insight is not None:
                 insights.append(insight)
         return insights
@@ -109,6 +121,7 @@ class CooccurrenceDetector(Detector):
         key: tuple[str, str, str, str],
         deltas: list[float],
         events: list[StateEvent],
+        leader_counts: dict[tuple[str, str], int] | None = None,
     ) -> Insight | None:
         leader_eid, leader_state, follower_eid, follower_state = key
 
@@ -121,12 +134,18 @@ class CooccurrenceDetector(Detector):
             return None
 
         # How often does the leader fire WITHOUT a matching follower? If the
-        # follower follows >=70% of the time, surface as a routine.
-        leader_total = sum(
-            1
-            for ev in events
-            if ev.entity_id == leader_eid and str(ev.new_state) == leader_state
-        )
+        # follower follows >=70% of the time, surface as a routine. Prefer
+        # the precomputed `leader_counts` dict (O(1) lookup) over a full
+        # buffer scan; the fallback exists so unit tests can call
+        # _evaluate_pair directly without setting up the full pipeline.
+        if leader_counts is not None:
+            leader_total = leader_counts.get((leader_eid, leader_state), 0)
+        else:
+            leader_total = sum(
+                1
+                for ev in events
+                if ev.entity_id == leader_eid and str(ev.new_state) == leader_state
+            )
         if leader_total == 0:
             return None
         consistency = min(1.0, len(deltas) / leader_total)
