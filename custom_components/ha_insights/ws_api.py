@@ -210,6 +210,7 @@ async def ws_list(
         vol.Optional("agent_id"): vol.Any(str, None),
     }
 )
+@websocket_api.require_admin
 @websocket_api.async_response
 async def ws_explain(
     hass: HomeAssistant,
@@ -300,6 +301,7 @@ async def ws_explain(
         vol.Optional("agent_id"): vol.Any(str, None),
     }
 )
+@websocket_api.require_admin
 @websocket_api.async_response
 async def ws_hypothesize(
     hass: HomeAssistant,
@@ -392,6 +394,7 @@ async def ws_hypothesize(
 @websocket_api.websocket_command(
     {vol.Required("type"): "home_insights/purge_all"}
 )
+@websocket_api.require_admin
 @websocket_api.async_response
 async def ws_purge_all(
     hass: HomeAssistant,
@@ -480,6 +483,7 @@ async def ws_dismiss(
         vol.Optional("payload_override"): dict,
     }
 )
+@websocket_api.require_admin
 @websocket_api.async_response
 async def ws_apply(
     hass: HomeAssistant,
@@ -577,6 +581,7 @@ async def ws_apply(
         vol.Optional("conversation_id"): vol.Any(str, None),
     }
 )
+@websocket_api.require_admin
 @websocket_api.async_response
 async def ws_refine(
     hass: HomeAssistant,
@@ -685,6 +690,7 @@ async def ws_refine(
         vol.Optional("payload_override"): dict,
     }
 )
+@websocket_api.require_admin
 @websocket_api.async_response
 async def ws_test_actions(
     hass: HomeAssistant,
@@ -792,6 +798,7 @@ async def ws_test_actions(
         vol.Optional("force", default=False): bool,
     }
 )
+@websocket_api.require_admin
 @websocket_api.async_response
 async def ws_undo(
     hass: HomeAssistant,
@@ -1206,6 +1213,7 @@ def ws_backfill_status(
         vol.Required("new_state"): str,
     }
 )
+@websocket_api.require_admin
 @callback
 def ws_dev_inject_event(
     hass: HomeAssistant,
