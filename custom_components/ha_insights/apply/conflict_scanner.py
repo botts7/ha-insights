@@ -50,26 +50,38 @@ def find_conflicts(
 def _automations_overlap(
     a: dict[str, Any], b: dict[str, Any], time_window_min: int
 ) -> bool:
-    """Either time-trigger or state-trigger overlap counts as a conflict."""
+    """Either time-trigger or state-trigger overlap counts as a conflict.
+
+    Both checks require BOTH trigger overlap AND action-target overlap.
+    Without the action check we'd flag any two automations triggered by
+    the same entity as conflicts — but two automations on `motion -> on`
+    that turn on different things (light vs notification vs scene) are
+    independent, not duplicates. v1.1 tightening after a 1000-entity
+    install where every long_tail insight was dropped because the user
+    happened to have any pre-existing automation on that entity.
+    """
     a_triggers = _as_list(a.get("trigger"))
     b_triggers = _as_list(b.get("trigger"))
+    a_entities = _extract_target_entities(a.get("action", []))
+    b_entities = _extract_target_entities(b.get("action", []))
+    target_overlap = bool(a_entities & b_entities)
+    if not target_overlap:
+        # Different action targets = different intent. No conflict.
+        return False
 
-    # Time-trigger overlap: same target entity within ±N minutes
+    # Time-trigger overlap: same trigger time AND same target entity
     for at in a_triggers:
         if not isinstance(at, dict) or at.get("platform") != "time":
             continue
         for bt in b_triggers:
             if not isinstance(bt, dict) or bt.get("platform") != "time":
                 continue
-            if not _times_close(at.get("at"), bt.get("at"), time_window_min):
-                continue
-            a_entities = _extract_target_entities(a.get("action", []))
-            b_entities = _extract_target_entities(b.get("action", []))
-            if a_entities & b_entities:
+            if _times_close(at.get("at"), bt.get("at"), time_window_min):
                 return True
 
-    # State-trigger overlap: same source entity_id with overlapping `to:` value.
-    # Two automations firing on `light.kitchen -> on` would cascade; flag it.
+    # State-trigger overlap: same trigger signature AND same target entity.
+    # Action targets already overlap (gate above), so we only need the
+    # state-trigger source to match.
     a_states = _state_trigger_signatures(a_triggers)
     b_states = _state_trigger_signatures(b_triggers)
     if a_states & b_states:

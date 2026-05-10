@@ -327,25 +327,38 @@ async def run_all_detectors(
         # the post-loop sweep can replace its prior active insights.
         completed_detectors.add(name)
         for insight in insights:
-            # Suppress insights that duplicate an existing automation —
-            # the user already has the automation, so suggesting they
-            # set it up again is noise. Conflicts list is preserved on
-            # the insight if you want to surface "shadowed by X" later.
+            # Annotate (don't suppress) insights that match an existing
+            # automation — the user might want to know HA noticed the
+            # pattern even if they already automated it (validates the
+            # automation; lets them refine or replace). Card surfaces
+            # `conflicts_with` as a "shadowed by automation" pill so the
+            # user can filter them out if they want.
+            #
+            # Switched from suppress to annotate after a 1000-entity
+            # install reported 0 insights post-restart — the broader
+            # registry-based automation read was now catching most
+            # patterns and dropping them silently, leaving the user
+            # confused about whether anything was working.
             if existing_automations:
                 from ..apply.conflict_scanner import find_conflicts
 
                 conflicts = find_conflicts(insight, existing_automations)
                 if conflicts:
                     suppressed_as_duplicate += 1
-                    continue
+                    insight = replace(
+                        insight, conflicts_with=tuple(conflicts)
+                    )
             await store.add_insight(insight)
             emitted_ids.add(insight.id)
             added += 1
 
     if suppressed_as_duplicate:
+        # We no longer suppress these — they're annotated with
+        # conflicts_with and shown in the panel with a "shadowed" pill.
+        # Naming kept for backwards compat with the WS response field.
         _LOGGER.info(
-            "HA Insights scan: suppressed %d insights duplicating existing "
-            "automations",
+            "HA Insights scan: %d insights shadowed by existing automations "
+            "(stored, marked, NOT suppressed — user can filter via panel)",
             suppressed_as_duplicate,
         )
 

@@ -48,9 +48,17 @@ class ScheduleDetector(Detector):
     requires_recorder = False
 
     LOOKBACK_DAYS = 14
-    MIN_OCCURRENCES = 10
-    TIME_STDDEV_MAX_MIN = 8.0
-    WEEKDAY_CONSISTENCY_MIN = 0.80
+    # Real human routines aren't 100% consistent — sick days, vacations,
+    # the kid's school holidays. 7 of 14 days catches genuine half-time
+    # patterns the user identifies as "we usually do X" without losing
+    # them to a few exceptions. (Was 10 — too strict; user reported real
+    # patterns missing because they happened on 8 of 14 days.)
+    MIN_OCCURRENCES = 7
+    # Real wake-up routines vary 7:00 ± 5-10 min. 8min stddev was tight;
+    # 12min lets us catch "I turn on the lights between 6:55 and 7:15"
+    # which is what real humans actually do.
+    TIME_STDDEV_MAX_MIN = 12.0
+    WEEKDAY_CONSISTENCY_MIN = 0.75
 
     async def scan(self, ctx: DetectorContext) -> list[Insight]:
         if ctx.event_buffer is None:
