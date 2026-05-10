@@ -97,6 +97,37 @@ class RefinementResult:
     # failover chain don't escape the privacy log.
     attempts: tuple[AttemptAudit, ...] = ()
 
+    @classmethod
+    def failure(
+        cls,
+        *,
+        error: str,
+        redaction_map: RedactionMap,
+        bytes_sent: int,
+        bytes_received: int = 0,
+        rationale: str | None = None,
+        raw_response: str | None = None,
+        chosen_agent_id: str | None = None,
+    ) -> "RefinementResult":
+        """Build a failure result with sensible defaults for unused fields.
+
+        Collapses what was previously 8 nearly-identical constructor
+        calls into named-arg sites that show only what's actually
+        different per failure path. v1.0 review #14.
+        """
+        return cls(
+            refined_payload=None,
+            rationale=rationale,
+            diff_summary=[],
+            redaction_map=redaction_map,
+            bytes_sent=bytes_sent,
+            bytes_received=bytes_received,
+            success=False,
+            error=error,
+            raw_response=raw_response,
+            chosen_agent_id=chosen_agent_id,
+        )
+
 
 def _yaml_dump(payload: dict[str, Any]) -> str:
     return yaml.safe_dump(payload, default_flow_style=False, sort_keys=False).strip()
@@ -489,15 +520,10 @@ async def _refine_one_attempt(
             agent_id=chosen_agent_id,
         )
     except Exception as err:
-        return RefinementResult(
-            refined_payload=None,
-            rationale=None,
-            diff_summary=[],
+        return RefinementResult.failure(
+            error=str(err),
             redaction_map=redaction_map,
             bytes_sent=bytes_sent,
-            bytes_received=0,
-            success=False,
-            error=str(err),
             chosen_agent_id=chosen_agent_id,
         )
 
@@ -505,6 +531,12 @@ async def _refine_one_attempt(
     speech = _extract_speech(result)
     bytes_received = len(speech.encode("utf-8")) if speech else 0
     new_conversation_id = _extract_conversation_id(result) or conversation_id
+    # v1.0 review #8: deref speech before showing it in errors / raw_response.
+    # Pseudonyms in the prompt round-trip through the LLM; the user wants
+    # to see their real entity_ids in error output, not "light.entity_xxx".
+    deref_speech = (
+        redaction_map.dereference(speech) if speech else speech
+    )
 
     if response_type and "error" in response_type.lower():
         is_llm_agent = (
@@ -514,51 +546,39 @@ async def _refine_one_attempt(
         if is_llm_agent:
             err_msg = (
                 f"LLM agent ({chosen_agent_id}) returned an error: "
-                f"{speech or '(no message)'}"
+                f"{deref_speech or '(no message)'}"
             )
         else:
             err_msg = (
                 "Active Conversation agent isn't an LLM (rule-based fallback). "
                 "Refine requires an LLM Conversation integration."
             )
-        return RefinementResult(
-            refined_payload=None,
-            rationale=None,
-            diff_summary=[],
+        return RefinementResult.failure(
+            error=err_msg,
             redaction_map=redaction_map,
             bytes_sent=bytes_sent,
             bytes_received=bytes_received,
-            success=False,
-            error=err_msg,
-            raw_response=speech,
+            raw_response=deref_speech,
             chosen_agent_id=chosen_agent_id,
         )
 
     if speech is None:
-        return RefinementResult(
-            refined_payload=None,
-            rationale=None,
-            diff_summary=[],
+        return RefinementResult.failure(
+            error="agent returned no speech",
             redaction_map=redaction_map,
             bytes_sent=bytes_sent,
-            bytes_received=0,
-            success=False,
-            error="agent returned no speech",
             chosen_agent_id=chosen_agent_id,
         )
 
     rationale, parsed, parse_error = parse_refine_response(speech)
     if parse_error or parsed is None:
-        return RefinementResult(
-            refined_payload=None,
-            rationale=rationale,
-            diff_summary=[],
+        return RefinementResult.failure(
+            error=f"could not parse refinement: {parse_error}",
             redaction_map=redaction_map,
             bytes_sent=bytes_sent,
             bytes_received=bytes_received,
-            success=False,
-            error=f"could not parse refinement: {parse_error}",
-            raw_response=speech,
+            rationale=rationale,
+            raw_response=deref_speech,
             chosen_agent_id=chosen_agent_id,
         )
 
@@ -568,29 +588,23 @@ async def _refine_one_attempt(
     try:
         refined = yaml.safe_load(dereferenced_yaml)
     except yaml.YAMLError as exc:
-        return RefinementResult(
-            refined_payload=None,
-            rationale=rationale,
-            diff_summary=[],
+        return RefinementResult.failure(
+            error=f"dereferenced YAML re-parse failed: {exc}",
             redaction_map=redaction_map,
             bytes_sent=bytes_sent,
             bytes_received=bytes_received,
-            success=False,
-            error=f"dereferenced YAML re-parse failed: {exc}",
-            raw_response=speech,
+            rationale=rationale,
+            raw_response=deref_speech,
             chosen_agent_id=chosen_agent_id,
         )
     if not isinstance(refined, dict):
-        return RefinementResult(
-            refined_payload=None,
-            rationale=rationale,
-            diff_summary=[],
+        return RefinementResult.failure(
+            error="dereferenced YAML did not parse to a mapping",
             redaction_map=redaction_map,
             bytes_sent=bytes_sent,
             bytes_received=bytes_received,
-            success=False,
-            error="dereferenced YAML did not parse to a mapping",
-            raw_response=speech,
+            rationale=rationale,
+            raw_response=deref_speech,
             chosen_agent_id=chosen_agent_id,
         )
 
@@ -614,14 +628,7 @@ async def _refine_one_attempt(
         # produce a partial dict — the validator catches it as missing keys
         # or wrong-type triggers. Surface the actionable message instead.
         if _looks_structurally_incomplete(refined):
-            return RefinementResult(
-                refined_payload=None,
-                rationale=rationale,
-                diff_summary=[],
-                redaction_map=redaction_map,
-                bytes_sent=bytes_sent,
-                bytes_received=bytes_received,
-                success=False,
+            return RefinementResult.failure(
                 error=(
                     "LLM response was cut off mid-YAML — likely hit "
                     "max_output_tokens. Increase the limit in your LLM "
@@ -629,19 +636,20 @@ async def _refine_one_attempt(
                     "switch to a non-thinking model that uses tokens "
                     "more efficiently."
                 ),
-                raw_response=speech,
+                redaction_map=redaction_map,
+                bytes_sent=bytes_sent,
+                bytes_received=bytes_received,
+                rationale=rationale,
+                raw_response=deref_speech,
                 chosen_agent_id=chosen_agent_id,
             )
-        return RefinementResult(
-            refined_payload=None,
-            rationale=rationale,
-            diff_summary=[],
+        return RefinementResult.failure(
+            error=f"validation failed: {validation_error}",
             redaction_map=redaction_map,
             bytes_sent=bytes_sent,
             bytes_received=bytes_received,
-            success=False,
-            error=f"validation failed: {validation_error}",
-            raw_response=speech,
+            rationale=rationale,
+            raw_response=deref_speech,
             chosen_agent_id=chosen_agent_id,
         )
 

@@ -84,6 +84,32 @@ class ExplanationResult:
     # failover chain don't escape the privacy log.
     attempts: tuple[AttemptAudit, ...] = ()
 
+    @classmethod
+    def failure(
+        cls,
+        *,
+        error: str,
+        redaction_map: RedactionMap,
+        bytes_sent: int,
+        bytes_received: int = 0,
+        chosen_agent_id: str | None = None,
+    ) -> "ExplanationResult":
+        """Build a failure result with sensible defaults for unused fields.
+
+        Collapses what was previously 4 nearly-identical constructor calls
+        into named-arg sites that show only what's actually different per
+        failure path.
+        """
+        return cls(
+            explanation=None,
+            redaction_map=redaction_map,
+            bytes_sent=bytes_sent,
+            bytes_received=bytes_received,
+            success=False,
+            error=error,
+            chosen_agent_id=chosen_agent_id,
+        )
+
 
 def build_hypothesize_prompt(insight: Insight, redacted_payload: dict) -> str:
     """Build a "what could cause this anomaly?" prompt.
@@ -375,18 +401,22 @@ async def _explain_one_attempt(
             agent_id=chosen_agent_id,
         )
     except Exception as err:  # surface any conversation failure to the user
-        return ExplanationResult(
-            explanation=None,
+        return ExplanationResult.failure(
+            error=str(err),
             redaction_map=redaction_map,
             bytes_sent=bytes_sent,
-            bytes_received=0,
-            success=False,
-            error=str(err),
             chosen_agent_id=chosen_agent_id,
         )
 
     response_type = _extract_response_type(result)
     speech = _extract_speech(result)
+    # v1.0 review #8: deref agent speech before showing it to the user
+    # in error messages. The prompt the agent saw contained pseudonyms;
+    # if it echoes them in its error, the user would see "light.entity_xxx"
+    # instead of their real entity_id.
+    deref_speech = (
+        redaction_map.dereference(speech) if speech else speech
+    )
 
     # Handle agent error responses — but distinguish:
     #   1. We routed to an LLM agent and IT failed (rate limit, API down, key
@@ -401,7 +431,7 @@ async def _explain_one_attempt(
         if is_llm_agent:
             error_msg = (
                 f"LLM agent ({chosen_agent_id}) returned an error: "
-                f"{speech or '(no message)'}"
+                f"{deref_speech or '(no message)'}"
             )
         else:
             error_msg = (
@@ -409,30 +439,24 @@ async def _explain_one_attempt(
                 "Install an LLM Conversation integration like Anthropic, OpenAI, "
                 "Google Generative AI, or Ollama, then select it as your agent."
             )
-        return ExplanationResult(
-            explanation=None,
+        return ExplanationResult.failure(
+            error=error_msg,
             redaction_map=redaction_map,
             bytes_sent=bytes_sent,
             bytes_received=len(speech.encode("utf-8")) if speech else 0,
-            success=False,
-            error=error_msg,
             chosen_agent_id=chosen_agent_id,
         )
 
     if speech is None:
-        return ExplanationResult(
-            explanation=None,
+        return ExplanationResult.failure(
+            error="agent returned no speech",
             redaction_map=redaction_map,
             bytes_sent=bytes_sent,
-            bytes_received=0,
-            success=False,
-            error="agent returned no speech",
             chosen_agent_id=chosen_agent_id,
         )
 
-    dereffed = redaction_map.dereference(speech)
     return ExplanationResult(
-        explanation=dereffed,
+        explanation=deref_speech,
         redaction_map=redaction_map,
         bytes_sent=bytes_sent,
         bytes_received=len(speech.encode("utf-8")),
