@@ -263,14 +263,47 @@ async def ws_list(
     # surface "🤖 used in 3 automations" with the actual aliases. Reads
     # the same source as the conflict scanner (HA's automation registry
     # + automations.yaml), then walks each automation's triggers and
-    # actions to collect every entity_id mentioned. Looser than the
-    # conflict-scanner overlap test (which requires both trigger AND
-    # target to match) — here we just want "is this entity touched by
-    # any automation, anywhere in its config" for context display.
+    # actions to collect every entity_id mentioned.
+    #
+    # Scene/group expansion: an automation that targets `scene.evening`
+    # or `light.outdoor_group_light` is logically "using" all the
+    # underlying lights, even though the YAML only lists the parent. We
+    # walk the state machine for any entity with `attributes.entity_id`
+    # (scenes, group_lights, group_covers, binary_sensor.group, etc.)
+    # and unfold each parent reference into its members so the pill
+    # shows up on the LEAVES, not just the parent.
     entity_to_automations: dict[str, list[str]] = {}
     try:
         from .apply.conflict_scanner import _as_list, _extract_target_entities
         from .detectors import _load_existing_automations
+
+        # Walk state machine once to build (parent → set of members).
+        # Same data as DetectorContext.entity_dependencies builds, but
+        # we don't have that here — keeping the WS path independent.
+        container_to_members: dict[str, set[str]] = {}
+        for state in hass.states.async_all():
+            for attr_name in ("entity_id", "group_members", "lights"):
+                members_attr = state.attributes.get(attr_name)
+                if not isinstance(members_attr, (list, tuple)):
+                    continue
+                members = {
+                    m
+                    for m in members_attr
+                    if isinstance(m, str) and "." in m
+                }
+                if members:
+                    container_to_members.setdefault(state.entity_id, set()).update(
+                        members
+                    )
+
+        def _expand(refs: set[str]) -> set[str]:
+            """One-hop expansion: parent containers → members. Catches the
+            common case (scene → lights, group_light → bulbs); doesn't
+            recurse into nested groups, which is rare and adds complexity."""
+            out = set(refs)
+            for eid in list(refs):
+                out |= container_to_members.get(eid, set())
+            return out
 
         autos = await _load_existing_automations(hass)
         for auto in autos:
@@ -287,6 +320,8 @@ async def ws_list(
                     referenced.update(e for e in ti if isinstance(e, str))
             # Action target references — reuse the conflict scanner helper
             referenced |= _extract_target_entities(auto.get("action"))
+            # Expand: scene → its members, group light → its bulbs
+            referenced = _expand(referenced)
             for eid in referenced:
                 entity_to_automations.setdefault(eid, []).append(label)
     except Exception:  # noqa: BLE001
