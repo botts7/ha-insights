@@ -68,9 +68,17 @@ class FrequencyAnomalyDetector(Detector):
     # Also require this many baseline events so we don't flag a brand-new
     # entity that didn't exist last week — its "baseline" is artificially low.
     MIN_BASELINE_EVENTS = 14
-    # Today/baseline ratio threshold. 3x daily mean is well above sampling
-    # noise for entities clearing the absolute floors above.
-    RATIO_THRESHOLD = 3.0
+    # Today/baseline ratio threshold. 3x daily mean was well above sampling
+    # noise BUT included normal "user used the device today" bursts on a
+    # 1000-entity install — 49 false-positive insights for things like
+    # "porch lights fired 15× today vs 2/day baseline." Bumped to 8× —
+    # genuine stuck loops or runaway sensors are 10-30×, normal usage
+    # rarely exceeds 7×. User feedback: the previous threshold made
+    # this detector unusable as a panel signal.
+    RATIO_THRESHOLD = 8.0
+    # Cap to keep panel render fast even when many entities legitimately
+    # spike. Sorted by ratio descending so the most extreme stick out.
+    MAX_INSIGHTS_PER_SCAN = 15
 
     async def scan(self, ctx: DetectorContext) -> list[Insight]:
         if ctx.event_buffer is None:
@@ -142,10 +150,16 @@ class FrequencyAnomalyDetector(Detector):
             if existing is None or cand[0] > existing[0]:
                 per_device_best[device_id] = cand
 
+        # Sort by ratio descending then cap to MAX_INSIGHTS_PER_SCAN —
+        # the most extreme anomalies are the most likely to be real
+        # stuck loops, the least extreme are most likely to be normal
+        # use bursts.
+        all_candidates = list(per_device_best.values()) + no_device
+        all_candidates.sort(key=lambda c: c[0], reverse=True)
+        all_candidates = all_candidates[: self.MAX_INSIGHTS_PER_SCAN]
+
         insights: list[Insight] = []
-        for ratio, entity_id, today_count, baseline_per_day in (
-            list(per_device_best.values()) + no_device
-        ):
+        for ratio, entity_id, today_count, baseline_per_day in all_candidates:
             insights.append(
                 self._build_insight(
                     entity_id=entity_id,
