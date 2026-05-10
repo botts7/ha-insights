@@ -105,9 +105,24 @@ async def _setup_entry_body(
         # Keep pseudonym map + state buffer in sync with entity registry.
         action = event.data.get("action")
         if action == "update":
+            changes = event.data.get("changes") or {}
+
+            # unique_id reassignment (entity_id may stay the same): the
+            # pseudonym was earned by the OLD underlying device. Drop it
+            # so the new device gets a fresh pseudonym, otherwise cloud-
+            # side LLM logs would conflate the two on next call.
+            # v1.0 review (regression-fix follow-up).
+            if "unique_id" in changes:
+                ent_id = event.data.get("entity_id")
+                if ent_id:
+                    entry.async_create_background_task(
+                        hass,
+                        store.delete_entity_pseudonym(ent_id),
+                        name=f"{DOMAIN}_invalidate_pseudonym_{ent_id}",
+                    )
+
             # Rename: migrate the pseudonym + buffer entries so detectors and
             # any cached references survive the rename atomically.
-            changes = event.data.get("changes") or {}
             old_entity_id = changes.get("entity_id")
             new_entity_id = event.data.get("entity_id")
             if (

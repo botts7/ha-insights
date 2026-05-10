@@ -23,6 +23,8 @@ from collections import defaultdict
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
+from homeassistant.util import dt as dt_util
+
 from ..insight import Insight, InsightKind
 from .base import Detector, DetectorContext, register_detector
 
@@ -93,8 +95,16 @@ class ScheduleDetector(Detector):
         if len(events) < self.MIN_OCCURRENCES:
             return None
 
+        # Convert to HA's local timezone before extracting weekday + time
+        # of day. A "Friday 7pm" routine in PST fires at Saturday 03:00 UTC;
+        # without this conversion the detector would classify it as
+        # Saturday and emit the apply payload with the wrong weekday.
+        # v1.0 review #2.
         weekday_minute = [
-            (ev.timestamp.weekday(), self._minute_of_day(ev.timestamp))
+            (
+                dt_util.as_local(ev.timestamp).weekday(),
+                self._minute_of_day(dt_util.as_local(ev.timestamp)),
+            )
             for ev in events
         ]
         weekday_set = self._classify_weekdays([d for d, _ in weekday_minute])

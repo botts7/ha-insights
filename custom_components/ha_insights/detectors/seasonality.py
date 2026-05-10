@@ -22,6 +22,8 @@ from collections import Counter, defaultdict
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
+from homeassistant.util import dt as dt_util
+
 from ..insight import Insight, InsightKind
 from .base import Detector, DetectorContext, register_detector
 
@@ -104,7 +106,13 @@ class SeasonalityDetector(Detector):
         if len(events) < self.MIN_DOMINANT_HITS:
             return None
 
-        per_weekday: Counter[int] = Counter(ev.timestamp.weekday() for ev in events)
+        # Convert to HA's local timezone before computing weekday — see
+        # v1.0 review #2. A "Friday 7pm" routine in PST is Saturday 03:00
+        # UTC; bucketing on UTC weekday classifies it wrong and emits an
+        # automation with the wrong day name.
+        per_weekday: Counter[int] = Counter(
+            dt_util.as_local(ev.timestamp).weekday() for ev in events
+        )
         dominant_weekday, dominant_count = per_weekday.most_common(1)[0]
         if dominant_count < self.MIN_DOMINANT_HITS:
             return None
@@ -114,9 +122,14 @@ class SeasonalityDetector(Detector):
         # Time stats over the dominant weekday's events only — the rest
         # might be drift/exceptions and would skew the mean.
         dominant_events = [
-            ev for ev in events if ev.timestamp.weekday() == dominant_weekday
+            ev
+            for ev in events
+            if dt_util.as_local(ev.timestamp).weekday() == dominant_weekday
         ]
-        minutes = [self._minute_of_day(ev.timestamp) for ev in dominant_events]
+        minutes = [
+            self._minute_of_day(dt_util.as_local(ev.timestamp))
+            for ev in dominant_events
+        ]
         avg_min = sum(minutes) / len(minutes)
         variance = sum((m - avg_min) ** 2 for m in minutes) / len(minutes)
         stddev = math.sqrt(variance)

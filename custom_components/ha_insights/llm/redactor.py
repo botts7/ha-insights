@@ -63,14 +63,32 @@ class RedactionMap:
     entities_blocked: list[str] = field(default_factory=list)
 
     def dereference(self, text: str) -> str:
-        """Replace any pseudonyms in `text` with their real entity_ids."""
+        """Replace any pseudonyms in `text` with their real entity_ids.
+
+        Uses word-boundary regex (not bare str.replace) so a pseudonym
+        that's a substring of a longer hallucinated identifier doesn't
+        get mangled. v1.0 review caught:
+            text = "see light.entity_abc1234567"  # LLM invented extra chars
+            pseudonym = "light.entity_abc123"
+            real = "light.kitchen"
+        Bare str.replace would emit "see light.kitchen4567" — a string
+        that LOOKS like a valid entity_id and would silently pass
+        downstream validation.
+        """
         if not self.pseudonym_to_entity:
             return text
         result = text
-        # Sort by length descending so longer pseudonyms match first (avoids
-        # partial overlap when one pseudonym is a prefix of another).
+        # Longest-first ordering still matters when two real pseudonyms
+        # have a prefix relationship (rare with our 6-char suffix scheme,
+        # but sound).
         for pseudonym in sorted(self.pseudonym_to_entity, key=len, reverse=True):
-            result = result.replace(pseudonym, self.pseudonym_to_entity[pseudonym])
+            real = self.pseudonym_to_entity[pseudonym]
+            # \b matches word/non-word transitions. entity_ids are
+            # `[a-z_]+\.[a-z0-9_]+`; the `.` is a non-word char, so \b
+            # correctly anchors at both the leading and trailing edges.
+            result = re.sub(
+                r"\b" + re.escape(pseudonym) + r"\b", real, result
+            )
         return result
 
 

@@ -17,6 +17,8 @@ from __future__ import annotations
 from collections import defaultdict
 from datetime import UTC, datetime, timedelta
 
+from homeassistant.util import dt as dt_util
+
 from ..insight import Insight, InsightKind
 from .base import Detector, DetectorContext, register_detector
 
@@ -63,11 +65,18 @@ class FrequencyAnomalyDetector(Detector):
         if ctx.event_buffer is None:
             return []
 
-        now = datetime.now(tz=UTC).replace(microsecond=0)
-        # We bucket by midnight UTC. Baseline is the prior 13 days of the
-        # 14-day window so today's bump is excluded from its own baseline.
-        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-        baseline_start = today_start - timedelta(days=self.LOOKBACK_DAYS - 1)
+        # Bucket by HA-local midnight, not UTC midnight — otherwise on the
+        # west coast a 4 PM event lands "tomorrow" and a 9 PM event lands
+        # "today" depending on which side of UTC midnight we are. v1.0
+        # review #2 caught this: the today vs baseline split was wrong
+        # for half the world.
+        now_local = dt_util.as_local(datetime.now(tz=UTC).replace(microsecond=0))
+        today_start_local = now_local.replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
+        # Compare against ev.timestamp by converting both to UTC.
+        today_start_utc = today_start_local.astimezone(UTC)
+        baseline_start = today_start_utc - timedelta(days=self.LOOKBACK_DAYS - 1)
 
         events = ctx.event_buffer.query(since=baseline_start)
         if not events:
@@ -76,7 +85,7 @@ class FrequencyAnomalyDetector(Detector):
         today_counts: dict[str, int] = defaultdict(int)
         baseline_counts: dict[str, int] = defaultdict(int)
         for ev in events:
-            if ev.timestamp >= today_start:
+            if ev.timestamp >= today_start_utc:
                 today_counts[ev.entity_id] += 1
             else:
                 baseline_counts[ev.entity_id] += 1
@@ -106,7 +115,7 @@ class FrequencyAnomalyDetector(Detector):
                     today_count=today_count,
                     baseline_per_day=baseline_per_day,
                     ratio=ratio,
-                    today_date=today_start.date().isoformat(),
+                    today_date=today_start_local.date().isoformat(),
                 )
             )
         return insights

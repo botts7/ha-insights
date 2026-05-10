@@ -17,6 +17,7 @@ from datetime import UTC, datetime, timedelta
 
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.event import async_track_time_change
+from homeassistant.util import dt as dt_util
 
 from ..const import DOMAIN
 from ..insight import Insight
@@ -91,6 +92,11 @@ async def fire_digest(
     """
     moment = now or datetime.now(tz=UTC)
     cutoff = moment - _NEW_WINDOW
+    # notification_id is date-stamped — use local date so a digest fired
+    # at 9 AM Pacific on May 10 doesn't end up with a notification_id
+    # that conflicts with a digest fired at 9 AM Eastern on May 11 just
+    # because UTC has rolled over for the eastern user. v1.0 review #2.
+    moment_local = dt_util.as_local(moment)
 
     open_insights = await store.list_insights()
     new_insights = [i for i in open_insights if i.created_at >= cutoff]
@@ -101,7 +107,7 @@ async def fire_digest(
     if message is None:
         return None
 
-    notification_id = f"ha_insights_digest_{moment.strftime('%Y%m%d')}"
+    notification_id = f"ha_insights_digest_{moment_local.strftime('%Y%m%d')}"
     try:
         await hass.services.async_call(
             "persistent_notification",

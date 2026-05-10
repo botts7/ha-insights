@@ -328,6 +328,9 @@ class HaInsightsConfigFlow(ConfigFlow, domain=DOMAIN):
                 CONF_NOTIFY_THRESHOLD: DEFAULT_NOTIFY_THRESHOLD,
                 CONF_DIGEST_ENABLED: DEFAULT_DIGEST_ENABLED,
                 CONF_DIGEST_HOUR: DEFAULT_DIGEST_HOUR,
+                CONF_PREFERRED_AGENT_ID: "",
+                CONF_REFINE_COST_THRESHOLD_USD: DEFAULT_REFINE_COST_THRESHOLD_USD,
+                CONF_ALLOW_USER_DETECTORS: DEFAULT_ALLOW_USER_DETECTORS,
             },
         )
 
@@ -488,6 +491,12 @@ class HaInsightsOptionsFlow(OptionsFlow):
                         CONF_DIGEST_HOUR: self._digest_hour,
                         CONF_PREFERRED_AGENT_ID: self._preferred_agent_id or "",
                         CONF_REFINE_COST_THRESHOLD_USD: self._refine_cost_threshold,
+                        # v1.0 review #3 follow-up: this branch was missing
+                        # _allow_user_detectors. A user toggling the
+                        # "allow detectors" flag in the same Configure
+                        # visit as switching INTO Cloud mode would lose
+                        # the toggle silently.
+                        CONF_ALLOW_USER_DETECTORS: self._allow_user_detectors,
                     },
                 )
             self._mode = None
