@@ -6,6 +6,34 @@ All notable changes to this project are documented in this file. Format follows 
 
 v1.0 release-candidate work. Internal-testing track; HACS submission deferred until the user verifies stability on their dev install.
 
+### Security & resilience hardening (v1.0 review)
+
+A multi-agent code review surfaced 22 findings across privacy, security, concurrency, resource management, and code quality. The following landed before v1.0 tagging:
+
+- **Admin gate on destructive WS handlers** (review #1). `apply`, `undo`, `purge_all`, `test_actions`, `_dev/inject_event`, `explain`, `refine`, `hypothesize` now require `connection.user.is_admin`. Read-only endpoints stay open so non-admin frontend users can still view + dismiss/snooze. Regression test parametrizes both buckets.
+- **Per-attempt audit logging** (#2). Failover walks multiple agents; each round-trip MUST hit the privacy log. `ExplanationResult.attempts` and `RefinementResult.attempts` accumulate `AttemptAudit` rows, WS handlers iterate via new `_audit_attempts` helper. Closes a privacy hole where earlier failed attempts disappeared from `outbound_calls`.
+- **Custom-detector sandbox** (#3). `CONF_ALLOW_USER_DETECTORS` defaults to False (opt-in gate); even when on, the loader AST-scans every file and rejects modules importing `os/subprocess/socket/urllib/urllib3/http/requests/httpx/aiohttp/websocket(s)/ftplib/smtplib/telnetlib/imaplib/poplib/shutil/tempfile/fcntl/termios/pwd/grp/spwd/ctypes/cffi/pickle/marshal/shelve/code/codeop` or using `__import__/__builtins__/eval/exec/compile`. 15 parametrized rejection tests. Unsandboxed `exec_module` was an RCE-on-config-write.
+- **Blocking imports off the event loop** (#4). `pkgutil.iter_modules` + `importlib.import_module` in `_autoload_detectors` now run via `hass.async_add_executor_job` once per HA boot. HA's blocking-call detector no longer fires on every cold start.
+- **Backfill task cancellation on entry unload** (#5). Captured as `entry_data["backfill_task"]`; `async_unload_entry` cancels + awaits before closing the store. A reload mid-backfill no longer leaks a coroutine writing to a popped buffer.
+- **Store leak guard on partial setup failure** (#6). `async_setup_entry` body wrapped in try/except → `store.close()` + reraise. Multi-entry reload-on-error otherwise stacked open SQLite handles.
+- **`SUPPORTED_METHODS` matches actual `async_register_command` calls** (#7). Three live endpoints (`hypothesize`, `refine_cost_estimate`, `list_entries`) were missing from the feature-detection tuple. New regression test parses ws_api.py source and asserts the two stay in lockstep.
+- **PII deref in agent error messages** (#8). When an LLM returns an error and echoes the prompt, real entity_ids round-trip through `redaction_map.dereference` so the user sees their real names in the WS reply, not `light.entity_xxx`. Same for `raw_response` debug output.
+- **Pseudonym map invalidated on entity remove** (#9). New `entity_registry "remove"` action handler calls `store.delete_entity_pseudonym(entity_id)` so a re-created entity_id doesn't inherit a deleted entity's pseudonym.
+- **Per-store apply lock** (#10). `InsightStore.apply_lock` (asyncio.Lock) wraps `validate → write → record_applied` in `ws_apply` and `get_history → drift → delete → clear_applied` in `ws_undo`. Two near-simultaneous applies on overlapping entities can no longer race in `automations.yaml`.
+- **Panel registration off the event loop** (#11). `_async_register_panel` is now async; `os.path.getmtime` runs via `hass.async_add_executor_job`.
+- **Entry-bound background tasks** (#12). The notify, rename-pseudonym, and delete-pseudonym tasks now use `entry.async_create_background_task` so HA auto-cancels them on unload.
+- **State event buffer count cap** (#13). `DEFAULT_MAX_EVENTS = 500_000` (~50 MB of `StateEvent` objects); deque(maxlen) gives silent oldest-drop, one-shot WARNING when the cap engages so the user knows their effective lookback is being trimmed by volume.
+- **Refiner / agent_client failure factory** (#14). `RefinementResult.failure(...)` and `ExplanationResult.failure(...)` classmethods collapse 12 nearly-identical failure-branch constructors into named-arg call sites. Each site now shows only the fields that actually differ per failure path.
+- **Multi-entry strings drift** (#16). `preferred_agent_id` and `refine_cost_threshold_usd` descriptions in `strings.json` + EN + DE now note the cross-entry combination semantics (first non-empty preference wins; lowest threshold wins).
+- **Documentation: preferred-agent first-wins** (#17). Same description update covers the surprising semantics; real entry_id-aware routing through every WS command remains a v1.1 follow-up.
+- **Dropped dead `_pick_llm_agent_id`** (#18). 33 LOC, no callers, superseded by `_list_agent_candidates` in v0.9 phase 7.
+- **Drift detection regression tests** (#19). 6 cases asserting volatile-field stripping (anything `_`-prefixed) and dict-iteration-order independence.
+
+### Deferred to v1.1
+
+- **`ws_api.py` extraction** (#15). 1,245 LOC, 19 handlers — natural splits along CRUD / LLM proxy / diagnostics already visible. Pure structural refactor; no correctness/security implications. Tracked for v1.1 alongside per-WS-call `entry_id` routing.
+- **Digest cross-restart catch-up** (#20). Today's digest is missed if HA is down at the trigger hour. Persistent state (`last_digest_at`) tracking + startup catch-up logic deferred — workaround is to lower `digest_hour` to before HA's typical restart window.
+
 ### Added
 
 - **Refine cost confirmation (RC #1).** New `home_insights/refine_cost_estimate` WS endpoint redacts the payload, builds the same prompt `refine_insight` would, resolves the target agent, and returns a token + USD estimate without calling the LLM. Card pre-flights this before every Refine; if cost exceeds `CONF_REFINE_COST_THRESHOLD_USD` (default $0.05) and the agent is cloud, shows a confirm dialog. Local agents always cost $0 and never trigger the confirm.
