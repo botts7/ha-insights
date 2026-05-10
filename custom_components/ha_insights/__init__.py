@@ -31,6 +31,7 @@ _WS_REGISTERED_FLAG = "_ws_registered"
 _SERVICES_REGISTERED_FLAG = "_services_registered"
 _PANEL_REGISTERED_FLAG = "_panel_registered"
 _USER_DETECTORS_LOADED_FLAG = "_user_detectors_loaded"
+_BUILTIN_DETECTORS_LOADED_FLAG = "_builtin_detectors_loaded"
 _PANEL_URL_PATH = "ha-insights"
 _USER_DETECTORS_DIR = "ha_insights_detectors"
 
@@ -39,12 +40,36 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up HA Insights from a config entry."""
     hass.data.setdefault(DOMAIN, {})
 
+    # Built-in detector autoload — sync I/O (pkgutil + importlib), so run
+    # via executor to avoid HA's blocking-call detector flagging us. Once
+    # per HA boot is sufficient since registration is global.
+    if not hass.data[DOMAIN].get(_BUILTIN_DETECTORS_LOADED_FLAG):
+        from .detectors import load_builtin_detectors
+
+        await hass.async_add_executor_job(load_builtin_detectors)
+        hass.data[DOMAIN][_BUILTIN_DETECTORS_LOADED_FLAG] = True
+
     # Per-entry storage so multiple test config entries don't share state and
     # production cleanly separates DB if the user ever recreates the entry.
     storage_path = hass.config.path(f"{DOMAIN}_{entry.entry_id}.db")
     store = InsightStore(storage_path)
     await store.open()
 
+    # If anything between here and the hass.data registration below raises,
+    # the SQLite handle leaks. Wrap the body to ensure we always close on
+    # partial failure. Multi-entry installs reload-on-error otherwise stack
+    # open SQLite connections.
+    try:
+        return await _setup_entry_body(hass, entry, store)
+    except Exception:
+        await store.close()
+        raise
+
+
+async def _setup_entry_body(
+    hass: HomeAssistant, entry: ConfigEntry, store: InsightStore
+) -> bool:
+    """Inner body of async_setup_entry, isolated for store-leak guard."""
     lookback_days = get_lookback_days(entry)
     # Buffer max_age must >= lookback so backfilled events aren't immediately
     # eligible for prune (default buffer max is 7d, our default lookback 14d).
@@ -173,12 +198,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
     # Schedule backfill as a background task so it doesn't block setup.
-    # Skipped entirely if lookback_days == 0.
+    # Skipped entirely if lookback_days == 0. We capture the task so
+    # async_unload_entry can cancel it cleanly — otherwise a reload
+    # mid-backfill would leak a coroutine that writes to a popped buffer.
     if lookback_days > 0:
-        hass.async_create_background_task(
+        backfill_task = hass.async_create_background_task(
             _run_initial_backfill(hass, entry.entry_id, buffer_, lookback_days),
             name=f"{DOMAIN}_initial_backfill_{entry.entry_id}",
         )
+        hass.data[DOMAIN][entry.entry_id]["backfill_task"] = backfill_task
     return True
 
 
@@ -355,6 +383,9 @@ def _async_register_panel(hass: HomeAssistant) -> None:
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry — closes the store and event listeners."""
+    import asyncio
+    import contextlib
+
     unloaded = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if not unloaded:
         return False
@@ -369,6 +400,13 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         data["unsub_store"]()
     if data.get("unsub_digest") is not None:
         data["unsub_digest"]()
+    # Cancel any in-flight initial backfill before closing the store —
+    # otherwise it'll write to a closed connection on its next flush.
+    backfill_task = data.get("backfill_task")
+    if backfill_task is not None and not backfill_task.done():
+        backfill_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError, Exception):
+            await backfill_task
     if "store" in data:
         await data["store"].close()
     # Unregister the panel only when the LAST entry unloads (other entries

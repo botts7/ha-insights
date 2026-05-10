@@ -42,6 +42,9 @@ SUPPORTED_METHODS = (
     "backfill_status",
     "redaction_preview",
     "audit_log",
+    "hypothesize",
+    "refine_cost_estimate",
+    "list_entries",
 )
 
 
