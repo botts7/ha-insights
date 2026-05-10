@@ -218,16 +218,21 @@ def _conversation_agent_selector(hass: Any) -> Any:
             if reg_entry.entity_id in seen:
                 continue
             seen.add(reg_entry.entity_id)
-            label = (
+            friendly = (
                 reg_entry.name
                 or reg_entry.original_name
                 or reg_entry.entity_id
             )
-            display = (
-                f"{label} ({reg_entry.entity_id})"
-                if label != reg_entry.entity_id
-                else reg_entry.entity_id
-            )
+            # Prefix with the platform so the dropdown disambiguates between
+            # similar entity_ids — e.g. a user with multiple Anthropic and
+            # OpenAI models can tell at a glance which line is which without
+            # matching tail strings.
+            platform = (reg_entry.platform or "").strip()
+            platform_label = f"[{platform}] " if platform else ""
+            if friendly != reg_entry.entity_id:
+                display = f"{platform_label}{friendly} ({reg_entry.entity_id})"
+            else:
+                display = f"{platform_label}{reg_entry.entity_id}"
             options.append(
                 selector.SelectOptionDict(
                     value=reg_entry.entity_id, label=display
