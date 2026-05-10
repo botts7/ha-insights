@@ -320,6 +320,28 @@ async def _run_initial_backfill(
         summary["lookback_days"],
     )
 
+    # First-install UX: backfill leaves a populated buffer but no insights
+    # exist until a detector pass runs. Without this, the empty-state card
+    # sits on "no insights loaded" until the user manually clicks Run Scan.
+    # Skip on zero-event runs (clean install with no recorder history) to
+    # avoid spinning detectors over an empty buffer.
+    if summary.get("events_added", 0) > 0 and isinstance(entry_data, dict):
+        store_ = entry_data.get("store")
+        if store_ is not None:
+            try:
+                from .detectors import DETECTORS, DetectorContext
+
+                ctx = DetectorContext(hass=hass, event_buffer=buffer_)
+                for detector_cls in DETECTORS.values():
+                    for insight in await detector_cls().scan(ctx):
+                        await store_.add_insight(insight)
+                _LOGGER.info(
+                    "HA Insights post-backfill scan complete (%d detectors)",
+                    len(DETECTORS),
+                )
+            except Exception:  # noqa: BLE001
+                _LOGGER.exception("HA Insights post-backfill scan failed")
+
 
 @callback
 def _async_register_services(hass: HomeAssistant) -> None:
