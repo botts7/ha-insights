@@ -49,6 +49,12 @@ class DetectorContext:
     # sensor packs reporting simultaneously). None for entities without
     # a device (template sensors, helpers).
     device_id_by_entity: dict[str, str | None] = field(default_factory=dict)
+    # All automations HA currently knows about (configuration.yaml +
+    # automations.yaml + packages + UI-defined + blueprints). Loaded once
+    # per scan. Used by the automation-linter detectors (trigger drift,
+    # dead action, stale condition) and by run_all_detectors itself to
+    # mark insights with conflicts_with.
+    existing_automations: list[dict[str, Any]] = field(default_factory=list)
 
 
 class Detector(ABC):

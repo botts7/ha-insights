@@ -35,9 +35,16 @@ class InsightKind(StrEnum):
     ANOMALY = "anomaly"
     DASHBOARD_CLEANUP = "dashboard_cleanup"
     SCENE_PROPOSAL = "scene_proposal"
+    # v1.1: findings about EXISTING automations rather than proposals for
+    # new ones. Trigger drift, dead actions, stale conditions — code-only
+    # "automation linter" output. payload_format="report" or "automation"
+    # depending on whether we just describe the issue or propose a fix.
+    AUTOMATION_IMPROVEMENT = "automation_improvement"
 
 
-_VALID_PAYLOAD_FORMATS = frozenset({"blueprint", "automation", "card", "group", "scene"})
+# "report" — informational finding, payload describes the issue but isn't
+# directly applicable. Used by the automation linter (trigger drift, etc).
+_VALID_PAYLOAD_FORMATS = frozenset({"blueprint", "automation", "card", "group", "scene", "report"})
 
 
 @dataclass(frozen=True)

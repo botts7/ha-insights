@@ -228,6 +228,7 @@ async def run_all_detectors(
         ctx,
         blocked_entities=effective_blocked,
         device_id_by_entity=device_id_by_entity,
+        existing_automations=existing_automations,
     )
     if ctx.event_buffer is not None:
         snapshot = ctx.event_buffer.snapshot()
@@ -247,6 +248,7 @@ async def run_all_detectors(
                 area_filter=ctx.area_filter,
             ),
             device_id_by_entity=device_id_by_entity,
+            existing_automations=existing_automations,
         )
 
     enabled = None
