@@ -15,11 +15,11 @@ from pathlib import Path
 
 import pytest
 
-from custom_components.ha_insights.detectors.base import DETECTORS
 from custom_components.ha_insights.detectors._user_loader import (
     discover_user_detector_files,
     load_user_detectors,
 )
+from custom_components.ha_insights.detectors.base import DETECTORS
 
 
 @pytest.fixture(autouse=True)
