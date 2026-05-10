@@ -166,3 +166,14 @@ class StateEventBuffer:
 
     def __len__(self) -> int:
         return len(self._events)
+
+    def snapshot(self) -> tuple[StateEvent, ...]:
+        """Return an immutable snapshot of every event currently buffered.
+
+        Used by run_all_detectors to hand a frozen, thread-safe view to
+        worker threads. The returned tuple is an O(n) copy at the moment
+        of the call; concurrent add/prune calls afterward don't affect
+        the snapshot. Cheap (single memcpy from deque to tuple) so it
+        runs on the event loop before the heavy scan starts.
+        """
+        return tuple(self._events)
