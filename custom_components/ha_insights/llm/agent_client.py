@@ -93,7 +93,7 @@ class ExplanationResult:
         bytes_sent: int,
         bytes_received: int = 0,
         chosen_agent_id: str | None = None,
-    ) -> "ExplanationResult":
+    ) -> ExplanationResult:
         """Build a failure result with sensible defaults for unused fields.
 
         Collapses what was previously 4 nearly-identical constructor calls

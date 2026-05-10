@@ -108,7 +108,7 @@ class RefinementResult:
         rationale: str | None = None,
         raw_response: str | None = None,
         chosen_agent_id: str | None = None,
-    ) -> "RefinementResult":
+    ) -> RefinementResult:
         """Build a failure result with sensible defaults for unused fields.
 
         Collapses what was previously 8 nearly-identical constructor
