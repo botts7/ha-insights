@@ -140,6 +140,29 @@ Or copy the file out of the container (`docker cp ...`) for offline inspection.
 - In **Local / Cloud** modes: every outbound call passes through the redactor; the audit log captures the final sent payload size; the previewer can show the exact JSON before sending.
 - Sensitive attributes (GPS / MAC / tokens / passwords / serials) are stripped from every insight payload regardless of mode — they never reach the redactor's pseudonymization pass to begin with.
 
+## Authorization on the WebSocket surface
+
+Mutating + cost-incurring WS endpoints require `connection.user.is_admin`:
+
+- `home_insights/apply` (writes `automations.yaml`)
+- `home_insights/undo`
+- `home_insights/purge_all` (wipes audit log)
+- `home_insights/test_actions` (fires arbitrary services)
+- `home_insights/explain`, `home_insights/refine`, `home_insights/hypothesize` (cost-incurring LLM calls against the admin's API key)
+- `home_insights/_dev/inject_event` (debug-only state injection)
+
+Read-only and per-user-state endpoints stay open: `list`, `dismiss`, `snooze`, `scan_now`, `subscribe`, `audit_log`, `redaction_preview`, `refine_cost_estimate`, `hello`, `list_entries`, `backfill_status`. A non-admin frontend user can review insights and dismiss/snooze them, but can't mutate shared state or burn LLM tokens.
+
+## Per-attempt audit log
+
+When LLM agent failover walks more than one candidate (e.g. Anthropic times out, integration falls over to Ollama), each round-trip lands in `outbound_calls` as its own row — not just the successful attempt. The privacy-log sensor's `bytes_sent_today` reflects total cumulative network egress including failed attempts.
+
+Each row records the actual responding agent (`agent`), the locality classification (`local` / `cloud` / `unknown`), the redaction mode at the time, and the byte counts. The `est_cost_usd` per row uses our pricing table (Anthropic Opus/Sonnet/Haiku, OpenAI 4o/4o-mini, Google Gemini 2.5 Pro/Flash, vendor fallback). Local agents always cost $0.
+
+## User-supplied detectors (sandbox)
+
+Off by default. When a user opts in via OptionsFlow (`allow_user_detectors=True`), `<config>/ha_insights_detectors/*.py` files are AST-scanned and rejected if they import network modules (`socket`, `urllib`, `requests`, `httpx`, `aiohttp`, `ssl`, `http`, `ftplib`, `smtplib`, etc.), filesystem-write modules (`os`, `shutil`, `tempfile`, `subprocess`), code-execution helpers (`pickle`, `marshal`, `code`, `ctypes`), or use `__import__`, `__builtins__`, `eval`, `exec`, `compile`. Modules clearing the scan run with full HA process privileges; the AST check is a best-effort sandbox, not actual subprocess isolation.
+
 ## Reporting privacy concerns
 
 If you find HA Insights doing something this document says it doesn't — please open a [GitHub issue](https://github.com/botts7/ha-insights/issues) with a reproduction. Privacy bugs are top priority.
