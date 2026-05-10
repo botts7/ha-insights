@@ -224,10 +224,31 @@ async def run_all_detectors(
 
         enabled = get_enabled_detectors(entry)
 
+    buffer_size = (
+        len(ctx.event_buffer.snapshot()) if ctx.event_buffer is not None else 0
+    )
+    # The snapshot above duplicates work done at ctx-build time, but is
+    # cheap (~3ms at 340K events). Avoids threading the size through the
+    # snapshot_ctx wrap above, which is harder to read.
+
     added = 0
     for name, detector_cls in DETECTORS.items():
         if enabled is not None and name not in enabled:
             _LOGGER.debug("Detector %r disabled by config; skipping", name)
+            continue
+        # Self-protective: skip detectors whose declared scale ceiling
+        # is below current buffer size. User can override via explicit
+        # opt-in in CONF_ENABLED_DETECTORS.
+        max_buf = getattr(detector_cls, "max_buffer_for_full_scan", None)
+        explicitly_enabled = enabled is not None and name in enabled
+        if max_buf is not None and buffer_size > max_buf and not explicitly_enabled:
+            _LOGGER.info(
+                "HA Insights skipping detector %r: buffer %d > scale ceiling %d. "
+                "Enable explicitly via CONF_ENABLED_DETECTORS to force-run.",
+                name,
+                buffer_size,
+                max_buf,
+            )
             continue
         try:
             insights = await asyncio.wait_for(

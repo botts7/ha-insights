@@ -49,11 +49,33 @@ class CooccurrenceDetector(Detector):
         if len(events) < self.MIN_OCCURRENCES * 2:
             return []
 
+        # Pre-filter: an entity that fires fewer than MIN_OCCURRENCES times
+        # over the whole lookback window can't possibly be the leader OR
+        # follower of a confirmed pattern (the threshold requires that many
+        # co-occurrences). Computing the per-entity histogram once and
+        # skipping non-busy entities at iteration time is the cheap fix
+        # that makes real-world installs (with skewed entity activity)
+        # finish in single-digit seconds. On installs where every entity
+        # is busy (synthetic stress tests), this filter is a no-op — that
+        # case is handled by the buffer-size auto-skip threshold instead.
+        entity_change_counts: dict[str, int] = defaultdict(int)
+        for ev in events:
+            if ev.new_state is None or ev.new_state == ev.old_state:
+                continue
+            entity_change_counts[ev.entity_id] += 1
+        busy_entities = frozenset(
+            eid
+            for eid, count in entity_change_counts.items()
+            if count >= self.MIN_OCCURRENCES
+        )
+
         pairs: dict[
             tuple[str, str, str, str], list[float]
         ] = defaultdict(list)  # (leader_eid, leader_state, follower_eid, follower_state) -> deltas
 
         for i, follower in enumerate(events):
+            if follower.entity_id not in busy_entities:
+                continue
             if not self._is_candidate(follower):
                 continue
             window_start = follower.timestamp - timedelta(seconds=self.WINDOW_SECONDS)
@@ -62,6 +84,8 @@ class CooccurrenceDetector(Detector):
                 if leader.timestamp < window_start:
                     break
                 if leader.entity_id == follower.entity_id:
+                    continue
+                if leader.entity_id not in busy_entities:
                     continue
                 if not self._is_candidate(leader):
                     continue

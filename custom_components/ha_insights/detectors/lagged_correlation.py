@@ -40,6 +40,15 @@ class LaggedCorrelationDetector(CooccurrenceDetector):
     # Looser stddev — at minute scale, +/- 90s is still "consistent".
     DELTA_STDDEV_MAX_SECONDS = 90.0
 
+    # Self-protective: 600s window × 14d lookback is super-linear at scale
+    # even with the busy-entity pre-filter (a synthetic install where every
+    # entity is busy still hits the watchdog). Skip on buffers larger than
+    # this; force-enable via CONF_ENABLED_DETECTORS if you really want it
+    # on a big install (and don't mind a slower scan). 100K events ≈ 4d
+    # at typical busy-install rates, so most healthy installs run it; the
+    # outliers (very busy / long lookback) get protection.
+    max_buffer_for_full_scan = 100_000
+
     def _evaluate_pair(
         self,
         key: tuple[str, str, str, str],

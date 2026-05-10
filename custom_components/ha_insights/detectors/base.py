@@ -57,6 +57,17 @@ class Detector(ABC):
     domains_default_blocked: ClassVar[frozenset[str]] = frozenset(
         {"camera", "person", "device_tracker", "lock"}
     )
+    # Self-protective skip threshold. If the snapshot is larger than this
+    # (in event count), `run_all_detectors` skips this detector with a log
+    # line rather than invoking it. Used by detectors with super-linear
+    # complexity that can otherwise hit the 30s watchdog on large installs
+    # AND leave a zombie thread consuming CPU after the watchdog skip
+    # (Python can't kill threads). None = always run regardless of size.
+    #
+    # Users can opt back in via per-detector enable/disable: an entry in
+    # CONF_ENABLED_DETECTORS forces the detector to run regardless of this
+    # threshold (the threshold is a *default safety net*, not a hard cap).
+    max_buffer_for_full_scan: ClassVar[int | None] = None
 
     @abstractmethod
     async def scan(self, ctx: DetectorContext) -> list[Insight]:
