@@ -86,6 +86,20 @@ The same `(kind, fingerprint)` must always produce the same `id`. Re-runs upsert
 
 The `lock` domain stays blocked regardless — never emit an insight that would automate a lock without explicit user approval through a separate UX path.
 
+## User-supplied detectors (sandbox)
+
+If your detector ships outside the integration repo and lands in a user's `<config>/ha_insights_detectors/*.py`, the AST sandbox enforces:
+
+- **Off by default.** The user must toggle `allow_user_detectors` ON in the OptionsFlow before any user-supplied file is loaded.
+- **Forbidden imports.** Any of `os`, `subprocess`, `socket`, `ssl`, `urllib`, `urllib3`, `http`, `requests`, `httpx`, `aiohttp`, `websocket`, `websockets`, `ftplib`, `smtplib`, `telnetlib`, `imaplib`, `poplib`, `shutil`, `tempfile`, `fcntl`, `termios`, `pwd`, `grp`, `spwd`, `ctypes`, `cffi`, `pickle`, `marshal`, `shelve`, `code`, `codeop` causes the module to be rejected at load time with a logged WARNING.
+- **Forbidden names.** `__import__`, `__builtins__`, `__loader__`, `__spec__`, `eval`, `exec`, `compile` (as Name OR Attribute access) trip the same rejection.
+- **Underscore-prefixed filenames are skipped.** Loader internals only.
+- **Module namespace isolation.** Your file is imported as `ha_insights_user.<filename>` — even if you name yours `schedule.py`, the built-in `ScheduleDetector` is not shadowed.
+
+The check is best-effort, not an actual subprocess sandbox. A determined attacker could bypass it with `getattr(...)` tricks. Real isolation requires HA-level subprocess work; the combination of opt-in + allowlist matches the actual threat model: protect users from accidentally trusting a community detector that wasn't properly reviewed.
+
+**For detectors that need allowed modules** — `typing`, `dataclasses`, `enum`, `re`, `math`, `statistics`, `itertools`, `functools`, `collections`, `datetime`, `time`, plus the HA Insights detector API (`base`, `insight`, `observers.state_event_buffer`) — there's nothing to declare. Just write idiomatic Python.
+
 ## Testing
 
 `tests/test_<your_detector>.py` — construct a `StateEventBuffer` directly with synthetic events, build a `DetectorContext` with a `MagicMock` hass, call `await detector.scan(ctx)` and assert on the returned insights.

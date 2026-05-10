@@ -4,6 +4,28 @@ Stable from v0.1 with semver. Breaking changes require a major version bump and 
 
 All examples assume an authenticated WebSocket connection at `ws://<your-ha>/api/websocket`.
 
+## Authorization
+
+Mutating + cost-incurring endpoints require `connection.user.is_admin`:
+
+| Endpoint | Why admin-gated |
+|---|---|
+| `home_insights/apply` | writes `automations.yaml` |
+| `home_insights/undo` | reverses an apply, mutates `automations.yaml` |
+| `home_insights/purge_all` | wipes the audit log + observation buffer |
+| `home_insights/test_actions` | fires arbitrary services from an insight payload |
+| `home_insights/explain` | costs LLM tokens against the admin's API key |
+| `home_insights/refine` | same |
+| `home_insights/hypothesize` | same |
+| `home_insights/_dev/inject_event` | debug; injects synthetic state events |
+
+Read-only and per-user-state endpoints stay open: `hello`, `list`, `dismiss`, `snooze`, `scan_now`, `subscribe`, `audit_log`, `redaction_preview`, `refine_cost_estimate`, `list_entries`, `backfill_status`. A non-admin connection that calls an admin-gated endpoint receives:
+
+```json
+{"id": ..., "type": "result", "success": false,
+ "error": {"code": "unauthorized", "message": "Unauthorized"}}
+```
+
 ## Authenticate
 
 Standard Home Assistant WebSocket auth flow first:
@@ -37,17 +59,26 @@ Handshake. Returns integration metadata so cards can detect protocol skew and de
   "type": "result",
   "success": true,
   "result": {
-    "integration_version": "0.7.0",
+    "integration_version": "1.0.0",
     "ws_protocol_version": 1,
     "supported_methods": [
-      "hello", "list", "subscribe", "dismiss", "snooze", "apply",
+      "hello", "list", "subscribe", "dismiss", "snooze", "apply", "undo",
       "scan_now", "purge_all", "explain", "refine", "test_actions",
-      "backfill_status", "redaction_preview", "audit_log"
+      "backfill_status", "redaction_preview", "audit_log",
+      "hypothesize", "refine_cost_estimate", "list_entries"
     ],
     "privacy_mode": "off"
   }
 }
 ```
+
+## Endpoints added in v0.9 / v1.0
+
+- **`home_insights/hypothesize`** — for ANOMALY-kind insights, asks the LLM for plausible causes ("battery dead?", "stuck contact?"). Same redactor + audit pipeline as Explain. Admin-gated.
+- **`home_insights/refine_cost_estimate`** — server-side pre-flight that returns `{tokens_in, tokens_out, cost_usd, agent_id, threshold_usd, requires_confirm}` without calling the LLM. Used by the card to prompt before expensive cloud calls. Open to all users.
+- **`home_insights/list_entries`** — enumerates active config entries with `entry_id` + `title`. Multi-config-entry cards use this to expose a picker. Open to all users.
+- **`home_insights/refine` (extended)** — accepts `conversation_id` for multi-turn refine; the response now includes `conversation_id` to thread back on the next turn. The result also carries an `attempts` array — one entry per failover round-trip.
+- **`home_insights/undo`** — reverses an apply; supports `force` to override drift detection.
 
 If a card's expected `ws_protocol_version` doesn't match the integration's, the card should disable any features that depend on incompatible methods and surface a banner.
 

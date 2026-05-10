@@ -4,25 +4,37 @@ Proactive routine detection and AI-assisted automation suggestions for Home Assi
 
 ## Status
 
-**v0.7.0** — five detectors, full LLM Refine pipeline, sidebar panel, recorder backfill, trust & visibility surfaces.
+**v1.0.0** — eight built-in detectors + opt-in user detectors, multi-turn LLM Refine, agent failover, multi-config-entry, full privacy posture.
 
-### Detectors
+### Detectors (built-in)
 | Detector | What it finds |
 |---|---|
 | **Schedule** | "Every weekday at ~6:47 AM you turn on `light.kitchen`" — strong time-of-day routines |
-| **Cooccurrence** | "Within 5s of the front door opening, the porch light turns on" — entity-follows-entity patterns |
+| **Seasonality** | "Every Friday at ~7 PM, movie lights go on" — weekly patterns Schedule misses |
+| **Cooccurrence** | "Within 5s of the front door opening, the porch light turns on" — entity-follows-entity |
+| **LaggedCorrelation** | "Garage opens, driveway light follows ~3 min later" — delayed-reaction routines |
 | **LongTail** | "Bathroom fan stayed on for 4 hours, 12 times this fortnight" — auto-off proposals |
+| **Streak** | "Light X turns on 3 days in a row at ~22:15" — emerging patterns |
 | **OrphanDevice** | "`sensor.battery_level_smoke` hasn't reported in 11 days" — battery / network alerts |
-| **Streak** | "Light X turns on 3 days in a row at ~22:15" — emerging patterns (lower bar than Schedule) |
+| **FrequencyAnomaly** | "Front door fired 50 times today (~2/day baseline)" — unusual activity spikes |
+
+Plus opt-in **user-supplied detectors** loaded from `<config>/ha_insights_detectors/*.py` with AST sandbox.
 
 ### Pipeline features
-- **🔄 Recorder backfill** — on first install, ingests up to 30 days of HA recorder history so insights surface immediately, not after a 1-2 week buffer fill
-- **✨ Refine with LLM** — let the LLM iterate on a proposed automation (add debounce, conditions, mode change). Side-by-side compare, follow-up feedback loop, refusal / token-limit detection
-- **💬 Explain with LLM** — natural-language explanation of why this routine is a candidate for automation
-- **🔥 Test actions** — run the proposed action block in real time (no automation save) so you can verify before applying
-- **🛡️ "What gets sent?"** — exact-payload preview of what would leave your network, before any LLM call
-- **🛡️ Audit log** — every outbound LLM call recorded with bytes / agent / mode / success
-- **Apply pipeline** — writes a real HA automation to `automations.yaml`, calls `automation.reload`, supports refined / renamed payloads via override
+- **🔄 Recorder backfill** — on first install, ingests up to 30 days of HA recorder history so insights surface immediately
+- **✨ Multi-turn Refine** — iterate the proposed automation with the LLM via natural conversation (`conversation_id` thread). Side-by-side compare, "Refine again (turn N)", explicit conversation reset
+- **💬 Explain with LLM** — natural-language explanation of why this routine is a candidate
+- **🔍 Hypothesize** — for ANOMALY insights, ask the LLM for plausible causes ("battery dead?", "stuck contact?")
+- **💰 Cost estimator** — token + USD estimate per call. Refine pre-flight prompts before expensive cloud calls
+- **🔁 Agent failover** — auto-pick walks preferred → Assist default → other agents on failure. Per-attempt audit log
+- **🔥 Test actions** — run the proposed action block in real time before applying
+- **🛡️ "What gets sent?"** — exact-payload preview before any LLM call
+- **🛡️ Audit log** — every outbound LLM call recorded with bytes / agent / mode / cost / success
+- **Apply pipeline** — writes a real HA automation, validates twice (offline + HA's own config validator), supports refined / renamed payloads via override
+- **🔄 Undo** — one-click reversal with drift detection so manual edits aren't silently lost
+- **🔔 Notifications** — high-confidence insights fire `persistent_notification`; daily digest at user-configurable hour
+- **🌍 Multi-config-entry** — independent insight scopes side by side (different area filters, separate LLM agents)
+- **🌐 i18n** — English + German baseline
 
 ### Privacy posture
 - **OFF** mode: zero outbound network calls. Local pattern detection only.
