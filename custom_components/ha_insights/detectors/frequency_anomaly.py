@@ -25,6 +25,18 @@ from .base import Detector, DetectorContext, register_detector
 # Domain whitelist mirrors OrphanDeviceDetector — high-cardinality status
 # entities (sun/scene/automation) skew the math and aren't useful spikes
 # even if they did go nuts.
+#
+# media_player, device_tracker, person REMOVED from the default set after
+# field testing on a 1000-entity install. These domains are inherently
+# bursty: a media player fires 10-30 state changes during a single session
+# (idle → buffering → playing → paused → buffering → playing → idle …),
+# and device_tracker / person fluctuate per movement. Their "anomaly today
+# vs flat 14-day average" is dominated by whether the device was used at
+# all on a given day, not by genuine stuck-loop / runaway behavior. Result
+# pre-fix: 10+ frequency_anomaly insights every day for the user's
+# normally-used media players. Post-fix: those domains never reach the
+# detector. If the user genuinely wants media_player anomaly tracking,
+# that's a future per-domain config flag.
 _DEFAULT_DOMAINS: frozenset[str] = frozenset(
     {
         "binary_sensor",
@@ -33,7 +45,6 @@ _DEFAULT_DOMAINS: frozenset[str] = frozenset(
         "light",
         "fan",
         "cover",
-        "media_player",
         "input_boolean",
         "input_number",
         "input_select",
@@ -91,7 +102,13 @@ class FrequencyAnomalyDetector(Detector):
                 baseline_counts[ev.entity_id] += 1
 
         baseline_days = self.LOOKBACK_DAYS - 1
-        insights: list[Insight] = []
+        # First pass: collect candidates per (device_id, entity) so we can
+        # deduplicate same-device bursts. When you DRIVE the car today,
+        # ~10 entities on it (windows, doors, locked, sentry_mode, etc.)
+        # all fire 10-30x more than baseline. That's "you used the car
+        # today", not 10 stuck loops. Group by device_id and keep only
+        # the entity with the highest ratio per device.
+        candidates: list[tuple[float, str, int, float]] = []  # (ratio, eid, today, baseline)
         for entity_id, today_count in today_counts.items():
             domain = entity_id.split(".", 1)[0] if "." in entity_id else ""
             if domain not in _DEFAULT_DOMAINS:
@@ -109,6 +126,26 @@ class FrequencyAnomalyDetector(Detector):
             ratio = today_count / baseline_per_day
             if ratio < self.RATIO_THRESHOLD:
                 continue
+            candidates.append((ratio, entity_id, today_count, baseline_per_day))
+
+        # Same-device dedup: per device, keep only the highest-ratio entity.
+        # Entities without a device_id (template sensors, helpers) keep all.
+        per_device_best: dict[str, tuple[float, str, int, float]] = {}
+        no_device: list[tuple[float, str, int, float]] = []
+        for cand in candidates:
+            ratio, eid, _today, _baseline = cand
+            device_id = ctx.device_id_by_entity.get(eid)
+            if device_id is None:
+                no_device.append(cand)
+                continue
+            existing = per_device_best.get(device_id)
+            if existing is None or cand[0] > existing[0]:
+                per_device_best[device_id] = cand
+
+        insights: list[Insight] = []
+        for ratio, entity_id, today_count, baseline_per_day in (
+            list(per_device_best.values()) + no_device
+        ):
             insights.append(
                 self._build_insight(
                     entity_id=entity_id,

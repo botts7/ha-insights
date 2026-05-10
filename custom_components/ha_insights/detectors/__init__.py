@@ -375,16 +375,71 @@ async def run_all_detectors(
 
 
 async def _load_existing_automations(hass: HomeAssistant) -> list[dict]:
-    """Read user's automations.yaml off the loop, return as a list of dicts.
+    """Return EVERY automation HA knows about, in the trigger+action shape
+    the conflict_scanner expects.
 
-    Returns [] if the file doesn't exist, can't be parsed, or any I/O
-    error — the conflict-scan filter is best-effort and shouldn't fail
-    the whole scan if it can't read the file.
+    Sources covered (in priority order):
+      1. HA's automation component runtime state (configuration.yaml,
+         packages, blueprints, UI-defined — basically every automation
+         that resolves to an `automation.*` entity)
+      2. automations.yaml file (catches automations registered but not
+         yet exposed as entities — rare)
+
+    Source 1 is the durable answer to the user's "this matches an
+    automation but it's not in automations.yaml" complaint: any
+    automation HA has actually loaded shows up there regardless of
+    where in the config tree it was declared.
+
+    Returns [] on any unexpected error — conflict suppression is
+    best-effort; if we can't read the registry the scan still runs
+    and just emits potentially-duplicate insights (cheaper than
+    crashing the whole scan).
     """
-    import os
+    seen_ids: set[str] = set()
+    automations: list[dict] = []
 
+    # Source 1: live automations from the automation component.
+    # HA exposes them as `automation.*` entities. Walk the state machine
+    # and pull each entity's config via the EntityComponent backref.
+    # This catches automations from automations.yaml AND configuration.yaml
+    # AND packages AND blueprints — every automation HA actually loaded.
+    try:
+        component = hass.data.get("automation")
+        # `component` may be an EntityComponent OR an EntityPlatform
+        # depending on HA version. Both expose `.entities`.
+        entities_iter = None
+        if hasattr(component, "entities"):
+            entities_iter = component.entities
+        elif isinstance(component, dict):
+            entities_iter = component.values()
+
+        if entities_iter is not None:
+            for entry in entities_iter:
+                # `raw_config` is the dict the automation was loaded from.
+                # Different HA versions name this differently; try both.
+                raw = (
+                    getattr(entry, "raw_config", None)
+                    or getattr(entry, "_raw_config", None)
+                )
+                if not isinstance(raw, dict):
+                    continue
+                ident = raw.get("id") or raw.get("alias") or id(entry)
+                if ident in seen_ids:
+                    continue
+                seen_ids.add(ident)
+                automations.append(raw)
+    except Exception:  # noqa: BLE001
+        _LOGGER.debug(
+            "automation component data unavailable; falling back to "
+            "automations.yaml only", exc_info=True,
+        )
+
+    # Source 2: automations.yaml file (covers rare cases where a YAML
+    # entry is declared but not yet exposed as an entity).
     def _read_yaml() -> list[dict]:
         try:
+            import os
+
             import yaml
 
             path = os.path.join(hass.config.config_dir, "automations.yaml")
@@ -399,11 +454,20 @@ async def _load_existing_automations(hass: HomeAssistant) -> list[dict]:
             if isinstance(loaded, dict):
                 return [loaded]
             return []
-        except Exception:  # noqa: BLE001 — best-effort read
+        except Exception:  # noqa: BLE001
             _LOGGER.exception("Could not load automations.yaml for conflict scan")
             return []
 
-    return await hass.async_add_executor_job(_read_yaml)
+    yaml_entries = await hass.async_add_executor_job(_read_yaml)
+    for raw in yaml_entries:
+        ident = raw.get("id") or raw.get("alias")
+        if ident is not None and ident in seen_ids:
+            continue
+        if ident is not None:
+            seen_ids.add(ident)
+        automations.append(raw)
+
+    return automations
 
 
 __all__ = [

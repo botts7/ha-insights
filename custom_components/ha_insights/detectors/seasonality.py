@@ -73,6 +73,13 @@ class SeasonalityDetector(Detector):
         for ev in ctx.event_buffer.query(since=cutoff):
             if not self._is_candidate_event(ev):
                 continue
+            # Skip transient device-passing-through states (media_player
+            # buffering, cover opening/closing, etc) — patterning over
+            # them is detecting the device's animation, not the user's
+            # decision. See Detector.TRANSIENT_STATES_BY_DOMAIN.
+            transient = self.TRANSIENT_STATES_BY_DOMAIN.get(ev.domain, frozenset())
+            if ev.new_state in transient:
+                continue
             assert ev.new_state is not None
             groups[(ev.entity_id, ev.new_state)].append(ev)
 
@@ -113,19 +120,31 @@ class SeasonalityDetector(Detector):
         per_weekday: Counter[int] = Counter(
             dt_util.as_local(ev.timestamp).weekday() for ev in events
         )
-        dominant_weekday, dominant_count = per_weekday.most_common(1)[0]
-        if dominant_count < self.MIN_DOMINANT_HITS:
-            return None
-        if dominant_count / len(events) < self.DOMINANCE_RATIO_MIN:
+        dominant_weekday, dominant_event_count = per_weekday.most_common(1)[0]
+        if dominant_event_count / len(events) < self.DOMINANCE_RATIO_MIN:
             return None
 
-        # Time stats over the dominant weekday's events only — the rest
-        # might be drift/exceptions and would skew the mean.
+        # Pull events on the dominant weekday only — the rest are drift /
+        # exceptions and would skew time-of-day stats.
         dominant_events = [
             ev
             for ev in events
             if dt_util.as_local(ev.timestamp).weekday() == dominant_weekday
         ]
+
+        # MIN_DOMINANT_HITS is now interpreted as DISTINCT calendar dates
+        # the pattern fired on, not raw event count. Was emitting things
+        # like "8 of last 4 Thursdays" — nonsensical because 8 events on
+        # 4 Thursdays read as 200%. Now we count UNIQUE Thursdays the
+        # pattern fired on, which is bounded 0..4 and matches the user's
+        # natural reading of "fired on N of the last 4 Thursdays".
+        distinct_dates = {
+            dt_util.as_local(ev.timestamp).date() for ev in dominant_events
+        }
+        distinct_date_count = len(distinct_dates)
+        if distinct_date_count < self.MIN_DOMINANT_HITS:
+            return None
+
         minutes = [
             self._minute_of_day(dt_util.as_local(ev.timestamp))
             for ev in dominant_events
@@ -136,10 +155,11 @@ class SeasonalityDetector(Detector):
         if stddev > self.TIME_STDDEV_MAX_MIN:
             return None
 
-        # Confidence: hits scale (max at 4 of 4) * dominance ratio * tightness.
+        # Confidence: how much of the 4-week window the pattern hit
+        # (distinct-date scale) × dominance ratio × timing tightness.
         confidence = (
-            min(1.0, dominant_count / 4.0)
-            * (dominant_count / len(events))
+            min(1.0, distinct_date_count / 4.0)
+            * (dominant_event_count / len(events))
             * max(0.3, 1.0 - stddev / 60.0)
         )
 
@@ -161,7 +181,7 @@ class SeasonalityDetector(Detector):
         weekday_label = _WEEKDAY_LABELS[dominant_weekday]
         title = (
             f"Every {weekday_label} at ~{time_str}, {entity_id} -> {new_state} "
-            f"({dominant_count} of last 4 {weekday_label}s)"
+            f"(fired on {distinct_date_count} of last 4 {weekday_label}s)"
         )
 
         domain = entity_id.split(".", 1)[0] if "." in entity_id else "homeassistant"

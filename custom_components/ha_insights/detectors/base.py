@@ -64,6 +64,27 @@ class Detector(ABC):
     domains_default_blocked: ClassVar[frozenset[str]] = frozenset(
         {"camera", "person", "device_tracker", "lock"}
     )
+    # Per-domain "transient" state values — intermediate states that
+    # appear only briefly during a transition. Detecting patterns over
+    # them (e.g. "media_player buffers every Thursday at 21:51") is
+    # noise: it's just the device passing through a state on its way
+    # to the steady-state target. The user's actual decision was to
+    # start playback, not to enter buffering. Detectors should treat
+    # transient states as if they didn't fire.
+    TRANSIENT_STATES_BY_DOMAIN: ClassVar[dict[str, frozenset[str]]] = {
+        # `buffering` happens on every play start; `loading` on some platforms
+        "media_player": frozenset({"buffering", "loading"}),
+        # Covers transition through opening/closing on their way to open/closed
+        "cover": frozenset({"opening", "closing"}),
+        # Lock transition states; `jammed` is an error condition rather
+        # than a steady state, which seasonality / streak shouldn't pattern on
+        "lock": frozenset({"locking", "unlocking", "jammed"}),
+        # Vacuums transition through `returning` between cleaning and docked
+        "vacuum": frozenset({"returning"}),
+        # Climate transitions through `idle` between heating/cooling cycles
+        # — this one is tricky since `idle` is also the steady state for
+        # off climates. Leaving climate out of the transient set for now.
+    }
     # Self-protective skip threshold. If the snapshot is larger than this
     # (in event count), `run_all_detectors` skips this detector with a log
     # line rather than invoking it. Used by detectors with super-linear
