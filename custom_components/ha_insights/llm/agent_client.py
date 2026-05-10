@@ -47,12 +47,29 @@ _USER_PROMPT_HYPOTHESIZE_TMPL = (
 
 
 @dataclass(frozen=True)
+class AttemptAudit:
+    """One row per LLM round-trip, for accurate audit logging.
+
+    Failover may walk multiple candidates; each network round-trip MUST
+    appear in the privacy log so users can see exactly what left their
+    network. Earlier failed attempts get their own row; only the final
+    attempt's payload bubbles up on the result for the WS reply.
+    """
+
+    chosen_agent_id: str | None
+    bytes_sent: int
+    bytes_received: int
+    success: bool
+
+
+@dataclass(frozen=True)
 class ExplanationResult:
     """Outcome of an Explain call.
 
     `chosen_agent_id` is the agent that actually responded — relevant when
     failover walked the candidate list before landing on a working agent.
-    Callers should audit-log against this, not the originally-requested id.
+    Callers should audit-log against `attempts` (one row per attempt) so
+    failed earlier attempts don't disappear from the privacy log.
     """
 
     explanation: str | None
@@ -62,6 +79,10 @@ class ExplanationResult:
     success: bool
     error: str | None = None
     chosen_agent_id: str | None = None
+    # v1.0 review #2: per-attempt audit rows. WS handlers iterate this
+    # and call record_call for each so failed earlier attempts in a
+    # failover chain don't escape the privacy log.
+    attempts: tuple[AttemptAudit, ...] = ()
 
 
 def build_hypothesize_prompt(insight: Insight, redacted_payload: dict) -> str:
@@ -332,6 +353,7 @@ async def explain_insight(
     candidates = _list_agent_candidates(
         hass, requested=agent_id, preferred=preferred_agent_id
     )
+    audits: list[AttemptAudit] = []
     last_result: ExplanationResult | None = None
     for candidate in candidates:
         last_result = await _explain_one_attempt(
@@ -341,13 +363,30 @@ async def explain_insight(
             bytes_sent=bytes_sent,
             redaction_map=redaction_map,
         )
+        audits.append(
+            AttemptAudit(
+                chosen_agent_id=last_result.chosen_agent_id,
+                bytes_sent=last_result.bytes_sent,
+                bytes_received=last_result.bytes_received,
+                success=last_result.success,
+            )
+        )
         if last_result.success:
-            return last_result
+            return _with_attempts(last_result, audits)
     # All attempts failed — return the last (most recent) failure verbatim.
     # _list_agent_candidates always returns at least [None] so last_result
     # is guaranteed populated.
     assert last_result is not None
-    return last_result
+    return _with_attempts(last_result, audits)
+
+
+def _with_attempts(
+    result: ExplanationResult, audits: list[AttemptAudit]
+) -> ExplanationResult:
+    """Re-pack the frozen dataclass with the accumulated audit list."""
+    from dataclasses import replace
+
+    return replace(result, attempts=tuple(audits))
 
 
 async def _explain_one_attempt(

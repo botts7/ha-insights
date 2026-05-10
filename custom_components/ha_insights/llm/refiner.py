@@ -18,6 +18,7 @@ import yaml
 
 from ..apply.validator import validate_automation
 from .agent_client import (
+    AttemptAudit,
     _extract_conversation_id,
     _extract_response_type,
     _extract_speech,
@@ -91,6 +92,10 @@ class RefinementResult:
     # exchange into a multi-turn dialogue (the agent remembers what it
     # proposed last time and what feedback led to changes).
     conversation_id: str | None = None
+    # v1.0 review #2: per-attempt audit rows. WS handler iterates this
+    # and calls record_call per row so failed earlier attempts in a
+    # failover chain don't escape the privacy log.
+    attempts: tuple[AttemptAudit, ...] = ()
 
 
 def _yaml_dump(payload: dict[str, Any]) -> str:
@@ -420,6 +425,7 @@ async def refine_insight(
     candidates = _list_agent_candidates(
         hass, requested=agent_id, preferred=preferred_agent_id
     )
+    audits: list[AttemptAudit] = []
     last_result: RefinementResult | None = None
     for idx, candidate in enumerate(candidates):
         # Conversation_id is tied to a specific agent; if failover walks
@@ -435,12 +441,29 @@ async def refine_insight(
             insight=insight,
             conversation_id=thread_id,
         )
+        audits.append(
+            AttemptAudit(
+                chosen_agent_id=last_result.chosen_agent_id,
+                bytes_sent=last_result.bytes_sent,
+                bytes_received=last_result.bytes_received,
+                success=last_result.success,
+            )
+        )
         if last_result.success:
-            return last_result
+            return _refine_with_attempts(last_result, audits)
     # All attempts failed — return the most recent failure verbatim.
     # _list_agent_candidates always returns at least [None].
     assert last_result is not None
-    return last_result
+    return _refine_with_attempts(last_result, audits)
+
+
+def _refine_with_attempts(
+    result: RefinementResult, audits: list[AttemptAudit]
+) -> RefinementResult:
+    """Re-pack the frozen dataclass with the accumulated audit list."""
+    from dataclasses import replace
+
+    return replace(result, attempts=tuple(audits))
 
 
 async def _refine_one_attempt(

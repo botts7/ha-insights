@@ -112,6 +112,41 @@ def _get_buffer(hass: HomeAssistant, entry_id: str | None = None):
     return None
 
 
+async def _audit_attempts(
+    store,
+    attempts,
+    *,
+    insight_id: str,
+    redactor,
+) -> None:
+    """Record one outbound_calls row per attempt.
+
+    Failover may walk multiple agents before one succeeds. Earlier failed
+    attempts still hit the network (some bytes left); v1.0 review found
+    those were getting silently dropped. Each AttemptAudit row becomes
+    its own privacy-log entry so the user sees the full picture.
+
+    Empty `attempts` is tolerated for backwards compat / defensive paths.
+    """
+    from .llm import derive_agent_locality, record_call
+
+    for attempt in attempts:
+        await record_call(
+            store,
+            insight_id=insight_id,
+            agent=(
+                str(attempt.chosen_agent_id)
+                if attempt.chosen_agent_id
+                else "default"
+            ),
+            agent_locality=derive_agent_locality(attempt.chosen_agent_id),
+            redaction_mode=str(redactor.mode),
+            bytes_sent=attempt.bytes_sent,
+            bytes_received=attempt.bytes_received,
+            success=attempt.success,
+        )
+
+
 def _resolve_blocked_entities(hass: HomeAssistant, getter) -> frozenset[str]:
     """Aggregate the per-entity opt-out across active config entries.
 
@@ -253,18 +288,11 @@ async def ws_explain(
         preferred_agent_id=preferred,
     )
 
-    # Audit against the agent that actually responded (failover may have
-    # walked the candidate list before landing on a working one).
-    audit_agent = result.chosen_agent_id or agent_id
-    await record_call(
-        store,
-        insight_id=insight.id,
-        agent=str(audit_agent) if audit_agent else "default",
-        agent_locality=derive_agent_locality(audit_agent),
-        redaction_mode=str(redactor.mode),
-        bytes_sent=result.bytes_sent,
-        bytes_received=result.bytes_received,
-        success=result.success,
+    # Audit every attempt — failover may have made multiple round-trips
+    # before landing on a working agent. Each round-trip is bytes that
+    # left the network and MUST appear in the privacy log.
+    await _audit_attempts(
+        store, result.attempts, insight_id=insight.id, redactor=redactor
     )
 
     if not result.success:
@@ -361,16 +389,8 @@ async def ws_hypothesize(
         preferred_agent_id=preferred,
     )
 
-    audit_agent = result.chosen_agent_id or agent_id
-    await record_call(
-        store,
-        insight_id=insight.id,
-        agent=str(audit_agent) if audit_agent else "default",
-        agent_locality=derive_agent_locality(audit_agent),
-        redaction_mode=str(redactor.mode),
-        bytes_sent=result.bytes_sent,
-        bytes_received=result.bytes_received,
-        success=result.success,
+    await _audit_attempts(
+        store, result.attempts, insight_id=insight.id, redactor=redactor
     )
 
     if not result.success:
@@ -640,18 +660,11 @@ async def ws_refine(
         conversation_id=msg.get("conversation_id"),
     )
 
-    # Audit against the agent that actually responded — failover may have
-    # walked the candidate list before landing on a working agent.
-    audit_agent = result.chosen_agent_id or msg.get("agent_id")
-    await record_call(
-        store,
-        insight_id=insight.id,
-        agent=str(audit_agent) if audit_agent else "default",
-        agent_locality=derive_agent_locality(audit_agent),
-        redaction_mode=str(redactor.mode),
-        bytes_sent=result.bytes_sent,
-        bytes_received=result.bytes_received,
-        success=result.success,
+    # Audit every attempt — failover may have made multiple round-trips
+    # before landing on a working agent. Each round-trip is bytes that
+    # left the network and MUST appear in the privacy log.
+    await _audit_attempts(
+        store, result.attempts, insight_id=insight.id, redactor=redactor
     )
 
     if not result.success:
