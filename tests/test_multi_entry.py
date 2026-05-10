@@ -13,20 +13,36 @@ from typing import Any
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.ha_insights import async_setup_entry
-from custom_components.ha_insights.config_flow import CONF_LLM_MODE, LlmMode
+from custom_components.ha_insights.config_flow import (
+    CONF_LLM_MODE,
+    CONF_LOOKBACK_DAYS,
+    CONF_NOTIFY_ON_INSIGHT,
+    LlmMode,
+)
 from custom_components.ha_insights.const import DOMAIN
 from custom_components.ha_insights.ws_api import _get_buffer, _get_store
 
 
 async def _add_entry(hass: Any, title: str) -> MockConfigEntry:
+    """Set up a config entry through HA's normal flow path.
+
+    LOOKBACK_DAYS=0 disables the recorder backfill task — the recorder
+    component isn't loaded in the test env, so a non-zero lookback would
+    schedule a background task that blocks async_block_till_done.
+    NOTIFY_ON_INSIGHT=False keeps persistent_notification calls out of
+    the assertion target, matching the convention in test_ws_api.
+    """
     entry = MockConfigEntry(
         domain=DOMAIN,
-        data={CONF_LLM_MODE: LlmMode.OFF.value},
+        data={
+            CONF_LLM_MODE: LlmMode.OFF.value,
+            CONF_LOOKBACK_DAYS: 0,
+            CONF_NOTIFY_ON_INSIGHT: False,
+        },
         title=title,
     )
     entry.add_to_hass(hass)
-    assert await async_setup_entry(hass, entry)
+    await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
     return entry
 
