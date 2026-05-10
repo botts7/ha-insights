@@ -26,11 +26,21 @@ class DetectorContext:
     Carries everything a detector needs without forcing it to know about HA
     internals directly. Stable shape from v0.1; new optional fields will be
     appended as later steps add capabilities (recorder helper, redactor, etc.).
+
+    Filter semantics (applied transparently inside FrozenBufferView at scan
+    time — detectors don't need to honor these manually):
+      - `area_filter`: empty = all areas; non-empty = only events whose
+        `area_id` is in the set.
+      - `blocked_entities`: events for these entity_ids are dropped from
+        the scan entirely. Same set as the LLM redactor's blocklist —
+        users expect "block this entity" to mean "don't scan it AND
+        don't send it to the LLM" (privacy gap closed in this version).
     """
 
     hass: HomeAssistant
     detector_config: dict[str, Any] = field(default_factory=dict)
     area_filter: frozenset[str] = field(default_factory=frozenset)
+    blocked_entities: frozenset[str] = field(default_factory=frozenset)
     event_buffer: StateEventBuffer | None = None
 
 

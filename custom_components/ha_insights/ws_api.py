@@ -931,6 +931,11 @@ async def ws_scan_now(
     """Run all registered detectors immediately. Returns count of new insights."""
     # Always go through run_all_detectors() — see detectors/__init__.py
     # for the event-loop-yield discipline + setup-phase guard.
+    from .config_flow import (
+        get_blocked_entities,
+        get_enabled_detectors,
+        get_scan_areas,
+    )
     from .detectors import DETECTORS, DetectorContext, run_all_detectors
 
     store = _get_store(hass)
@@ -939,13 +944,39 @@ async def ws_scan_now(
         connection.send_error(msg["id"], "not_set_up", "Store/buffer not initialized")
         return
 
-    ctx = DetectorContext(hass=hass, event_buffer=buffer_)
-    new_count = await run_all_detectors(hass, ctx, store)
+    # Resolve which entry to read config from. With multi-entry installs
+    # we apply per-entry filters; for single-entry the loop runs once.
+    new_count = 0
+    detectors_actually_run: list[str] = []
+    for entry_id, entry_data in hass.data.get(DOMAIN, {}).items():
+        if not isinstance(entry_data, dict) or "buffer" not in entry_data:
+            continue
+        entry = hass.config_entries.async_get_entry(entry_id)
+        if entry is None:
+            continue
+        ctx = DetectorContext(
+            hass=hass,
+            event_buffer=entry_data["buffer"],
+            blocked_entities=get_blocked_entities(entry),
+            area_filter=get_scan_areas(entry),
+        )
+        new_count += await run_all_detectors(
+            hass, ctx, entry_data["store"], entry=entry
+        )
+        enabled = get_enabled_detectors(entry)
+        names = (
+            list(DETECTORS.keys())
+            if enabled is None
+            else [n for n in DETECTORS if n in enabled]
+        )
+        for n in names:
+            if n not in detectors_actually_run:
+                detectors_actually_run.append(n)
 
     connection.send_result(
         msg["id"],
         {
-            "detectors_run": list(DETECTORS.keys()),
+            "detectors_run": detectors_actually_run,
             "insights_emitted": new_count,
         },
     )

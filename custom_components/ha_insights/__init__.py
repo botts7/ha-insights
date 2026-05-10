@@ -340,17 +340,26 @@ def _async_register_services(hass: HomeAssistant) -> None:
         # Always go through run_all_detectors() so the yield discipline
         # is enforced in one place. See detectors/__init__.py for the
         # event-loop-starvation incident note.
+        from .config_flow import get_blocked_entities, get_scan_areas
         from .detectors import DetectorContext, run_all_detectors
 
-        for entry_data in hass.data.get(DOMAIN, {}).values():
+        for entry_id, entry_data in hass.data.get(DOMAIN, {}).items():
             if not isinstance(entry_data, dict):
                 continue
             buffer_ = entry_data.get("buffer")
             store = entry_data.get("store")
             if buffer_ is None or store is None:
                 continue
-            ctx = DetectorContext(hass=hass, event_buffer=buffer_)
-            await run_all_detectors(hass, ctx, store)
+            entry = hass.config_entries.async_get_entry(entry_id)
+            blocked = get_blocked_entities(entry) if entry else frozenset()
+            areas = get_scan_areas(entry) if entry else frozenset()
+            ctx = DetectorContext(
+                hass=hass,
+                event_buffer=buffer_,
+                blocked_entities=blocked,
+                area_filter=areas,
+            )
+            await run_all_detectors(hass, ctx, store, entry=entry)
 
     async def _backfill(call: ServiceCall) -> None:
         """Manual recorder backfill — re-runs for every active config entry."""

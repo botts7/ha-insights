@@ -25,7 +25,26 @@ from .const import DOMAIN
 CONF_LLM_MODE = "llm_mode"
 CONF_CLOUD_CONSENT = "cloud_consent"
 CONF_LOOKBACK_DAYS = "lookback_days"
+# Storage key kept as "llm_block_entities" for backwards compat with existing
+# installs, but as of v1.1 this list is honored by the SCAN PIPELINE TOO —
+# blocked entities never enter a detector's input set. Closes the privacy
+# gap users assumed already existed ("block this entity" now = "don't
+# scan AND don't send to LLM").
 CONF_LLM_BLOCK_ENTITIES = "llm_block_entities"
+# v1.1: limit detectors to events from a specific subset of HA areas. Empty
+# = all areas (today's behavior). Multi-select against the area registry.
+CONF_SCAN_AREAS = "scan_areas"
+# v1.1: per-detector enable/disable. Stored as a list of detector NAMES
+# (matches DETECTORS dict keys: "schedule", "long_tail", etc.). None /
+# missing key = "all enabled" (back-compat — installs upgraded from v1.0
+# don't get any detectors silently disabled).
+CONF_ENABLED_DETECTORS = "enabled_detectors"
+# v1.1: periodic auto-scan in hours. 0 = manual-only (today's behavior;
+# user must click Run Scan Now). 1+ = registered as
+# async_track_time_interval after EVENT_HOMEASSISTANT_STARTED.
+CONF_SCAN_INTERVAL_HOURS = "scan_interval_hours"
+DEFAULT_SCAN_INTERVAL_HOURS = 0
+SCAN_INTERVAL_HOURS_RANGE = (0, 168)  # 0 = off, up to weekly
 CONF_NOTIFY_ON_INSIGHT = "notify_on_insight"
 CONF_NOTIFY_THRESHOLD = "notify_threshold"
 CONF_DIGEST_ENABLED = "digest_enabled"
@@ -181,11 +200,13 @@ def get_digest_settings(entry: ConfigEntry) -> tuple[bool, int]:
 
 
 def get_blocked_entities(entry: ConfigEntry) -> frozenset[str]:
-    """Resolve the per-entity LLM opt-out list.
+    """Resolve the per-entity opt-out list.
 
-    These entity_ids are NEVER included in any LLM prompt — neither as
-    pseudonyms nor as real values. Privacy floor below the redactor's
-    mode-driven behavior.
+    These entity_ids are NEVER scanned by any detector AND NEVER included
+    in any LLM prompt — neither as pseudonyms nor as real values. Privacy
+    floor below the redactor's mode-driven behavior. Unified scan + LLM
+    scope as of v1.1; storage key (`llm_block_entities`) preserved for
+    backwards compat with v1.0 installs.
     """
     raw = entry.options.get(
         CONF_LLM_BLOCK_ENTITIES,
@@ -199,6 +220,56 @@ def get_blocked_entities(entry: ConfigEntry) -> frozenset[str]:
     else:
         items = []
     return frozenset(items)
+
+
+def get_scan_areas(entry: ConfigEntry) -> frozenset[str]:
+    """Resolve the area scope for detector scans.
+
+    Empty set means "all areas" (the default). When non-empty, only events
+    whose `area_id` is in the set reach detectors. Useful on large installs
+    to limit scan scope to e.g. living areas only.
+    """
+    raw = entry.options.get(
+        CONF_SCAN_AREAS,
+        entry.data.get(CONF_SCAN_AREAS, []),
+    )
+    if isinstance(raw, (list, tuple, set, frozenset)):
+        items = [str(s).strip() for s in raw if str(s).strip()]
+    else:
+        items = []
+    return frozenset(items)
+
+
+def get_enabled_detectors(entry: ConfigEntry) -> frozenset[str] | None:
+    """Resolve which detectors are enabled.
+
+    Returns None when the user has never customized this — meaning
+    "all registered detectors run" (back-compat for v1.0 installs that
+    upgrade in place). Returns a frozenset of detector names when
+    customized. Use `is None` checks at call sites; never assume an
+    empty frozenset means "all" (it means "none enabled" — valid state
+    if the user explicitly disabled every detector).
+    """
+    raw = entry.options.get(CONF_ENABLED_DETECTORS, entry.data.get(CONF_ENABLED_DETECTORS))
+    if raw is None:
+        return None
+    if isinstance(raw, (list, tuple, set, frozenset)):
+        return frozenset(str(s).strip() for s in raw if str(s).strip())
+    return None
+
+
+def get_scan_interval_hours(entry: ConfigEntry) -> int:
+    """Resolve the periodic auto-scan interval (0 = manual only)."""
+    raw = entry.options.get(
+        CONF_SCAN_INTERVAL_HOURS,
+        entry.data.get(CONF_SCAN_INTERVAL_HOURS, DEFAULT_SCAN_INTERVAL_HOURS),
+    )
+    try:
+        hours = int(raw)
+    except (TypeError, ValueError):
+        return DEFAULT_SCAN_INTERVAL_HOURS
+    lo, hi = SCAN_INTERVAL_HOURS_RANGE
+    return max(lo, min(hi, hours))
 
 
 def _conversation_agent_selector(hass: Any) -> Any:

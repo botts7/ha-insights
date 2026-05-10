@@ -22,6 +22,8 @@ from homeassistant.core import CoreState, HomeAssistant
 from .base import DETECTORS, Detector, DetectorContext, register_detector
 
 if TYPE_CHECKING:
+    from homeassistant.config_entries import ConfigEntry  # noqa: F401
+
     from ..observers.state_event_buffer import StateEvent
     from ..store import InsightStore
 
@@ -42,18 +44,25 @@ class _FrozenBufferView:
     event loop, so worker threads can scan without touching the live
     deque.
 
+    Filter responsibilities (applied transparently in `query`):
+      - `blocked_entities`: events for these entity_ids never reach
+        any detector. The user's privacy floor + their scan-scope
+        opt-out are unified — consistent with what users expect
+        "block this entity" to mean.
+      - `area_filter`: if non-empty, only events whose `area_id` is
+        in the set pass through. Empty set = no area scoping (current
+        default for installs that haven't configured CONF_SCAN_AREAS).
+
     GIL discipline:
       Even though the detector runs in a worker thread, CPython's GIL
       means it competes with the main event loop for execution. The
       GIL auto-releases every ~5ms (sys.getswitchinterval), but a
       thread can re-grab it instantly, starving the loop. To make the
       worst case predictable, query() explicitly yields the GIL via
-      `time.sleep(0)` every _GIL_YIELD_EVERY events. Cheap (single
-      modulo + branch) and gives the event loop a guaranteed shot at
-      the CPU on a regular cadence.
+      `time.sleep(0)` every _GIL_YIELD_EVERY events.
     """
 
-    __slots__ = ("_events",)
+    __slots__ = ("_events", "_blocked_entities", "_area_filter")
 
     # Yield the GIL every N events. Tuned for ~1ms wall-clock between
     # yields on representative hardware — frequent enough that the
@@ -61,8 +70,16 @@ class _FrozenBufferView:
     # overhead is invisible against the per-event work detectors do.
     _GIL_YIELD_EVERY = 2_000
 
-    def __init__(self, events: tuple[StateEvent, ...]) -> None:
+    def __init__(
+        self,
+        events: tuple[StateEvent, ...],
+        *,
+        blocked_entities: frozenset[str] = frozenset(),
+        area_filter: frozenset[str] = frozenset(),
+    ) -> None:
         self._events = events
+        self._blocked_entities = blocked_entities
+        self._area_filter = area_filter
 
     def query(
         self,
@@ -77,6 +94,10 @@ class _FrozenBufferView:
         for i, ev in enumerate(self._events):
             if i and i % self._GIL_YIELD_EVERY == 0:
                 _time.sleep(0)
+            if ev.entity_id in self._blocked_entities:
+                continue
+            if self._area_filter and ev.area_id not in self._area_filter:
+                continue
             if entity_id is not None and ev.entity_id != entity_id:
                 continue
             if since is not None and ev.timestamp < since:
@@ -126,6 +147,7 @@ async def run_all_detectors(
     store: InsightStore,
     *,
     allow_during_setup: bool = False,
+    entry: "ConfigEntry | None" = None,  # noqa: F821 — string forward-ref
 ) -> int:
     """Fan out a single scan pass across every registered detector.
 
@@ -174,17 +196,39 @@ async def run_all_detectors(
     # Snapshot the buffer ONCE on the loop, then hand the immutable
     # view to every detector. ~50 MB tuple-copy at the 500K cap — fast
     # enough to do on the loop, since it's a single memcpy of pointers.
+    # The view also enforces blocked_entities and area_filter, so every
+    # detector gets the same scoped data without per-detector code.
     snapshot_ctx = ctx
     if ctx.event_buffer is not None:
         snapshot = ctx.event_buffer.snapshot()
         _LOGGER.info(
-            "HA Insights scan: snapshotted %d events for thread-safe scan",
+            "HA Insights scan: snapshotted %d events for thread-safe scan "
+            "(blocked=%d, area_filter=%d)",
             len(snapshot),
+            len(ctx.blocked_entities),
+            len(ctx.area_filter),
         )
-        snapshot_ctx = replace(ctx, event_buffer=_FrozenBufferView(snapshot))
+        snapshot_ctx = replace(
+            ctx,
+            event_buffer=_FrozenBufferView(
+                snapshot,
+                blocked_entities=ctx.blocked_entities,
+                area_filter=ctx.area_filter,
+            ),
+        )
+
+    enabled = None
+    if entry is not None:
+        # Lazy import to avoid circular at module-load time.
+        from ..config_flow import get_enabled_detectors
+
+        enabled = get_enabled_detectors(entry)
 
     added = 0
     for name, detector_cls in DETECTORS.items():
+        if enabled is not None and name not in enabled:
+            _LOGGER.debug("Detector %r disabled by config; skipping", name)
+            continue
         try:
             insights = await asyncio.wait_for(
                 asyncio.to_thread(_run_detector_in_thread, detector_cls, snapshot_ctx),
