@@ -254,13 +254,7 @@ async def ws_explain(
 ) -> None:
     """User-initiated LLM explanation. Redactor + agent + dereference + audit."""
     from .config_flow import get_blocked_entities
-    from .llm import (
-        RedactionMode,
-        Redactor,
-        derive_agent_locality,
-        explain_insight,
-        record_call,
-    )
+    from .llm import RedactionMode, Redactor, explain_insight
 
     store = _get_store(hass)
     if store is None:
@@ -346,13 +340,7 @@ async def ws_hypothesize(
     """
     from .config_flow import get_blocked_entities
     from .insight import InsightKind
-    from .llm import (
-        RedactionMode,
-        Redactor,
-        derive_agent_locality,
-        explain_insight,
-        record_call,
-    )
+    from .llm import RedactionMode, Redactor, explain_insight
 
     store = _get_store(hass)
     if store is None:
@@ -615,13 +603,7 @@ async def ws_refine(
     insight — the refined payload is returned for the card to preview, then
     applied via `home_insights/apply` with `payload_override` if accepted.
     """
-    from .llm import (
-        RedactionMode,
-        Redactor,
-        derive_agent_locality,
-        record_call,
-        refine_insight,
-    )
+    from .llm import RedactionMode, Redactor, refine_insight
 
     store = _get_store(hass)
     if store is None:
