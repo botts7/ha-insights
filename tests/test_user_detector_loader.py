@@ -140,6 +140,70 @@ def test_two_modules_with_detectors_both_register(tmp_path: Path) -> None:
     assert "user_test_beta" in DETECTORS
 
 
+def test_allow_false_short_circuits(tmp_path: Path) -> None:
+    """The opt-in gate: allow=False loads nothing, even if files are present."""
+    _write(tmp_path / "alpha.py", _VALID_DETECTOR_BODY)
+    count = load_user_detectors(tmp_path, allow=False)
+    assert count == 0
+    assert "user_test_alpha" not in DETECTORS
+
+
+# --- AST sandbox ---
+
+
+_FORBIDDEN_BODIES: list[tuple[str, str]] = [
+    ("os_import", "import os\n"),
+    ("subprocess_import", "import subprocess\n"),
+    ("requests_import", "import requests\n"),
+    ("urllib_from", "from urllib.request import urlopen\n"),
+    ("socket_import", "import socket\n"),
+    ("ssl_import", "import ssl\n"),
+    ("pickle_import", "import pickle\n"),
+    ("ctypes_import", "import ctypes\n"),
+    ("aiohttp_import", "import aiohttp\n"),
+    ("httpx_import", "import httpx\n"),
+    ("shutil_import", "import shutil\n"),
+    ("eval_use", "x = eval('1+1')\n"),
+    ("exec_use", "exec('print(1)')\n"),
+    ("dunder_import", "x = __import__('os')\n"),
+    ("compile_use", "compile('1+1', '<x>', 'eval')\n"),
+]
+
+
+@pytest.mark.parametrize(("name", "body"), _FORBIDDEN_BODIES)
+def test_ast_rejects_forbidden_module(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+    name: str,
+    body: str,
+) -> None:
+    """AST scan must reject every entry in _FORBIDDEN_TOP_LEVEL_MODULES /
+    _FORBIDDEN_NAMES. Each module is parameterized so a regression on
+    any one is visible in the failing test name."""
+    _write(tmp_path / f"{name}.py", body + _VALID_DETECTOR_BODY)
+    with caplog.at_level(logging.WARNING):
+        count = load_user_detectors(tmp_path, allow=True)
+    assert count == 0, f"{name} should have been rejected by AST scan"
+    assert any(
+        "sandbox check rejected" in record.message for record in caplog.records
+    ), f"{name} rejection should be logged"
+
+
+def test_ast_allows_clean_detector(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A detector using only allowed modules (typing, dataclass, datetime,
+    HA Insights detector API) passes the AST scan and loads."""
+    _write(tmp_path / "ok.py", _VALID_DETECTOR_BODY)
+    with caplog.at_level(logging.WARNING):
+        count = load_user_detectors(tmp_path, allow=True)
+    assert count == 1
+    # No sandbox warning logged
+    assert not any(
+        "sandbox check rejected" in record.message for record in caplog.records
+    )
+
+
 def test_module_namespace_isolation(tmp_path: Path) -> None:
     """User module name like `schedule.py` doesn't shadow built-in.
 

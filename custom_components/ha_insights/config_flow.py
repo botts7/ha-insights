@@ -36,6 +36,12 @@ CONF_DIGEST_HOUR = "digest_hour"
 CONF_PREFERRED_AGENT_ID = "preferred_agent_id"
 CONF_REFINE_COST_THRESHOLD_USD = "refine_cost_threshold_usd"
 DEFAULT_REFINE_COST_THRESHOLD_USD = 0.05
+# v1.0 review #3: user-supplied detectors are arbitrary Python that runs
+# with full HA process privileges. Default off; the user must explicitly
+# opt in via OptionsFlow before the loader picks anything up. AST scan
+# adds a forbidden-imports check on top of the opt-in.
+CONF_ALLOW_USER_DETECTORS = "allow_user_detectors"
+DEFAULT_ALLOW_USER_DETECTORS = False
 DEFAULT_LOOKBACK_DAYS = 14
 LOOKBACK_DAYS_RANGE = (0, 30)  # 0 disables backfill entirely
 DEFAULT_NOTIFY_ON_INSIGHT = True
@@ -101,6 +107,19 @@ def get_notify_settings(entry: ConfigEntry) -> tuple[bool, float]:
         threshold = DEFAULT_NOTIFY_THRESHOLD
     threshold = max(0.0, min(1.0, threshold))
     return bool(enabled_raw), threshold
+
+
+def get_allow_user_detectors(entry: ConfigEntry) -> bool:
+    """Resolve whether <config>/ha_insights_detectors/*.py files load.
+
+    Off by default — user must opt in. Even when on, the loader's AST
+    scan rejects modules with forbidden imports.
+    """
+    raw = entry.options.get(
+        CONF_ALLOW_USER_DETECTORS,
+        entry.data.get(CONF_ALLOW_USER_DETECTORS, DEFAULT_ALLOW_USER_DETECTORS),
+    )
+    return bool(raw)
 
 
 def get_refine_cost_threshold(entry: ConfigEntry) -> float:
@@ -329,6 +348,7 @@ class HaInsightsOptionsFlow(OptionsFlow):
         self._digest_hour: int = DEFAULT_DIGEST_HOUR
         self._preferred_agent_id: str | None = None
         self._refine_cost_threshold: float = DEFAULT_REFINE_COST_THRESHOLD_USD
+        self._allow_user_detectors: bool = DEFAULT_ALLOW_USER_DETECTORS
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
@@ -344,6 +364,7 @@ class HaInsightsOptionsFlow(OptionsFlow):
         )
         current_preferred = get_preferred_agent_id(self.config_entry) or ""
         current_refine_threshold = get_refine_cost_threshold(self.config_entry)
+        current_allow_user_detectors = get_allow_user_detectors(self.config_entry)
 
         if user_input is not None:
             self._mode = LlmMode(user_input[CONF_LLM_MODE])
@@ -373,6 +394,11 @@ class HaInsightsOptionsFlow(OptionsFlow):
                     CONF_REFINE_COST_THRESHOLD_USD, current_refine_threshold
                 )
             )
+            self._allow_user_detectors = bool(
+                user_input.get(
+                    CONF_ALLOW_USER_DETECTORS, current_allow_user_detectors
+                )
+            )
             if self._mode is LlmMode.CLOUD and current_mode != LlmMode.CLOUD.value:
                 # Only require fresh consent if switching INTO cloud
                 return await self.async_step_cloud_consent()
@@ -387,6 +413,7 @@ class HaInsightsOptionsFlow(OptionsFlow):
                     CONF_DIGEST_HOUR: self._digest_hour,
                     CONF_PREFERRED_AGENT_ID: self._preferred_agent_id or "",
                     CONF_REFINE_COST_THRESHOLD_USD: self._refine_cost_threshold,
+                    CONF_ALLOW_USER_DETECTORS: self._allow_user_detectors,
                 },
             )
 
@@ -431,6 +458,15 @@ class HaInsightsOptionsFlow(OptionsFlow):
                 ): vol.All(
                     vol.Coerce(float), vol.Range(min=0.0, max=10.0)
                 ),
+                # Custom-detector loader is gated off by default. Users
+                # opting in have read the security note and accept that
+                # arbitrary Python from <config>/ha_insights_detectors/
+                # will run with full HA process privileges (subject to
+                # the AST sandbox).
+                vol.Optional(
+                    CONF_ALLOW_USER_DETECTORS,
+                    default=current_allow_user_detectors,
+                ): bool,
             }
         )
         return self.async_show_form(step_id="init", data_schema=schema)

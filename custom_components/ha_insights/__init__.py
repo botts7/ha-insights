@@ -13,6 +13,7 @@ from homeassistant.helpers import entity_registry as er
 
 from . import ws_api
 from .config_flow import (
+    get_allow_user_detectors,
     get_digest_settings,
     get_lookback_days,
     get_notify_settings,
@@ -179,18 +180,28 @@ async def _setup_entry_body(
     # pick them up automatically. We run this AFTER ws / services / panel
     # so a broken user detector can't take any of those down.
     if not hass.data[DOMAIN].get(_USER_DETECTORS_LOADED_FLAG):
+        from functools import partial
         from pathlib import Path
 
         from .detectors._user_loader import load_user_detectors
 
+        # Off by default. User must explicitly opt in via OptionsFlow,
+        # acknowledging the security model (see _user_loader docstring).
+        allow = get_allow_user_detectors(entry)
         user_dir = Path(hass.config.path(_USER_DETECTORS_DIR))
         loaded = await hass.async_add_executor_job(
-            load_user_detectors, user_dir
+            partial(load_user_detectors, user_dir, allow=allow)
         )
         if loaded > 0:
             _LOGGER.info(
                 "HA Insights: loaded %d user detector(s) from %s",
                 loaded,
+                user_dir,
+            )
+        elif not allow:
+            _LOGGER.debug(
+                "HA Insights: user detectors disabled (allow_user_detectors "
+                "is off); skipping %s",
                 user_dir,
             )
         hass.data[DOMAIN][_USER_DETECTORS_LOADED_FLAG] = True
