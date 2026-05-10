@@ -989,6 +989,25 @@ async def ws_scan_now(
         connection.send_error(msg["id"], "not_set_up", "Store/buffer not initialized")
         return
 
+    # Pre-flight check: if the buffer is empty AND backfill is currently
+    # running, scanning would emit 0 insights AND the auto-sweep would
+    # delete every existing insight. Reject the scan with an actionable
+    # error rather than silently nuking the store.
+    backfill_running = any(
+        d.get("backfill_running")
+        for d in hass.data.get(DOMAIN, {}).values()
+        if isinstance(d, dict)
+    )
+    if backfill_running and len(buffer_) == 0:
+        connection.send_error(
+            msg["id"],
+            "backfill_in_progress",
+            "HA Insights is still backfilling history. Wait for the "
+            "Backfill toast to complete, then try Scan again. Scanning "
+            "an empty buffer would clear all your existing insights.",
+        )
+        return
+
     # Resolve which entry to read config from. With multi-entry installs
     # we apply per-entry filters; for single-entry the loop runs once.
     new_count = 0

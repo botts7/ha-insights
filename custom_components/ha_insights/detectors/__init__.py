@@ -390,16 +390,34 @@ async def run_all_detectors(
     # dismissed, and unexpired-snoozed insights are preserved (user
     # actions outweigh staleness). Detectors that didn't run keep their
     # prior insights untouched (no fresh signal).
-    swept = await store.replace_active_insights_for_detectors(
-        completed_detectors=frozenset(completed_detectors),
-        emitted_ids=frozenset(emitted_ids),
-    )
-    if swept:
-        _LOGGER.info(
-            "HA Insights scan: swept %d stale active insights "
-            "(no longer emitted by their detector)",
-            swept,
+    #
+    # SAFETY: skip the sweep entirely if the buffer was nearly empty
+    # during the scan. An empty buffer makes every detector return [],
+    # which would then trigger sweeping ALL prior insights — silently
+    # nuking the user's data. Common cause: integration reload created
+    # a fresh empty buffer, user clicked Scan before backfill completed.
+    # Threshold of 100 is generous; even a tiny install has >100 events
+    # within minutes of normal operation.
+    if buffer_size < 100:
+        _LOGGER.warning(
+            "HA Insights scan: buffer only had %d events; skipping the "
+            "sweep step to protect existing insights from being deleted "
+            "(probably a reload before backfill completed; click Backfill "
+            "to repopulate, then Scan)",
+            buffer_size,
         )
+        swept = 0
+    else:
+        swept = await store.replace_active_insights_for_detectors(
+            completed_detectors=frozenset(completed_detectors),
+            emitted_ids=frozenset(emitted_ids),
+        )
+        if swept:
+            _LOGGER.info(
+                "HA Insights scan: swept %d stale active insights "
+                "(no longer emitted by their detector)",
+                swept,
+            )
 
     if return_summary:
         return {
