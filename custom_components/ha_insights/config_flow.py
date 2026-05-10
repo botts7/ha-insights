@@ -265,11 +265,14 @@ class HaInsightsConfigFlow(ConfigFlow, domain=DOMAIN):
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Mode selection — single-instance integration."""
-        if self.unique_id is None:
-            await self.async_set_unique_id(DOMAIN)
-            self._abort_if_unique_id_configured()
+        """Mode selection.
 
+        Multi-entry: each config entry runs an independent insight scope
+        (its own store, buffer, panel-shared registry). Most installs run
+        one entry; advanced users can add a second for a different area
+        filter, lookback window, or LLM agent. We don't set a unique_id
+        so HA permits multiple entries side-by-side.
+        """
         if user_input is not None:
             self._mode = LlmMode(user_input[CONF_LLM_MODE])
             if self._mode is LlmMode.CLOUD:

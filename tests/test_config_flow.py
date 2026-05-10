@@ -147,8 +147,13 @@ async def test_options_flow_includes_lookback_days(hass: HomeAssistant) -> None:
     assert result["data"][CONF_LOOKBACK_DAYS] == 21
 
 
-async def test_single_instance_only(hass: HomeAssistant) -> None:
-    """A second config flow on the same domain aborts as already_configured."""
+async def test_multi_entry_allowed(hass: HomeAssistant) -> None:
+    """v1.0 RC #7: a second config entry creates a second independent scope.
+
+    Most installs run one entry; advanced users want two (different area
+    filters, separate lookback windows, separate LLM agents). HA permits
+    multiple entries because we don't set a unique_id in async_step_user.
+    """
     result = await hass.config_entries.flow.async_init(
         DOMAIN, context={"source": "user"}
     )
@@ -157,9 +162,17 @@ async def test_single_instance_only(hass: HomeAssistant) -> None:
         user_input={CONF_LLM_MODE: LlmMode.OFF.value},
     )
     assert result["type"] is FlowResultType.CREATE_ENTRY
+    first_entry_id = result["result"].entry_id
 
+    # Second flow proceeds to CREATE_ENTRY too — no abort.
     result = await hass.config_entries.flow.async_init(
         DOMAIN, context={"source": "user"}
     )
-    assert result["type"] is FlowResultType.ABORT
-    assert result["reason"] == "already_configured"
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        user_input={CONF_LLM_MODE: LlmMode.LOCAL.value},
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    second_entry_id = result["result"].entry_id
+
+    assert first_entry_id != second_entry_id

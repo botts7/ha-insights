@@ -65,21 +65,47 @@ def async_register(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_undo)
     websocket_api.async_register_command(hass, ws_hypothesize)
     websocket_api.async_register_command(hass, ws_refine_cost_estimate)
+    websocket_api.async_register_command(hass, ws_list_entries)
     websocket_api.async_register_command(hass, ws_dev_inject_event)
 
 
-def _get_store(hass: HomeAssistant) -> InsightStore | None:
-    """Resolve the active store from hass.data; None if integration not set up."""
+def _get_store(
+    hass: HomeAssistant, entry_id: str | None = None
+) -> InsightStore | None:
+    """Resolve a store from hass.data.
+
+    `entry_id=None` returns the first entry's store — preserves
+    single-entry-card backwards compatibility. Pass an explicit entry_id
+    to route to a specific config entry's store in multi-entry installs.
+    Returns None if the entry doesn't exist or the integration isn't set up.
+
+    NOTE (v1.0): WS handlers currently always call this with the default
+    (no entry_id), so multi-entry users will see all reads/writes route
+    to the first entry. The integration setup itself is per-entry
+    correctly (separate stores, buffers, sensors, digests). Per-call
+    entry_id routing through the WS surface is a v1.1 follow-up — the
+    mechanism is here, the schemas just don't expose it yet.
+    """
     data = hass.data.get(DOMAIN, {})
+    if entry_id is not None:
+        candidate = data.get(entry_id)
+        if isinstance(candidate, dict):
+            return candidate.get("store")
+        return None
     for value in data.values():
         if isinstance(value, dict) and "store" in value:
             return value["store"]
     return None
 
 
-def _get_buffer(hass: HomeAssistant):
-    """Resolve the active StateEventBuffer; None if integration not set up."""
+def _get_buffer(hass: HomeAssistant, entry_id: str | None = None):
+    """Resolve a StateEventBuffer; first entry by default, specific entry_id otherwise."""
     data = hass.data.get(DOMAIN, {})
+    if entry_id is not None:
+        candidate = data.get(entry_id)
+        if isinstance(candidate, dict):
+            return candidate.get("buffer")
+        return None
     for value in data.values():
         if isinstance(value, dict) and "buffer" in value:
             return value["buffer"]
@@ -1038,6 +1064,28 @@ def _resolve_refine_cost_threshold(hass: HomeAssistant) -> float:
         for entry in hass.config_entries.async_entries(DOMAIN)
     ]
     return min(thresholds) if thresholds else DEFAULT_REFINE_COST_THRESHOLD_USD
+
+
+@websocket_api.websocket_command(
+    {vol.Required("type"): "home_insights/list_entries"}
+)
+@callback
+def ws_list_entries(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Return the configured HA Insights entries.
+
+    Multi-entry installs (v1.0 RC #7) run multiple independent insight
+    scopes side by side. Cards default to the first entry — call this
+    endpoint to discover them all and let the user pick. Single-entry
+    installs return one row.
+    """
+    entries: list[dict[str, str]] = []
+    for entry in hass.config_entries.async_entries(DOMAIN):
+        entries.append({"entry_id": entry.entry_id, "title": entry.title})
+    connection.send_result(msg["id"], {"entries": entries})
 
 
 @websocket_api.websocket_command(
