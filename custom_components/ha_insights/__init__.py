@@ -30,7 +30,9 @@ _LOGGER = logging.getLogger(__name__)
 _WS_REGISTERED_FLAG = "_ws_registered"
 _SERVICES_REGISTERED_FLAG = "_services_registered"
 _PANEL_REGISTERED_FLAG = "_panel_registered"
+_USER_DETECTORS_LOADED_FLAG = "_user_detectors_loaded"
 _PANEL_URL_PATH = "ha-insights"
+_USER_DETECTORS_DIR = "ha_insights_detectors"
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -145,6 +147,28 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if not hass.data[DOMAIN].get(_PANEL_REGISTERED_FLAG):
         _async_register_panel(hass)
         hass.data[DOMAIN][_PANEL_REGISTERED_FLAG] = True
+
+    # User-supplied detectors: scan <config>/ha_insights_detectors/*.py once
+    # per HA boot. The @register_detector decorator on each module side-
+    # effects into the global DETECTORS dict, so subsequent scan_now calls
+    # pick them up automatically. We run this AFTER ws / services / panel
+    # so a broken user detector can't take any of those down.
+    if not hass.data[DOMAIN].get(_USER_DETECTORS_LOADED_FLAG):
+        from pathlib import Path
+
+        from .detectors._user_loader import load_user_detectors
+
+        user_dir = Path(hass.config.path(_USER_DETECTORS_DIR))
+        loaded = await hass.async_add_executor_job(
+            load_user_detectors, user_dir
+        )
+        if loaded > 0:
+            _LOGGER.info(
+                "HA Insights: loaded %d user detector(s) from %s",
+                loaded,
+                user_dir,
+            )
+        hass.data[DOMAIN][_USER_DETECTORS_LOADED_FLAG] = True
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
