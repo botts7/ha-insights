@@ -46,6 +46,9 @@ SUPPORTED_METHODS = (
     "hypothesize",
     "refine_cost_estimate",
     "list_entries",
+    "get_automation",
+    "refine_automation",
+    "apply_automation_refinement",
 )
 
 
@@ -72,6 +75,9 @@ def async_register(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_refine_cost_estimate)
     websocket_api.async_register_command(hass, ws_list_entries)
     websocket_api.async_register_command(hass, ws_dev_inject_event)
+    websocket_api.async_register_command(hass, ws_get_automation)
+    websocket_api.async_register_command(hass, ws_refine_automation)
+    websocket_api.async_register_command(hass, ws_apply_automation_refinement)
 
 
 def _get_store(
@@ -1593,3 +1599,294 @@ def ws_dev_inject_event(
     )
     accepted = buffer_.add(event)
     connection.send_result(msg["id"], {"accepted": accepted})
+
+
+# ---------------------------------------------------------------------------
+# Existing-automation Refine flow (v1.1)
+#
+# Three endpoints that let the user refine an EXISTING automation with the
+# LLM, instead of only refining new insights.
+#
+#   1. home_insights/get_automation { automation_id } -> {yaml, config, alias, id}
+#      Loads the automation's current YAML so the card can show it as the
+#      "before" view in the refine dialog.
+#
+#   2. home_insights/refine_automation { automation_id, feedback, agent_id? }
+#      Loads the automation, treats it as a virtual insight payload, runs
+#      it through the existing refine pipeline (redactor + LLM + dereference),
+#      returns the refined YAML + diff_summary. NO file write yet — preview
+#      only.
+#
+#   3. home_insights/apply_automation_refinement { automation_id, refined_config }
+#      Writes the refined YAML back via AutomationWriter (same path as
+#      Apply for new insights), then automation.reload picks it up.
+#
+# Mutating endpoints are admin-gated; get_automation is read-only.
+# ---------------------------------------------------------------------------
+
+
+def _find_automation_by_id(
+    hass: HomeAssistant, automation_id: str
+) -> dict | None:
+    """Look up an automation's raw_config dict by its id or alias.
+
+    Walks both runtime state (hass.data["automation"]) AND automations.yaml.
+    Returns the first match. None when no automation matches.
+    """
+    component = hass.data.get("automation")
+    entities_iter = None
+    if hasattr(component, "entities"):
+        entities_iter = component.entities
+    elif isinstance(component, dict):
+        entities_iter = component.values()
+    if entities_iter is not None:
+        for entry in entities_iter:
+            raw = (
+                getattr(entry, "raw_config", None)
+                or getattr(entry, "_raw_config", None)
+            )
+            if isinstance(raw, dict) and (
+                str(raw.get("id")) == automation_id
+                or raw.get("alias") == automation_id
+            ):
+                return raw
+    try:
+        import os as _os
+        import yaml as _yaml
+
+        path = _os.path.join(hass.config.config_dir, "automations.yaml")
+        if _os.path.exists(path):
+            with open(path, encoding="utf-8") as f:
+                loaded = _yaml.safe_load(f)
+            entries = (
+                loaded if isinstance(loaded, list)
+                else [loaded] if isinstance(loaded, dict)
+                else []
+            )
+            for entry in entries:
+                if not isinstance(entry, dict):
+                    continue
+                if (
+                    str(entry.get("id")) == automation_id
+                    or entry.get("alias") == automation_id
+                ):
+                    return entry
+    except Exception:  # noqa: BLE001
+        pass
+    return None
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "home_insights/get_automation",
+        vol.Required("automation_id"): str,
+    }
+)
+@websocket_api.async_response
+async def ws_get_automation(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Return the current YAML config for an existing automation."""
+    automation_id = msg["automation_id"]
+    raw = await hass.async_add_executor_job(
+        _find_automation_by_id, hass, automation_id
+    )
+    if raw is None:
+        connection.send_error(
+            msg["id"],
+            "not_found",
+            f"No automation with id/alias {automation_id!r}",
+        )
+        return
+    try:
+        import yaml as _yaml
+
+        yaml_text = _yaml.safe_dump(
+            raw, sort_keys=False, default_flow_style=False
+        )
+    except Exception:  # noqa: BLE001
+        yaml_text = str(raw)
+    connection.send_result(
+        msg["id"],
+        {
+            "id": raw.get("id"),
+            "alias": raw.get("alias"),
+            "yaml": yaml_text,
+            "config": raw,
+        },
+    )
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "home_insights/refine_automation",
+        vol.Required("automation_id"): str,
+        vol.Required("feedback"): str,
+        vol.Optional("agent_id"): vol.Any(str, None),
+    }
+)
+@websocket_api.require_admin
+@websocket_api.async_response
+async def ws_refine_automation(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Run an existing automation through the LLM refine pipeline."""
+    from datetime import UTC, datetime
+
+    from .config_flow import get_blocked_entities, get_preferred_agent_id
+    from .insight import Insight, InsightKind
+    from .llm import RedactionMode, Redactor, refine_insight
+
+    automation_id = msg["automation_id"]
+    raw = await hass.async_add_executor_job(
+        _find_automation_by_id, hass, automation_id
+    )
+    if raw is None:
+        connection.send_error(
+            msg["id"],
+            "not_found",
+            f"No automation with id/alias {automation_id!r}",
+        )
+        return
+
+    virtual_fingerprint = {
+        "automation_id": automation_id,
+        "kind": "existing_automation_refinement",
+    }
+    virtual_insight = Insight(
+        id=Insight.compute_id(
+            InsightKind.AUTOMATION_PROPOSAL, virtual_fingerprint
+        ),
+        kind=InsightKind.AUTOMATION_PROPOSAL,
+        detector="user_refine",
+        area_id=None,
+        title=(
+            "Refine existing automation: "
+            f"{raw.get('alias') or automation_id}"
+        ),
+        confidence=1.0,
+        fingerprint=virtual_fingerprint,
+        payload=raw,
+        payload_format="automation",
+        created_at=datetime.now(tz=UTC),
+    )
+
+    store = _get_store(hass)
+    if store is None:
+        connection.send_error(msg["id"], "not_set_up", "Store not initialized")
+        return
+
+    blocked = _resolve_blocked_entities(hass, get_blocked_entities)
+    redactor = Redactor(
+        store, mode=RedactionMode.AGGRESSIVE, blocked_entities=blocked
+    )
+    preferred = _resolve_preferred_agent_id(hass)
+
+    try:
+        result = await refine_insight(
+            hass,
+            agent_id=msg.get("agent_id"),
+            insight=virtual_insight,
+            redactor=redactor,
+            feedback=msg["feedback"],
+            preferred_agent_id=preferred,
+        )
+    except Exception as err:  # noqa: BLE001
+        connection.send_error(msg["id"], "refine_failed", str(err))
+        return
+
+    if not result.success or result.refined_payload is None:
+        connection.send_error(
+            msg["id"],
+            "refine_failed",
+            result.error or "LLM refinement returned no payload",
+        )
+        return
+
+    try:
+        import yaml as _yaml
+
+        refined_yaml = _yaml.safe_dump(
+            result.refined_payload,
+            sort_keys=False,
+            default_flow_style=False,
+        )
+        original_yaml = _yaml.safe_dump(
+            raw, sort_keys=False, default_flow_style=False
+        )
+    except Exception:  # noqa: BLE001
+        refined_yaml = str(result.refined_payload)
+        original_yaml = str(raw)
+
+    await _audit_attempts(
+        store, result.attempts, insight_id=virtual_insight.id, redactor=redactor
+    )
+
+    connection.send_result(
+        msg["id"],
+        {
+            "automation_id": automation_id,
+            "alias": raw.get("alias"),
+            "original_yaml": original_yaml,
+            "refined_yaml": refined_yaml,
+            "refined_config": result.refined_payload,
+            "rationale": result.rationale,
+            "diff_summary": result.diff_summary,
+            "bytes_sent": result.bytes_sent,
+            "bytes_received": result.bytes_received,
+            "chosen_agent_id": result.chosen_agent_id,
+            "conversation_id": result.conversation_id,
+            "attempts": (
+                [a.to_dict() for a in result.attempts]
+                if result.attempts else []
+            ),
+        },
+    )
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "home_insights/apply_automation_refinement",
+        vol.Required("automation_id"): str,
+        vol.Required("refined_config"): dict,
+    }
+)
+@websocket_api.require_admin
+@websocket_api.async_response
+async def ws_apply_automation_refinement(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Write the refined automation YAML back to disk + reload."""
+    from .apply.automation_writer import AutomationWriter
+
+    automation_id = msg["automation_id"]
+    refined = msg["refined_config"]
+    if not isinstance(refined, dict):
+        connection.send_error(
+            msg["id"],
+            "bad_payload",
+            "refined_config must be an automation dict",
+        )
+        return
+
+    writer = AutomationWriter(hass)
+    try:
+        await writer.write(refined, auto_id=automation_id)
+    except Exception as err:  # noqa: BLE001
+        connection.send_error(msg["id"], "write_failed", str(err))
+        return
+
+    connection.send_result(
+        msg["id"],
+        {
+            "automation_id": automation_id,
+            "applied": True,
+            "url": f"/config/automations/edit/{automation_id}",
+        },
+    )
