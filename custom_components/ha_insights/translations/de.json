@@ -1,0 +1,48 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "HA Insights einrichten",
+        "description": "HA Insights beobachtet den Zustand deines Smart Homes, um Automatisierungen vorzuschlagen. Wähle, wie (oder ob) die LLM-Anreicherung arbeiten soll. Du kannst dies später unter Konfigurieren ändern.",
+        "data": {
+          "llm_mode": "LLM-Modus"
+        }
+      },
+      "cloud_consent": {
+        "title": "Cloud-LLM — Datenfluss bestätigen",
+        "description": "Cloud-LLMs (Anthropic, OpenAI, Google) laufen außerhalb deines Heimnetzwerks. Mit standardmäßig aktivierter Pseudonymisierung verlassen echte Entitäts- und Bereichsnamen niemals dein Netz; numerische Werte werden in Bereiche eingruppiert; sensible Attribute (GPS, MAC, Tokens, Passwörter) werden stets entfernt. Jeder ausgehende Aufruf wird im Datenschutz-Log-Sensor protokolliert.\n\nLokales LLM wird empfohlen, falls verfügbar. Trotzdem mit Cloud fortfahren?",
+        "data": {
+          "cloud_consent": "Ich verstehe und möchte die Cloud-LLM-Anreicherung aktivieren"
+        }
+      }
+    },
+    "abort": {
+      "already_configured": "HA Insights ist bereits eingerichtet."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "HA Insights-Einstellungen",
+        "description": "Datenschutzmodus, Benachrichtigungen, tägliche Zusammenfassung und bevorzugten LLM-Agenten anpassen. Beim Wechsel IN den Cloud-LLM-Modus muss die Zustimmung zum Datenfluss erneut bestätigt werden.",
+        "data": {
+          "llm_mode": "LLM-Modus",
+          "lookback_days": "Recorder-Verlaufstiefe (Tage)",
+          "notify_on_insight": "Bei Insight mit hoher Konfidenz benachrichtigen",
+          "notify_threshold": "Konfidenz-Schwelle für Benachrichtigung (0.0 - 1.0)",
+          "digest_enabled": "Tägliche Zusammenfassung als Benachrichtigung senden",
+          "digest_hour": "Stunde der Zusammenfassung (0 - 23, lokale Zeit)",
+          "preferred_agent_id": "Bevorzugter LLM-Agent (leer = automatische Auswahl)",
+          "refine_cost_threshold_usd": "Bestätigungs-Schwelle für Refine-Kosten (USD)"
+        }
+      },
+      "cloud_consent": {
+        "title": "Cloud-Datenfluss bestätigen",
+        "description": "Pseudonymisierte Daten werden an den konfigurierten Cloud-LLM-Agenten gesendet. Echte Namen verlassen das Netz niemals; sensible Attribute werden entfernt.",
+        "data": {
+          "cloud_consent": "Ich verstehe und möchte die Cloud-LLM-Anreicherung aktivieren"
+        }
+      }
+    }
+  }
+}
