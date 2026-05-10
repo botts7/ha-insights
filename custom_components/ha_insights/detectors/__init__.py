@@ -219,6 +219,18 @@ async def run_all_detectors(
     except Exception:  # pragma: no cover — defensive
         pass  # cooccurrence falls back to its sub-second-delta filter
 
+    # Load existing automations once per scan so we can:
+    #   1. Pass to TriggerDriftDetector etc via ctx.existing_automations
+    #   2. Mark detector emissions with conflicts_with after the run
+    # Read off the loop via the helper (executor for YAML I/O); cheap.
+    existing_automations = await _load_existing_automations(hass)
+    if existing_automations:
+        _LOGGER.info(
+            "HA Insights scan: %d existing automations loaded "
+            "(for trigger_drift + duplicate annotation)",
+            len(existing_automations),
+        )
+
     # Snapshot the buffer ONCE on the loop, then hand the immutable
     # view to every detector. ~50 MB tuple-copy at the 500K cap — fast
     # enough to do on the loop, since it's a single memcpy of pointers.
@@ -264,18 +276,6 @@ async def run_all_detectors(
     # The snapshot above duplicates work done at ctx-build time, but is
     # cheap (~3ms at 340K events). Avoids threading the size through the
     # snapshot_ctx wrap above, which is harder to read.
-
-    # Load existing automations once so we can suppress insights that
-    # duplicate them. Reads automations.yaml via executor to avoid
-    # blocking the loop. Exceptions are non-fatal — if we can't read
-    # the file, we just don't filter.
-    existing_automations = await _load_existing_automations(hass)
-    if existing_automations:
-        _LOGGER.info(
-            "HA Insights scan: %d existing automations loaded for "
-            "duplicate suppression",
-            len(existing_automations),
-        )
 
     added = 0
     suppressed_as_duplicate = 0
