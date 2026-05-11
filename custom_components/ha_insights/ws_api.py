@@ -2040,6 +2040,52 @@ def _wrap_user_feedback(
     return f"USER: {user_text}\n\n{_principles_for(depth)}"
 
 
+def _humanize_llm_error(raw: str) -> str:
+    """Translate cryptic provider errors into actionable user guidance.
+
+    Common cases we see in the audit pipeline:
+      - Gemini hits its output budget mid-YAML → FinishReason.MAX_TOKENS.
+        The default Google AI agent config caps `max_output_tokens` at
+        ~8192; a full 200-line automation rewrite + rationale can blow
+        through it.
+      - OpenAI returns 'context_length_exceeded' on huge YAMLs.
+      - Anthropic returns 'prompt is too long' / hits stop_reason of
+        'max_tokens'.
+
+    For each known failure mode we append a one-line tip pointing the
+    user at the lever they can actually pull.
+    """
+    text = raw or ""
+    lowered = text.lower()
+    if "max_tokens" in lowered or "max-tokens" in lowered or "max tokens" in lowered:
+        return (
+            f"{text}\n\n"
+            "→ The LLM ran out of output token budget mid-response. "
+            "Try one of:\n"
+            "  • Switch the panel's analysis-depth toggle to 'Concise' "
+            "(top of the panel)\n"
+            "  • Type a shorter / more specific follow-up so the model "
+            "doesn't try to rewrite the whole YAML\n"
+            "  • Raise `max_output_tokens` in your conversation agent's "
+            "configuration (Settings → Devices & Services → your "
+            "Google AI / OpenAI / Anthropic Conversation entry)"
+        )
+    if "context_length" in lowered or "prompt is too long" in lowered:
+        return (
+            f"{text}\n\n"
+            "→ The prompt exceeded the model's context window. "
+            "Switch to a model with a larger context (Claude Sonnet 4 "
+            "or Gemini Pro), or shorten the automation YAML before "
+            "auditing."
+        )
+    if "rate" in lowered and "limit" in lowered:
+        return (
+            f"{text}\n\n"
+            "→ Rate-limited by the LLM provider. Wait a minute and try again."
+        )
+    return text
+
+
 def _attempt_to_dict(attempt: Any) -> dict[str, Any]:
     """Serialize an AttemptAudit (frozen dataclass with no to_dict())
     into a JSON-safe dict. Both ws_refine_automation and
@@ -2346,14 +2392,18 @@ async def ws_refine_automation(
             preferred_agent_id=preferred,
         )
     except Exception as err:  # noqa: BLE001
-        connection.send_error(msg["id"], "refine_failed", str(err))
+        connection.send_error(
+            msg["id"], "refine_failed", _humanize_llm_error(str(err))
+        )
         return
 
     if not result.success or result.refined_payload is None:
         connection.send_error(
             msg["id"],
             "refine_failed",
-            result.error or "LLM refinement returned no payload",
+            _humanize_llm_error(
+                result.error or "LLM refinement returned no payload"
+            ),
         )
         return
 
@@ -2648,17 +2698,23 @@ async def ws_audit_suggest(
     # Build via the use-case-aware helper. Per-observation-kind
     # hints + shared regression principles + dynamic "all
     # context-only" early-exit framing all live in one place.
+    #
+    # Stage-two calls force depth=concise to leave more output token
+    # headroom for the model. Stage-two prompts re-include the YAML
+    # (the algorithm's output), and Gemini's default max_output_tokens
+    # is small enough that re-emitting a full YAML + verbose rationale
+    # hits MAX_TOKENS. Concise principles are sufficient — the user
+    # is iterating; they've already seen the rules once.
     depth = _resolve_audit_depth(hass, msg.get("analysis_depth"))
-    feedback = _build_audit_feedback(observations, depth=depth)
+    effective_depth = "concise" if use_seed else depth
+    feedback = _build_audit_feedback(observations, depth=effective_depth)
     if use_seed:
         # Frame the second-stage call: the LLM is iterating on the
         # algorithm's output, not starting from scratch.
         feedback = (
-            "STAGE TWO: The YAML below has already been processed by "
-            "our deterministic fixer (member-target dedup, time-drift "
-            "shift, auto-off `for:` raise). Build on those edits — "
-            "do not undo them. Focus on the audit observations that "
-            "DIDN'T have a deterministic fix.\n\n"
+            "STAGE TWO. The YAML has already been fixed by our "
+            "deterministic stage — build on it, don't undo it. "
+            "Output the refined YAML and a 1-2 sentence rationale.\n\n"
             + feedback
         )
     if extra_feedback.strip():
@@ -2683,14 +2739,18 @@ async def ws_audit_suggest(
             preferred_agent_id=preferred,
         )
     except Exception as err:  # noqa: BLE001
-        connection.send_error(msg["id"], "refine_failed", str(err))
+        connection.send_error(
+            msg["id"], "refine_failed", _humanize_llm_error(str(err))
+        )
         return
 
     if not result.success or result.refined_payload is None:
         connection.send_error(
             msg["id"],
             "refine_failed",
-            result.error or "LLM refinement returned no payload",
+            _humanize_llm_error(
+                result.error or "LLM refinement returned no payload"
+            ),
         )
         return
 
