@@ -219,6 +219,33 @@ async def run_all_detectors(
     except Exception:  # pragma: no cover — defensive
         pass  # cooccurrence falls back to its sub-second-delta filter
 
+    # v1.2 — single authoritative entity-hierarchy view backed by HA's
+    # registries (entity, device, area, floor, label) plus state-machine
+    # group/scene relationships and script targets. Detectors increasingly
+    # use this instead of the older scattered dicts; both coexist during
+    # the migration. Cached on hass.data so ws_list can reuse without
+    # rebuilding.
+    from .hierarchy import build_hierarchy
+
+    hierarchy = build_hierarchy(hass)
+    _LOGGER.info(
+        "HA Insights: built entity hierarchy "
+        "(%d entities, %d devices, %d areas, %d floors, %d integrations)",
+        len(hierarchy.device_of),
+        len(hierarchy.entities_on_device),
+        len(hierarchy.entities_in_area),
+        len(hierarchy.entities_on_floor),
+        len(hierarchy.entities_from_integration),
+    )
+    # Stash on hass.data so ws_list can reuse without re-walking the
+    # registries. Expires implicitly when the next scan rebuilds.
+    if entry is not None:
+        from ..const import DOMAIN as _DOMAIN
+
+        entry_data = hass.data.get(_DOMAIN, {}).get(entry.entry_id)
+        if isinstance(entry_data, dict):
+            entry_data["hierarchy"] = hierarchy
+
     # Entity dependency map. Walks the state machine looking for entities
     # that reference other entities via standard HA conventions:
     #   - attributes.entity_id is a list (groups, group_light, group_cover)
@@ -266,6 +293,7 @@ async def run_all_detectors(
         existing_automations=existing_automations,
         entity_dependencies=entity_dependencies,
         container_to_members=container_to_members,
+        hierarchy=hierarchy,
     )
     if ctx.event_buffer is not None:
         snapshot = ctx.event_buffer.snapshot()

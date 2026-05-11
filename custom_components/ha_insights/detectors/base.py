@@ -77,6 +77,11 @@ class DetectorContext:
     # the entities the key entity contains; reverse lookup needs to
     # check entity_dependencies (which IS symmetric).
     container_to_members: dict[str, frozenset[str]] = field(default_factory=dict)
+    # v1.2 — the authoritative entity hierarchy view built from HA's
+    # registries. Replaces the scattered dicts above in Phase 3 of the
+    # refactor; legacy fields keep working until then. See
+    # detectors/hierarchy.py for query methods.
+    hierarchy: "EntityHierarchy | None" = None  # noqa: F821 — forward ref
 
 
 class Detector(ABC):
