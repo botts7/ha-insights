@@ -405,7 +405,7 @@ async def ws_list(
             aid = alias_to_id.get(label)
             if aid:
                 entry["id"] = aid
-                entry["url"] = f"/config/automations/edit/{aid}"
+                entry["url"] = f"/config/automation/edit/{aid}"
             out.append(entry)
         return out
 
@@ -535,7 +535,7 @@ async def ws_list(
         # Structured automation links — both for `conflicts_with` (the
         # 🔁 strict-duplicate match) AND `referenced_in_automations`
         # (the 🤖 entity-context match). Card renders each as a
-        # clickable chip → /config/automations/edit/{id} when id is
+        # clickable chip → /config/automation/edit/{id} when id is
         # known, plain text otherwise. This addresses the user ask
         # "let me edit the existing automation instead of starting over."
         d["conflicts_with_links"] = _build_automation_links(ins.conflicts_with)
@@ -2134,6 +2134,6 @@ async def ws_apply_automation_refinement(
         {
             "automation_id": automation_id,
             "applied": True,
-            "url": f"/config/automations/edit/{automation_id}",
+            "url": f"/config/automation/edit/{automation_id}",
         },
     )
