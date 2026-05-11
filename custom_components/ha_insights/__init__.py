@@ -520,6 +520,178 @@ def _async_register_services(hass: HomeAssistant) -> None:
             )
             break  # one entry's store is shared; don't double-run
 
+    async def _audit_suggest_batch(call: ServiceCall) -> None:
+        """Run home_insights/audit_suggest against the next N
+        report-format audit insights, in highest-confidence-first
+        order. Gated by the per-month USD budget (default $5).
+
+        Conservative defaults:
+          batch_size: 3 (small)
+          stop on first error
+          single-flight via _AUDIT_BATCH_LOCK
+          one config-entry's store at a time
+        """
+        from .audit.budget import (
+            estimate_month_to_date,
+            is_local_agent,
+            is_within_budget,
+        )
+        from .config_flow import get_audit_monthly_budget_usd
+
+        batch_size = max(1, min(10, int(call.data.get("batch_size") or 3)))
+        for entry_id, entry_data in hass.data.get(DOMAIN, {}).items():
+            if not isinstance(entry_data, dict) or "store" not in entry_data:
+                continue
+            store_obj = entry_data["store"]
+            entry = hass.config_entries.async_get_entry(entry_id)
+            if entry is None:
+                continue
+            cap_usd = get_audit_monthly_budget_usd(entry)
+            from .config_flow import get_preferred_agent_id as _gpa
+            preferred_check = _gpa(entry)
+            budget_applies = not is_local_agent(preferred_check)
+            spend = await estimate_month_to_date(store_obj)
+            if budget_applies and not is_within_budget(
+                spend, monthly_cap_usd=cap_usd
+            ):
+                _LOGGER.info(
+                    "audit suggest batch: month-to-date $%.2f exceeds "
+                    "cap $%.2f — skipping batch (cloud agent)",
+                    spend.estimated_usd,
+                    cap_usd,
+                )
+                continue
+            if not budget_applies:
+                _LOGGER.debug(
+                    "audit suggest batch: local agent %s — budget gate "
+                    "disabled",
+                    preferred_check,
+                )
+            # Pull report-format audit insights ordered by confidence.
+            insights = await store_obj.list_insights(
+                include_dismissed=False,
+                include_applied=False,
+                include_snoozed=False,
+            )
+            report_audits = [
+                i for i in insights
+                if i.detector == "automation_audit"
+                and i.payload_format == "report"
+            ]
+            report_audits.sort(key=lambda i: i.confidence, reverse=True)
+            picked = report_audits[:batch_size]
+            if not picked:
+                _LOGGER.info("audit suggest batch: nothing to suggest on")
+                continue
+            # Reuse the WS endpoint internally — same audit log, same
+            # redactor, same caching path.
+            from .audit.cache import compute_cache_key, get as cache_get
+            from .audit.cache import put as cache_put
+            from .insight import Insight, InsightKind
+            from .llm import RedactionMode, Redactor, refine_insight
+            from .config_flow import (
+                get_blocked_entities,
+                get_preferred_agent_id,
+            )
+            from .ws_api import _find_automation_by_id
+
+            preferred = get_preferred_agent_id(entry)
+            blocked = get_blocked_entities(entry) or frozenset()
+            from datetime import UTC, datetime as _dt
+            processed = 0
+            for ins in picked:
+                # Re-check budget between calls so we don't overrun
+                # by N within a single batch when each call is big.
+                # Skip the check entirely for local agents — no $.
+                if budget_applies:
+                    live_spend = await estimate_month_to_date(store_obj)
+                    if not is_within_budget(
+                        live_spend, monthly_cap_usd=cap_usd
+                    ):
+                        _LOGGER.info(
+                            "audit suggest batch: budget exhausted mid-"
+                            "batch after %d call(s)",
+                            processed,
+                        )
+                        break
+                payload = ins.payload or {}
+                automation_id = payload.get("automation_id")
+                if not automation_id:
+                    continue
+                observations = payload.get("observations") or []
+                raw = await hass.async_add_executor_job(
+                    _find_automation_by_id, hass, automation_id
+                )
+                if raw is None:
+                    continue
+                obs_kinds = [o.get("kind", "") for o in observations]
+                cache_key = compute_cache_key(raw, obs_kinds)
+                if cache_get(cache_key) is not None:
+                    # Already cached — skip, no tokens needed
+                    continue
+                virtual = Insight(
+                    id=Insight.compute_id(
+                        InsightKind.AUTOMATION_PROPOSAL,
+                        {"automation_id": automation_id,
+                         "kind": "automation_audit_suggest"},
+                    ),
+                    kind=InsightKind.AUTOMATION_PROPOSAL,
+                    detector="user_audit",
+                    area_id=None,
+                    title=f"Refine: {raw.get('alias') or automation_id}",
+                    confidence=1.0,
+                    fingerprint={
+                        "automation_id": automation_id,
+                        "kind": "automation_audit_suggest",
+                    },
+                    payload=raw,
+                    payload_format="automation",
+                    created_at=_dt.now(tz=UTC),
+                )
+                redactor = Redactor(
+                    store_obj,
+                    mode=RedactionMode.AGGRESSIVE,
+                    blocked_entities=blocked,
+                )
+                feedback = "Audit findings:\n" + "\n".join(
+                    f"- {o.get('text', '')}" for o in observations
+                ) + "\n\nSuggest concrete YAML edits per finding."
+                try:
+                    result = await refine_insight(
+                        hass,
+                        agent_id=None,
+                        insight=virtual,
+                        redactor=redactor,
+                        feedback=feedback,
+                        preferred_agent_id=preferred,
+                    )
+                except Exception as err:  # noqa: BLE001
+                    _LOGGER.warning(
+                        "audit suggest batch: %s failed: %s",
+                        automation_id,
+                        err,
+                    )
+                    break  # Stop on first failure — backoff
+                if result.success and result.refined_payload is not None:
+                    cache_put(
+                        cache_key,
+                        refined_yaml=result.refined_payload,
+                        rationale=result.rationale,
+                        diff_summary=result.diff_summary,
+                    )
+                    processed += 1
+                else:
+                    break
+            _LOGGER.info(
+                "audit suggest batch: processed=%d of %d picked; "
+                "month-to-date $%.2f / $%.2f",
+                processed,
+                len(picked),
+                spend.estimated_usd,
+                cap_usd,
+            )
+            break  # only one entry's store needed
+
     async def _reload_ui(call: ServiceCall) -> None:
         """Re-register the sidebar panel with a fresh cache-bust query
         string so deployed bundle changes land without an HA restart.
@@ -537,6 +709,7 @@ def _async_register_services(hass: HomeAssistant) -> None:
     hass.services.async_register(DOMAIN, "backfill", _backfill)
     hass.services.async_register(DOMAIN, "reload_ui", _reload_ui)
     hass.services.async_register(DOMAIN, "run_audit_rollup", _run_audit_rollup)
+    hass.services.async_register(DOMAIN, "audit_suggest_batch", _audit_suggest_batch)
 
 
 async def _async_register_panel(hass: HomeAssistant) -> None:

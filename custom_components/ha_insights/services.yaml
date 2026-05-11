@@ -43,6 +43,30 @@ reload_ui:
     browser. The "🔄 Reload UI" button in the panel header calls this
     same service.
 
+audit_suggest_batch:
+  name: Run audit LLM suggest (batch)
+  description: >
+    Run the LLM Suggest pipeline against the next N report-format
+    audit insights, ordered by confidence (highest first). Gated by
+    the monthly USD budget (default $5) when a cloud LLM agent is
+    selected; budget gate is automatically disabled when the chosen
+    agent is local (HA Assist with local model, Ollama, etc.) since
+    there's no $ cost. Each suggestion is cached by content-hash so
+    repeated batches don't re-spend on unchanged automations.
+  fields:
+    batch_size:
+      name: Batch size
+      description: >
+        How many audit insights to run through the LLM this call.
+        Default 3 — safe to keep small. Capped at 10.
+      example: 3
+      selector:
+        number:
+          min: 1
+          max: 10
+          step: 1
+          mode: slider
+
 run_audit_rollup:
   name: Run audit rollup (small batch)
   description: >

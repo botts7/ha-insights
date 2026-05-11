@@ -92,6 +92,19 @@ def get_active_mode(entry: ConfigEntry) -> str:
     )
 
 
+def get_audit_monthly_budget_usd(entry: ConfigEntry) -> float:
+    """USD/month cap for the AutomationAudit background suggest
+    batch. Default $5, range 0..50. Setting to 0 effectively
+    disables the batch endpoint — the single-click 🤖 Suggest still
+    works for explicit user actions."""
+    raw = entry.options.get("audit_monthly_budget_usd", 5.0)
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return 5.0
+    return max(0.0, min(50.0, value))
+
+
 def get_lookback_days(entry: ConfigEntry) -> int:
     """Resolve the configured backfill lookback (options override data)."""
     raw = entry.options.get(
