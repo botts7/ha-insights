@@ -2021,20 +2021,60 @@ def _find_automation_by_id(
                 or raw.get("alias") == automation_id
             ):
                 return raw
+    # File-based fallback: walk automations.yaml AND any glob-loaded
+    # config files (packages/, configuration.yaml inline `automation:`).
+    # Package-defined automations were previously invisible to the
+    # lookup; this catches them too.
     try:
+        import glob as _glob
         import os as _os
         import yaml as _yaml
 
-        path = _os.path.join(hass.config.config_dir, "automations.yaml")
-        if _os.path.exists(path):
-            with open(path, encoding="utf-8") as f:
-                loaded = _yaml.safe_load(f)
-            entries = (
-                loaded if isinstance(loaded, list)
-                else [loaded] if isinstance(loaded, dict)
-                else []
-            )
-            for entry in entries:
+        candidate_paths: list[str] = []
+        candidate_paths.append(
+            _os.path.join(hass.config.config_dir, "automations.yaml")
+        )
+        candidate_paths.append(
+            _os.path.join(hass.config.config_dir, "configuration.yaml")
+        )
+        # Common packages directory pattern. We don't try to read
+        # arbitrary user-customised layouts — those are rare and the
+        # warning banner explains the limitation.
+        for p in _glob.glob(
+            _os.path.join(hass.config.config_dir, "packages", "*.yaml")
+        ):
+            candidate_paths.append(p)
+        for p in _glob.glob(
+            _os.path.join(hass.config.config_dir, "packages", "**", "*.yaml"),
+            recursive=True,
+        ):
+            candidate_paths.append(p)
+
+        seen_paths: set[str] = set()
+        for path in candidate_paths:
+            if path in seen_paths or not _os.path.exists(path):
+                continue
+            seen_paths.add(path)
+            try:
+                with open(path, encoding="utf-8") as f:
+                    loaded = _yaml.safe_load(f)
+            except Exception:  # noqa: BLE001 — bad YAML, skip
+                continue
+            # Top-level automations.yaml ships a list directly.
+            # configuration.yaml / packages have `automation:` as a key.
+            candidates: list = []
+            if isinstance(loaded, list):
+                candidates = loaded
+            elif isinstance(loaded, dict):
+                auto_block = loaded.get("automation")
+                if isinstance(auto_block, list):
+                    candidates = auto_block
+                elif isinstance(auto_block, dict):
+                    candidates = [auto_block]
+                else:
+                    # Treat the top-level dict itself as a candidate
+                    candidates = [loaded]
+            for entry in candidates:
                 if not isinstance(entry, dict):
                     continue
                 if (
@@ -2065,23 +2105,56 @@ async def ws_get_automation(
         _find_automation_by_id, hass, automation_id
     )
     if raw is None:
+        _LOGGER.warning(
+            "ws_get_automation: no automation found for id/alias %r — "
+            "lookup walked hass.data['automation'] AND automations.yaml "
+            "with no match. Automation may live in a package or "
+            "configuration.yaml — those aren't currently scanned.",
+            automation_id,
+        )
         connection.send_error(
             msg["id"],
             "not_found",
-            f"No automation with id/alias {automation_id!r}",
+            f"No automation found with id/alias {automation_id!r}. "
+            "If this automation lives in a package or configuration.yaml, "
+            "the lookup can't reach it.",
         )
         return
     # Sanitize the raw_config dict so PyYAML.safe_dump can serialize
     # it downstream (HA injects Template / Selector / etc. objects
     # PyYAML can't represent → RepresenterError otherwise).
     raw = _sanitize_yaml_safe(raw)
+    if not isinstance(raw, dict) or not raw:
+        # Lookup returned a truthy-but-empty object (e.g. a stub
+        # entity created before its raw_config was populated). Send
+        # a clear error so the card warning banner has something
+        # specific to display.
+        _LOGGER.warning(
+            "ws_get_automation: raw_config for %r is empty after "
+            "sanitisation: %r",
+            automation_id,
+            raw,
+        )
+        connection.send_error(
+            msg["id"],
+            "empty_config",
+            f"Automation {automation_id!r} exists but its raw_config "
+            "is empty. HA may still be loading; try again in a few "
+            "seconds.",
+        )
+        return
     try:
         import yaml as _yaml
 
         yaml_text = _yaml.safe_dump(
             raw, sort_keys=False, default_flow_style=False
         )
-    except Exception:  # noqa: BLE001
+    except Exception as err:  # noqa: BLE001
+        _LOGGER.warning(
+            "ws_get_automation: yaml.safe_dump failed for %r: %s",
+            automation_id,
+            err,
+        )
         yaml_text = str(raw)
     connection.send_result(
         msg["id"],
