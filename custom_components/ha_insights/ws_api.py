@@ -519,6 +519,22 @@ async def ws_list(
             else []
         )
         d["cohort_label"] = ins.fingerprint.get("_grouped_under")
+        # Carry the entity_id list of the entities involved (for dedup
+        # at the end of this function — strips per-entity bits from
+        # the title to group rows that should display together even
+        # if the store has them as separate rows from an older
+        # fingerprint schema).
+        eids_for_dedup: list[str] = []
+        for key in (
+            "entity_id",
+            "follower_entity_id",
+            "leader_entity_id",
+            "target_entity_id",
+        ):
+            v = ins.fingerprint.get(key)
+            if isinstance(v, str) and "." in v:
+                eids_for_dedup.append(v)
+        d["_eids_for_dedup"] = eids_for_dedup
         # Structured automation links — both for `conflicts_with` (the
         # 🔁 strict-duplicate match) AND `referenced_in_automations`
         # (the 🤖 entity-context match). Card renders each as a
@@ -531,7 +547,164 @@ async def ws_list(
         )
         enriched.append(d)
 
+    # Display-time dedup: merge insights that share a normalized title
+    # signature AND a discoverable container (shared device_id, common
+    # state-machine parent, or heuristic same-domain cohort). Catches
+    # insights stored before the scan-time dedup landed AND lets the
+    # user see the merged view immediately, without waiting for a
+    # rescan. Pure read-side transform — the store stays unchanged.
+    enriched = _display_time_dedup(enriched, hass)
+
     connection.send_result(msg["id"], {"insights": enriched})
+
+
+# ---------------------------------------------------------------------------
+# Display-time dedup (v1.1 — runs in ws_list after enrichment)
+# ---------------------------------------------------------------------------
+import re as _re
+
+
+def _normalize_title_for_dedup(title: str, eids: list[str]) -> str:
+    """Strip per-entity tokens from an insight title so two insights that
+    differ only in their entity name produce the same signature.
+
+    Examples (with eids ["binary_sensor.home_nvr_garage_motion"]):
+      "binary_sensor.home_nvr_garage_motion hasn't reported in 8d. ..."
+      → "<E> hasn't reported in 8d. ..."
+
+    Numeric tokens (durations, counts) are preserved because they ARE
+    the signal — two entities silent for different durations shouldn't
+    merge.
+    """
+    out = title
+    for eid in eids:
+        out = out.replace(eid, "<E>")
+    # Strip any leftover bare entity_id-like tokens (matches domain.name)
+    out = _re.sub(r"\b[a-z_]+\.[A-Za-z0-9_]+\b", "<E>", out)
+    return out
+
+
+def _display_time_dedup(
+    enriched: list[dict[str, Any]], hass: HomeAssistant
+) -> list[dict[str, Any]]:
+    """Group enriched insights by (kind, detector, normalized title)
+    and collapse groups of 2+ that share a device_id or domain into a
+    single representative row. Other groups pass through unchanged.
+
+    Cohort metadata (cohort_members + cohort_label) is filled in on
+    the representative so the card's expand toggle still works.
+    """
+    if not enriched:
+        return enriched
+
+    # Build device_id lookup for cross-entity device-shared dedup.
+    device_id_by_entity: dict[str, str | None] = {}
+    try:
+        from homeassistant.helpers import entity_registry as er
+
+        registry = er.async_get(hass)
+        for ent in registry.entities.values():
+            device_id_by_entity[ent.entity_id] = ent.device_id
+    except Exception:  # noqa: BLE001
+        pass
+
+    from collections import defaultdict as _dd
+
+    buckets: dict[tuple[str, str, str], list[dict]] = _dd(list)
+    for d in enriched:
+        eids = d.get("_eids_for_dedup") or []
+        sig = (
+            d.get("kind") or "",
+            d.get("detector") or "",
+            _normalize_title_for_dedup(d.get("title") or "", eids),
+        )
+        buckets[sig].append(d)
+
+    result: list[dict[str, Any]] = []
+    for bucket in buckets.values():
+        if len(bucket) < 2:
+            for d in bucket:
+                d.pop("_eids_for_dedup", None)
+                result.append(d)
+            continue
+        # Collect all entity_ids across the group
+        all_eids: list[str] = []
+        for d in bucket:
+            all_eids.extend(d.get("_eids_for_dedup") or [])
+        all_eids = sorted(set(all_eids))
+        if len(all_eids) < 2:
+            for d in bucket:
+                d.pop("_eids_for_dedup", None)
+                result.append(d)
+            continue
+        # Determine cohort label: prefer shared device_id, then domain prefix.
+        cohort_label = _resolve_cohort_label(all_eids, device_id_by_entity)
+        if cohort_label is None:
+            # No coherent group — keep them separate.
+            for d in bucket:
+                d.pop("_eids_for_dedup", None)
+                result.append(d)
+            continue
+        # Pick representative: highest confidence.
+        rep = max(bucket, key=lambda d: float(d.get("confidence") or 0))
+        rep = dict(rep)
+        rep.pop("_eids_for_dedup", None)
+        others = len(bucket) - 1
+        # Don't double-append the suffix if it's already there from a
+        # scan-time merge.
+        if "similar entities" not in (rep.get("title") or ""):
+            rep["title"] = (
+                f"{rep.get('title') or ''} "
+                f"(+{others} similar entities: {cohort_label})"
+            )
+        rep["cohort_members"] = all_eids
+        rep["cohort_label"] = cohort_label
+        result.append(rep)
+    return result
+
+
+def _resolve_cohort_label(
+    entity_ids: list[str],
+    device_id_by_entity: dict[str, str | None],
+) -> str | None:
+    """Pick a friendly label for a cohort: shared device → entity-id
+    prefix; otherwise same-domain cohort label."""
+    # Shared device → longest common entity-id prefix.
+    device_ids = {device_id_by_entity.get(e) for e in entity_ids}
+    device_ids.discard(None)
+    if len(device_ids) == 1:
+        prefix = _longest_common_entity_prefix(entity_ids)
+        if prefix:
+            return prefix
+    # Same-domain fallback.
+    domains = {e.split(".", 1)[0] for e in entity_ids if "." in e}
+    if len(domains) == 1:
+        return f"{next(iter(domains))}.* (cohort)"
+    return None
+
+
+def _longest_common_entity_prefix(entity_ids: list[str]) -> str | None:
+    """Return `domain.prefix_*` if all entity_ids share a domain AND a
+    name prefix of >=4 chars. Same shape as the detector-side helper."""
+    if len(entity_ids) < 2:
+        return None
+    domains = {e.split(".", 1)[0] for e in entity_ids if "." in e}
+    if len(domains) != 1:
+        return None
+    domain = next(iter(domains))
+    names = [e.split(".", 1)[1] for e in entity_ids if "." in e]
+    if not names:
+        return None
+    prefix = names[0]
+    for n in names[1:]:
+        while prefix and not n.startswith(prefix):
+            prefix = prefix[:-1]
+        if not prefix:
+            return None
+    prefix = prefix.rstrip("_")
+    if len(prefix) < 4:
+        return None
+    return f"{domain}.{prefix}_*"
 
 
 @websocket_api.websocket_command(
