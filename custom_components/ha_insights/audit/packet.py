@@ -105,6 +105,7 @@ def build_audit_packet(
     blocked_entities: frozenset[str] = frozenset(),
     trace_aggregates: Any | None = None,
     rollup_by_entity: dict[str, dict[str, dict[int, int]]] | None = None,
+    live_states: dict[str, str] | None = None,
     now: datetime | None = None,
 ) -> AuditPacket:
     """Build an AuditPacket for one automation. Pure function.
@@ -176,6 +177,7 @@ def build_audit_packet(
             _observe_silent_entities(
                 entities=target_entities | trigger_entities,
                 buffer=buffer,
+                live_states=live_states or {},
                 now=now,
             )
         )
@@ -488,53 +490,74 @@ def _observe_silent_entities(
     *,
     entities: set[str],
     buffer: "StateEventBuffer",
+    live_states: dict[str, str],
     now: datetime,
 ) -> list[Observation]:
-    """Any target/trigger entity that hasn't reported a state change
-    in the last N days — the automation will silently fail."""
+    """An entity is "silent" only when HA itself thinks it's dead.
+
+    Previously this fired on ANY entity missing from our 14-day
+    buffer, but the buffer respects scan_areas + blocked_entities,
+    so an entity outside the user's monitored set looked dead to
+    us even though HA had a fresh state for it. Result on a real
+    install: 8+ false-positive "no state changes" findings against
+    perfectly live entities.
+
+    New rule, much tighter:
+      - Looks like a device_id (no dot) → skip; trigger refs that
+        target a device aren't entities at all
+      - hass.states has the entity AND it's not `unavailable`/
+        `unknown` → live, skip silently
+      - hass.states has the entity at `unavailable`/`unknown` →
+        emit (HA itself says it's broken)
+      - hass.states has NO entry for the entity → emit (renamed
+        or removed)
+
+    The buffer is no longer used for this signal — HA's own state
+    machine is the source of truth for "is this entity alive."
+    """
     if not entities:
         return []
-    since = now - timedelta(days=_LOOKBACK_DAYS)
-    silent_cutoff = now - timedelta(days=_SILENT_THRESHOLD_DAYS)
     out: list[Observation] = []
     for eid in sorted(entities):
-        last_ts: datetime | None = None
-        for ev in buffer.query(entity_id=eid, since=since):
-            if last_ts is None or ev.timestamp > last_ts:
-                last_ts = ev.timestamp
-        if last_ts is None:
-            # No events at all in 14d for an entity this automation
-            # uses — strong signal.
-            days = _LOOKBACK_DAYS
+        # Skip device_id-shaped trigger refs (32-char hex). Those
+        # are HA's `device_id:` trigger references, not entity_ids;
+        # complaining about them as dead entities is wrong.
+        if "." not in eid:
+            continue
+        # Skip platform.X service references like `script.foo` —
+        # they're real entities but not the kind of thing that
+        # "goes dead" in the usual sense.
+        state = live_states.get(eid)
+        if state is None:
             out.append(
                 Observation(
                     kind=OBS_ENTITY_SILENT,
                     text=(
-                        f"{eid} has no state changes in the last {days}d. "
-                        "The automation may be referring to a dead, "
-                        "renamed, or removed entity."
+                        f"{eid} is not in Home Assistant's state machine. "
+                        "The automation may be referring to a renamed or "
+                        "removed entity — check the entity registry."
                     ),
-                    confidence=0.85,
+                    confidence=0.9,
                     metrics={
                         "entity_id": eid,
-                        "silent_days_min": days,
+                        "reason": "missing_from_state_machine",
                     },
                 )
             )
             continue
-        if last_ts < silent_cutoff:
-            days = max(1, int((now - last_ts).total_seconds() / 86400))
+        if state in {"unavailable", "unknown"}:
             out.append(
                 Observation(
                     kind=OBS_ENTITY_SILENT,
                     text=(
-                        f"{eid} hasn't changed state in {days}d. The "
-                        "automation may not be firing as expected."
+                        f"{eid} is currently `{state}` in Home Assistant. "
+                        "The automation will silently fail until the "
+                        "entity comes back online."
                     ),
-                    confidence=0.75,
+                    confidence=0.85,
                     metrics={
                         "entity_id": eid,
-                        "silent_days": days,
+                        "current_state": state,
                     },
                 )
             )

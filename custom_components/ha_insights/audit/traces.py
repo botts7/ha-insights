@@ -107,63 +107,59 @@ async def _list_traces(
     hass: "HomeAssistant",
     item_id: str,
 ) -> list[dict[str, Any]] | None:
-    """`trace/list` WS command via HA's internal helper. Returns None
-    if the API isn't available or the id has no traces."""
+    """Read traces directly from HA's `hass.data[DATA_TRACE]` storage.
+
+    Previous version used `async_get_traces_for_domain` which doesn't
+    exist on every HA build — every call was throwing silently and
+    every automation looked like it had "no traces" in the audit.
+    Direct dict access is the documented internal API and works
+    across HA versions.
+
+    Returns None when the trace integration isn't loaded (rare).
+    Returns [] when the integration IS loaded but no traces for
+    this item_id — meaningful distinction so the packet builder
+    can stay quiet when traces aren't tracked vs noisy when the
+    automation genuinely never fired.
+    """
     try:
-        # The trace component exposes async_list_traces / async_get_trace
-        # helpers through `hass.data["trace"]`. Falling back to the WS
-        # command is fragile, so prefer direct API.
-        from homeassistant.components.trace import (
-            async_list_contexts,  # noqa: F401  — present to confirm import works
-        )
-        from homeassistant.components.trace.models import (
-            async_store_trace,  # noqa: F401
-        )
+        from homeassistant.components.trace.const import DATA_TRACE
     except Exception:  # noqa: BLE001
-        # Trace integration may not be loaded; just bail out.
         return None
 
-    try:
-        # Public-API path: list_automation_traces() is the documented
-        # accessor on the trace integration. It returns a list of
-        # ItemTrace dicts.
-        from homeassistant.components.automation import (
-            DOMAIN as AUTOMATION_DOMAIN,
-        )
-        from homeassistant.components.trace import (
-            async_get_traces_for_domain,
-        )
+    trace_data = hass.data.get(DATA_TRACE)
+    if not isinstance(trace_data, dict):
+        return None
 
-        traces = await async_get_traces_for_domain(
-            hass, AUTOMATION_DOMAIN
-        )
-        # Filter by our item_id. The structure varies by HA version —
-        # try both shapes.
-        bare_id = item_id.removeprefix("automation.")
-        item_traces = traces.get(item_id) or traces.get(bare_id)
-        if item_traces is None:
-            return []
-        # Normalize to list of {run_id, timestamp} for the detail-fetch
-        # phase. Different HA versions store this differently.
-        out: list[dict[str, Any]] = []
-        iterable = (
-            item_traces.values()
-            if isinstance(item_traces, dict)
-            else item_traces
-        )
-        for t in iterable:
-            if hasattr(t, "as_short_dict"):
+    # Storage shape: {domain: {item_id: TraceLimitedDict}}.
+    # TraceLimitedDict is a dict-like keyed by run_id, holding
+    # ItemTrace instances. We try both item_id forms (with and
+    # without the automation. prefix) so callers don't have to
+    # know HA's storage key shape.
+    bare_id = item_id.removeprefix("automation.")
+    domain_traces = trace_data.get("automation")
+    if not isinstance(domain_traces, dict):
+        return []
+    item_traces = domain_traces.get(bare_id) or domain_traces.get(item_id)
+    if item_traces is None:
+        return []
+    # Convert each stored ItemTrace into a short-dict form for the
+    # detail loop. ItemTrace has both as_short_dict() and as_dict();
+    # short is enough for our aggregates.
+    out: list[dict[str, Any]] = []
+    iterable = (
+        item_traces.values()
+        if hasattr(item_traces, "values")
+        else item_traces
+    )
+    for t in iterable:
+        if hasattr(t, "as_short_dict"):
+            try:
                 out.append(t.as_short_dict())
-            elif isinstance(t, dict):
-                out.append(t)
-        return out
-    except Exception as err:  # noqa: BLE001
-        _LOGGER.debug(
-            "audit/traces: list failed for %s: %s — skipping trace observations",
-            item_id,
-            err,
-        )
-        return None
+            except Exception:  # noqa: BLE001
+                continue
+        elif isinstance(t, dict):
+            out.append(t)
+    return out
 
 
 async def _get_trace(
@@ -171,22 +167,32 @@ async def _get_trace(
     item_id: str,
     run_id: str,
 ) -> dict[str, Any] | None:
-    """Fetch one detailed trace. Returns None on any error."""
+    """Fetch one detailed trace. Same direct-dict path as _list_traces;
+    returns None when not found."""
     try:
-        from homeassistant.components.automation import (
-            DOMAIN as AUTOMATION_DOMAIN,
-        )
-        from homeassistant.components.trace import async_get_trace
-
-        trace = await async_get_trace(
-            hass, AUTOMATION_DOMAIN, item_id, run_id
-        )
-        if hasattr(trace, "as_dict"):
-            return trace.as_dict()
-        return trace if isinstance(trace, dict) else None
-    except Exception as err:  # noqa: BLE001
-        _LOGGER.debug("audit/traces: get failed for %s/%s: %s", item_id, run_id, err)
+        from homeassistant.components.trace.const import DATA_TRACE
+    except Exception:  # noqa: BLE001
         return None
+
+    trace_data = hass.data.get(DATA_TRACE)
+    if not isinstance(trace_data, dict):
+        return None
+    bare_id = item_id.removeprefix("automation.")
+    domain_traces = trace_data.get("automation") or {}
+    item_traces = domain_traces.get(bare_id) or domain_traces.get(item_id)
+    if item_traces is None:
+        return None
+    trace = (
+        item_traces.get(run_id) if hasattr(item_traces, "get") else None
+    )
+    if trace is None:
+        return None
+    if hasattr(trace, "as_dict"):
+        try:
+            return trace.as_dict()
+        except Exception:  # noqa: BLE001
+            return None
+    return trace if isinstance(trace, dict) else None
 
 
 def _aggregate_traces(
@@ -323,23 +329,14 @@ def observations_from_traces(
         now = datetime.now(tz=UTC)
     out: list[dict[str, Any]] = []
 
-    # Dormant: last run > N days ago (or no runs at all but the
-    # automation exists)
-    if aggregates.trace_count == 0:
-        out.append(
-            {
-                "kind": "trace_never_fired",
-                "text": (
-                    "This automation has no execution traces in HA's "
-                    "history. Either it never fired, or HA discarded its "
-                    "traces (stored_traces: 0). If it never fired — the "
-                    "trigger may be broken or the entity dead."
-                ),
-                "confidence": 0.6,
-                "metrics": {"trace_count": 0},
-            }
-        )
-    elif aggregates.last_run_at is not None:
+    # Dormant: last run > N days ago. We DO NOT emit a finding when
+    # trace_count is zero — HA only keeps the last N traces per
+    # automation (default 5, often 0 if stored_traces is unset on
+    # older automations), so absence-of-traces is "we don't know"
+    # rather than "never fired". Earlier release fired this on every
+    # automation that didn't happen to have traces in memory; the
+    # 20+ false-positives killed signal-to-noise.
+    if aggregates.last_run_at is not None:
         age = now - aggregates.last_run_at
         if age > timedelta(days=TRACE_DORMANT_DAYS):
             out.append(

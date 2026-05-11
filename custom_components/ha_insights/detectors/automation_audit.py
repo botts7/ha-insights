@@ -101,6 +101,14 @@ class AutomationAuditDetector(Detector):
         # installs degrade gracefully — short-term observations only).
         rollup_by_entity = await self._load_rollups(ctx, audit_targets)
 
+        # Snapshot HA's live state machine so the silent-entity
+        # check has a source of truth that's independent of our
+        # scan_areas / blocked_entities filtered buffer. Cheap dict
+        # iteration on the event loop.
+        live_states: dict[str, str] = {
+            s.entity_id: s.state for s in ctx.hass.states.async_all()
+        }
+
         # Build packets + emit insights. Pure / fast per automation.
         now = datetime.now(tz=UTC)
         insights: list[Insight] = []
@@ -117,6 +125,7 @@ class AutomationAuditDetector(Detector):
                     auto.get("id") or auto.get("alias") or ""
                 ),
                 rollup_by_entity=rollup_by_entity,
+                live_states=live_states,
                 now=now,
             )
             if not packet.observations:

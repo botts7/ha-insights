@@ -35,7 +35,14 @@ if TYPE_CHECKING:
 @register_detector
 class RedundantTargetDetector(Detector):
     """Flag automations whose action targets contain both a group/scene/
-    script and at least one of its own members."""
+    script and at least one of its own members.
+
+    v1.1: AutomationAuditDetector now covers this same finding inside
+    a consolidated per-automation audit row. Keeping this detector
+    disabled-by-default avoids double-emission. Re-enable by setting
+    `detector_config.legacy_emit = True` if you specifically want the
+    standalone row.
+    """
 
     name = "redundant_target"
     kind = InsightKind.AUTOMATION_IMPROVEMENT
@@ -43,6 +50,11 @@ class RedundantTargetDetector(Detector):
 
     async def scan(self, ctx: DetectorContext) -> list[Insight]:
         if not ctx.existing_automations:
+            return []
+        # Suppressed by default — AutomationAuditDetector folds this
+        # finding into its consolidated row. Opt back in via config
+        # if a user wants the standalone view.
+        if not ctx.detector_config.get("legacy_emit"):
             return []
 
         from ..apply.conflict_scanner import _extract_target_entities
