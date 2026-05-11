@@ -393,6 +393,7 @@ async def run_all_detectors(
             entity_dependencies,
             container_to_members,
             device_id_by_entity,
+            hierarchy_for_dedup=hierarchy,
         )
         for insight in insights:
             # Annotate (don't suppress) insights that match an existing
@@ -591,6 +592,7 @@ def _dedup_grouped_insights(
     entity_dependencies: dict[str, frozenset[str]],
     container_to_members: dict[str, frozenset[str]] | None = None,
     device_id_by_entity: dict[str, str | None] | None = None,
+    hierarchy_for_dedup: "EntityHierarchy | None" = None,  # noqa: F821
 ) -> list:
     """Collapse insights that share a fingerprint (mod entity_id) AND
     whose entities live under the same group/scene container.
@@ -651,13 +653,19 @@ def _dedup_grouped_insights(
         if len(eids) < 2:
             result.extend(group)
             continue
-        # Primary path: discover a real shared container in the dep map.
-        parent = _find_common_container(
-            eids,
-            entity_dependencies,
-            container_to_members,
-            device_id_by_entity,
-        )
+        # Primary path: discover a real shared container.
+        # v1.2: prefer the central hierarchy's find_common_parent
+        # (covers device, parent-self, third-party container in one
+        # call). Fall back to the legacy helper during migration.
+        if hierarchy_for_dedup is not None:
+            parent = hierarchy_for_dedup.find_common_parent(eids)
+        else:
+            parent = _find_common_container(
+                eids,
+                entity_dependencies,
+                container_to_members,
+                device_id_by_entity,
+            )
         merge_label: str | None = None
         if parent is not None:
             merge_label = parent

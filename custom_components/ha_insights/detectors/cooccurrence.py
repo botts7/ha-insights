@@ -100,20 +100,28 @@ class CooccurrenceDetector(Detector):
             tuple[str, str, str, str], list[float]
         ] = defaultdict(list)  # (leader_eid, leader_state, follower_eid, follower_state) -> deltas
 
-        # Same-device pair filter — pulls (entity_id -> device_id) from
-        # ctx (populated once at scan start). Pairs whose entities share
-        # a device_id are virtually always two views of the same physical
-        # hardware event (relay board with input + relay channel,
-        # multi-endpoint Zigbee, sensor pack reporting all readings
-        # together). Filter at pair-discovery time so they never even
-        # reach the dedup dict.
-        device_id_by_entity = ctx.device_id_by_entity
-        # Entity dependency map (groups, derived sensors, aggregates) —
-        # see docstring on DetectorContext.entity_dependencies. Pairs
-        # connected by any dependency edge are dropped: they aren't
-        # "responding to" each other, they're reflecting the same
-        # underlying event.
-        entity_dependencies = ctx.entity_dependencies
+        # Pair-relatedness check via the central hierarchy. Replaces the
+        # previous combo of (device_id_by_entity + entity_dependencies)
+        # with a single query method that already knows about
+        # device-sharing, group membership, source/derived sensors, and
+        # small-group siblings. Falls back to the legacy maps when no
+        # hierarchy is in the context (only happens during the migration
+        # window if a non-standard caller built ctx by hand).
+        hierarchy = ctx.hierarchy
+        legacy_device_map = ctx.device_id_by_entity
+        legacy_dep_map = ctx.entity_dependencies
+
+        def _pair_is_related(eid_a: str, eid_b: str) -> bool:
+            if hierarchy is not None:
+                return hierarchy.are_related(eid_a, eid_b)
+            # Legacy path
+            da = legacy_device_map.get(eid_a)
+            db = legacy_device_map.get(eid_b)
+            if da is not None and da == db:
+                return True
+            if eid_b in legacy_dep_map.get(eid_a, frozenset()):
+                return True
+            return False
 
         for i, follower in enumerate(events):
             if follower.entity_id not in busy_entities:
@@ -121,7 +129,6 @@ class CooccurrenceDetector(Detector):
             if not self._is_candidate(follower):
                 continue
             window_start = follower.timestamp - timedelta(seconds=self.WINDOW_SECONDS)
-            follower_device = device_id_by_entity.get(follower.entity_id)
             for j in range(i - 1, max(-1, i - self.MAX_LOOKBACK_EVENTS), -1):
                 leader = events[j]
                 if leader.timestamp < window_start:
@@ -132,23 +139,11 @@ class CooccurrenceDetector(Detector):
                     continue
                 if not self._is_candidate(leader):
                     continue
-                # Same-device skip: applies only when both entities have
-                # a non-None device_id AND they match. Two unrelated
-                # devices both with `device_id=None` would still pair.
-                leader_device = device_id_by_entity.get(leader.entity_id)
-                if (
-                    leader_device is not None
-                    and follower_device is not None
-                    and leader_device == follower_device
-                ):
-                    continue
-                # Dependency-graph skip: parent group fires its members,
-                # member fires sibling members, derived sensor reflects
-                # source. None of these are useful "B follows A" patterns.
-                if (
-                    follower.entity_id
-                    in entity_dependencies.get(leader.entity_id, frozenset())
-                ):
+                # Single relatedness check covers same-device, group
+                # parent/child, sibling-in-small-group, source/derived,
+                # AND script co-targeting — everything we filter out as
+                # "same root event, not real causation."
+                if _pair_is_related(leader.entity_id, follower.entity_id):
                     continue
                 delta = (follower.timestamp - leader.timestamp).total_seconds()
                 if delta <= 0:

@@ -138,11 +138,18 @@ class FrequencyAnomalyDetector(Detector):
 
         # Same-device dedup: per device, keep only the highest-ratio entity.
         # Entities without a device_id (template sensors, helpers) keep all.
+        # Uses ctx.hierarchy when available (v1.2 refactor), falls back
+        # to the legacy map otherwise.
+        def _device_of(eid: str) -> str | None:
+            if ctx.hierarchy is not None:
+                return ctx.hierarchy.device_of.get(eid)
+            return ctx.device_id_by_entity.get(eid)
+
         per_device_best: dict[str, tuple[float, str, int, float]] = {}
         no_device: list[tuple[float, str, int, float]] = []
         for cand in candidates:
             ratio, eid, _today, _baseline = cand
-            device_id = ctx.device_id_by_entity.get(eid)
+            device_id = _device_of(eid)
             if device_id is None:
                 no_device.append(cand)
                 continue

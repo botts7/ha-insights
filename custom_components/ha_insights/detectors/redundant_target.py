@@ -42,13 +42,21 @@ class RedundantTargetDetector(Detector):
     requires_recorder = False
 
     async def scan(self, ctx: DetectorContext) -> list[Insight]:
-        if not ctx.existing_automations or not ctx.container_to_members:
+        if not ctx.existing_automations:
             return []
 
         from ..apply.conflict_scanner import _extract_target_entities
 
+        # Prefer the central hierarchy's strict parent→members map.
+        # Fall back to the legacy container_to_members during migration.
+        if ctx.hierarchy is not None and ctx.hierarchy.members_of:
+            container_map = ctx.hierarchy.members_of
+        elif ctx.container_to_members:
+            container_map = ctx.container_to_members
+        else:
+            return []
+
         insights: list[Insight] = []
-        container_map = ctx.container_to_members
 
         for auto in ctx.existing_automations:
             targets = _extract_target_entities(auto.get("action"))

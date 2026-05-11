@@ -250,26 +250,31 @@ async def ws_list(
         include_snoozed=msg["include_snoozed"],
     )
 
-    # Build a quick (entity_id -> device_class) lookup so we don't hit the
-    # registry once per insight. Empty dict if registry is unavailable —
-    # the enrichment is purely additive; missing values just become null.
-    device_class_by_entity: dict[str, str | None] = {}
-    # Also capture each entity's integration platform so we can surface
-    # "this is managed by an external integration's own schedule" — pet
-    # feeders, robot vacuums, smart fans, thermostat schedules, etc. all
-    # have device-side automations HA can't see or modify.
-    platform_by_entity: dict[str, str | None] = {}
+    # v1.2: reuse the EntityHierarchy built by the most recent scan
+    # (stashed on hass.data) instead of independently walking the
+    # registries. Rebuild on-demand if missing (no scan yet, or
+    # cache cleared by integration reload).
+    hierarchy = None
     try:
-        from homeassistant.helpers import entity_registry as er
+        from .detectors.hierarchy import build_hierarchy
 
-        registry = er.async_get(hass)
-        for ent_entry in registry.entities.values():
-            device_class_by_entity[ent_entry.entity_id] = (
-                ent_entry.device_class or ent_entry.original_device_class
-            )
-            platform_by_entity[ent_entry.entity_id] = ent_entry.platform
+        for entry_data_val in hass.data.get(DOMAIN, {}).values():
+            if isinstance(entry_data_val, dict) and "hierarchy" in entry_data_val:
+                hierarchy = entry_data_val["hierarchy"]
+                break
+        if hierarchy is None:
+            hierarchy = build_hierarchy(hass)
     except Exception:  # noqa: BLE001
-        pass  # fall through with empty dicts
+        hierarchy = None
+
+    # Pull what ws_list specifically needs out of the hierarchy. Older
+    # code paths still expect raw dicts so keep these names.
+    if hierarchy is not None:
+        device_class_by_entity: dict[str, str | None] = hierarchy.device_class_of
+        platform_by_entity: dict[str, str | None] = hierarchy.integration_of
+    else:
+        device_class_by_entity = {}
+        platform_by_entity = {}
 
     # Build entity → list-of-automation-names map so each insight can
     # surface "🤖 used in 3 automations" with the actual aliases. Reads
@@ -289,46 +294,28 @@ async def ws_list(
         from .apply.conflict_scanner import _as_list, _extract_target_entities
         from .detectors import _load_existing_automations
 
-        # Walk state machine once to build (parent → set of members).
-        # Same data as DetectorContext.entity_dependencies builds, but
-        # we don't have that here — keeping the WS path independent.
-        container_to_members: dict[str, set[str]] = {}
-        for state in hass.states.async_all():
-            for attr_name in ("entity_id", "group_members", "lights"):
-                members_attr = state.attributes.get(attr_name)
-                if not isinstance(members_attr, (list, tuple)):
-                    continue
-                members = {
-                    m
-                    for m in members_attr
-                    if isinstance(m, str) and "." in m
-                }
-                if members:
-                    container_to_members.setdefault(state.entity_id, set()).update(
-                        members
-                    )
-
-        # Build script.X → set of entities the script touches. An automation
-        # action `service: script.evening_lights` should be treated as if
-        # it directly touched whatever entities the script's own actions
-        # target. Without this expansion, calling a script breaks the
-        # automation→entity reference chain and the 🤖 pill goes missing.
-        from ._script_targets import collect_script_targets as _cst
-
-        try:
-            script_targets: dict[str, set[str]] = _cst(hass)
-        except Exception:  # noqa: BLE001
+        # v1.2: pull container + script-target relationships straight from
+        # the cached hierarchy instead of re-walking the state machine.
+        # Falls back to empty dicts if no scan has run yet.
+        if hierarchy is not None:
+            container_to_members: dict[str, frozenset[str]] = hierarchy.members_of
+            # The hierarchy already folded script targets INTO members_of
+            # (script.X → its action target entity_ids), so a separate
+            # script_targets lookup isn't needed for expansion below.
+            script_targets: dict[str, set[str]] = {}
+        else:
+            container_to_members = {}
             script_targets = {}
 
         def _expand(refs: set[str]) -> set[str]:
-            """Expand parent containers → members AND script.X → its targets.
-            One-hop only; doesn't recurse into nested groups or script
-            chains. Covers the common case where automations call a
-            scene OR a script."""
+            """Expand parent containers → members. The hierarchy already
+            folded script targets into members_of, so checking it covers
+            both scenes and scripts uniformly. One-hop only."""
             out = set(refs)
             for eid in list(refs):
-                out |= container_to_members.get(eid, set())
-                if eid.startswith("script."):
+                out |= set(container_to_members.get(eid, frozenset()))
+                # Legacy fallback if container_to_members is empty
+                if not container_to_members and eid.startswith("script."):
                     out |= script_targets.get(eid, set())
             return out
 
@@ -489,17 +476,27 @@ async def ws_list(
         # External-schedule hint. We only surface it when the entity is
         # NOT already tied to an HA automation — otherwise it's the
         # user's own automation doing the work and the pill is wrong.
-        platform = platform_by_entity.get(eid) if isinstance(eid, str) else None
+        # v1.2: delegate the platform → vendor-label mapping to
+        # hierarchy.is_externally_managed so the list stays canonical.
         d["external_source"] = None
-        if (
-            platform is not None
-            and platform in _EXTERNAL_SCHEDULE_PLATFORMS
-        ):
+        if isinstance(eid, str) and hierarchy is not None:
             entity_refs = entity_to_automations.get(eid, [])
             if not entity_refs and not ins.conflicts_with:
-                d["external_source"] = _EXTERNAL_PLATFORM_LABEL.get(
-                    platform, platform
-                )
+                vendor = hierarchy.is_externally_managed(eid)
+                if vendor:
+                    d["external_source"] = vendor
+        elif isinstance(eid, str):
+            # Legacy path (no hierarchy available)
+            platform = platform_by_entity.get(eid)
+            if (
+                platform is not None
+                and platform in _EXTERNAL_SCHEDULE_PLATFORMS
+            ):
+                entity_refs = entity_to_automations.get(eid, [])
+                if not entity_refs and not ins.conflicts_with:
+                    d["external_source"] = _EXTERNAL_PLATFORM_LABEL.get(
+                        platform, platform
+                    )
         # Which existing automations reference any of this insight's
         # entities? De-dup'd list of aliases. Empty when none.
         referenced_in: list[str] = []
