@@ -518,25 +518,56 @@ async def ws_list(
         # user's own automation doing the work and the pill is wrong.
         # v1.2: delegate the platform → vendor-label mapping to
         # hierarchy.is_externally_managed so the list stays canonical.
+        #
+        # COHORT SAFETY: the pill is per-insight-row, but a cohort row
+        # represents multiple entities. If the rep is Tuya but a cohort
+        # member is from `ble_monitor` (different integration), the pill
+        # would falsely tag the BLE entity too. So we collect the
+        # vendor labels for every member and only surface the pill when
+        # they all agree. Mixed cohorts → no pill (the 🔌 integration
+        # tag still appears for the rep, that's all we can safely say).
         d["external_source"] = None
-        if isinstance(eid, str) and hierarchy is not None:
-            entity_refs = entity_to_automations.get(eid, [])
-            if not entity_refs and not ins.conflicts_with:
-                vendor = hierarchy.is_externally_managed(eid)
-                if vendor:
-                    d["external_source"] = vendor
-        elif isinstance(eid, str):
-            # Legacy path (no hierarchy available)
-            platform = platform_by_entity.get(eid)
-            if (
-                platform is not None
-                and platform in _EXTERNAL_SCHEDULE_PLATFORMS
-            ):
-                entity_refs = entity_to_automations.get(eid, [])
-                if not entity_refs and not ins.conflicts_with:
-                    d["external_source"] = _EXTERNAL_PLATFORM_LABEL.get(
-                        platform, platform
-                    )
+        if isinstance(eid, str):
+            cohort_member_ids: list[str] = []
+            cohort_fp = ins.fingerprint.get("_member_entities")
+            if isinstance(cohort_fp, (list, tuple)):
+                cohort_member_ids = [
+                    m for m in cohort_fp if isinstance(m, str) and "." in m
+                ]
+            entities_to_check = cohort_member_ids or [eid]
+            # Suppress the pill if ANY entity in the cohort already has
+            # an HA automation — same logic as before, applied across
+            # all members.
+            any_automated = bool(ins.conflicts_with) or any(
+                entity_to_automations.get(e) for e in entities_to_check
+            )
+            if not any_automated and hierarchy is not None:
+                vendors = {
+                    hierarchy.is_externally_managed(e)
+                    for e in entities_to_check
+                }
+                if len(vendors) == 1:
+                    vendor = next(iter(vendors))
+                    if vendor:
+                        d["external_source"] = vendor
+            elif not any_automated:
+                # Legacy hierarchy-less path. Same single-vendor rule.
+                vendors_legacy: set[str | None] = set()
+                for e in entities_to_check:
+                    platform = platform_by_entity.get(e)
+                    if (
+                        platform is not None
+                        and platform in _EXTERNAL_SCHEDULE_PLATFORMS
+                    ):
+                        vendors_legacy.add(
+                            _EXTERNAL_PLATFORM_LABEL.get(platform, platform)
+                        )
+                    else:
+                        vendors_legacy.add(None)
+                if len(vendors_legacy) == 1:
+                    vendor_legacy = next(iter(vendors_legacy))
+                    if vendor_legacy:
+                        d["external_source"] = vendor_legacy
         # Which existing automations reference any of this insight's
         # entities? De-dup'd list of aliases. Empty when none.
         referenced_in: list[str] = []
