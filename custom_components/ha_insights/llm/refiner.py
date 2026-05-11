@@ -36,12 +36,17 @@ _REFINE_PROMPT_TMPL = (
     "Refine this Home Assistant automation. Add a debounce, condition, or "
     "mode change as appropriate. Be terse — keep the YAML minimal.\n\n"
     "Budget discipline (CRITICAL):\n"
-    "- Keep the entire response under 250 tokens.\n"
-    "- If you cannot produce a complete valid YAML refinement within that\n"
-    "  budget, output exactly this single line and NOTHING ELSE:\n"
-    "    INSUFFICIENT_BUDGET\n"
-    "- Do NOT start emitting YAML you cannot finish. A truncated YAML is\n"
-    "  worse than admitting the budget is too tight.\n\n"
+    "- Output should be reasonably tight, but you MUST emit a complete\n"
+    "  valid YAML refinement that preserves every entity_id and every\n"
+    "  load-bearing field from the current automation.\n"
+    "- If your agent's max_output_tokens is so low that you cannot fit a\n"
+    "  complete YAML rewrite, output exactly this single line and NOTHING\n"
+    "  ELSE: INSUFFICIENT_BUDGET\n"
+    "- Do NOT start emitting YAML you cannot finish — truncated YAML is\n"
+    "  worse than admitting the budget is too tight.\n"
+    "- Do NOT emit INSUFFICIENT_BUDGET because you THINK 250 tokens is\n"
+    "  the limit. Trust your actual token budget; only bail out when\n"
+    "  there is genuinely no room for the rewrite.\n\n"
     "Otherwise, output exactly two sections (no markdown fences, no extra\n"
     "commentary):\n"
     "RATIONALE: <one short sentence>\n"
@@ -136,6 +141,68 @@ def _yaml_dump(payload: dict[str, Any]) -> str:
 _ENTITY_ID_FIELDS: frozenset[str] = frozenset(
     {"entity_id", "entity_ids"}
 )
+
+
+def _normalize_action_key_style(
+    original: dict[str, Any],
+    refined: dict[str, Any],
+) -> None:
+    """If the original used `action: light.turn_on` (newer key style)
+    in its action items but the refined uses `service: light.turn_on`
+    (or vice versa), rewrite the refined to match.
+
+    HA accepts both. The LLM flipping styles is cosmetic noise that
+    pollutes the diff modal and triggers false "look something
+    changed!" reads. Mutates `refined` in place.
+
+    No-op when the original had no action list, or all items already
+    use the same style as the original.
+    """
+    def _action_key_style(actions: Any) -> str | None:
+        """Return 'action' or 'service' based on the first item that
+        carries either key. None if no items match."""
+        if not isinstance(actions, list):
+            actions = [actions] if isinstance(actions, dict) else []
+        for item in actions:
+            if not isinstance(item, dict):
+                continue
+            if "action" in item:
+                return "action"
+            if "service" in item:
+                return "service"
+        return None
+
+    target_style = _action_key_style(original.get("action"))
+    if target_style is None:
+        return
+    other = "service" if target_style == "action" else "action"
+
+    def _rewrite(actions: Any) -> None:
+        items = actions if isinstance(actions, list) else (
+            [actions] if isinstance(actions, dict) else []
+        )
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            if other in item and target_style not in item:
+                item[target_style] = item.pop(other)
+            # Recurse into nested choose/parallel/repeat/if blocks
+            for nested_key in ("choose", "parallel", "default", "then", "else", "sequence"):
+                nested = item.get(nested_key)
+                if isinstance(nested, list):
+                    _rewrite(nested)
+                elif isinstance(nested, dict):
+                    _rewrite([nested])
+            # `choose` has its own list of `{conditions, sequence}` blocks
+            choose_blocks = item.get("choose")
+            if isinstance(choose_blocks, list):
+                for block in choose_blocks:
+                    if isinstance(block, dict):
+                        seq = block.get("sequence")
+                        if isinstance(seq, list):
+                            _rewrite(seq)
+
+    _rewrite(refined.get("action"))
 
 
 def _collect_entity_ids(
@@ -628,6 +695,35 @@ async def _refine_one_attempt(
             refined["description"] = rationale.strip()
         elif insight.payload.get("description"):
             refined["description"] = insight.payload["description"]
+
+    # Restore load-bearing fields the LLM tends to drop on refresh.
+    # `id` is the most critical: applying a refined automation without
+    # its id creates a DUPLICATE in automations.yaml instead of
+    # updating the original. The LLM has no reason to know this; just
+    # carry the value through. Same for any other top-level field the
+    # user had that the LLM didn't echo (mode, max, max_exceeded,
+    # initial_state, trace).
+    _PRESERVE_FIELDS = (
+        "id",
+        "mode",
+        "max",
+        "max_exceeded",
+        "initial_state",
+        "trace",
+        "variables",
+    )
+    for key in _PRESERVE_FIELDS:
+        if key not in refined and key in insight.payload:
+            refined[key] = insight.payload[key]
+
+    # Normalize action-key style to match the original. HA's automation
+    # YAML supports BOTH `action: light.turn_on` (newer, 2024+) and
+    # `service: light.turn_on` (legacy). LLMs flip between the two
+    # unpredictably; Rule 6 in the prompt asks them not to, but they
+    # often do anyway. Post-process: detect the original's style and
+    # apply it to every action step in the refined YAML. This is a
+    # surface-only rewrite — semantics unchanged.
+    _normalize_action_key_style(insight.payload, refined)
 
     allowed_entities: set[str] = set()
     _collect_entity_ids(insight.payload, allowed_entities)
