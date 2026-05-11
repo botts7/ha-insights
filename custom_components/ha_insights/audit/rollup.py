@@ -376,16 +376,26 @@ def _dow_observations(
         return []
     out: list[dict[str, Any]] = []
     # Zero-bucket detection — "never fires Sat/Sun"
+    #
+    # Note framing: these are INFORMATIONAL observations, not
+    # prescriptive ones. A trigger-based automation already gates
+    # firing on the trigger entity, so adding a day-of-week
+    # condition on the trigger entity itself is redundant. The LLM
+    # prompt downstream has a guardrail against this. We surface
+    # the pattern as context the LLM can use to understand the
+    # user's home rhythm, NOT as an instruction to add conditions.
     zero_days = [i for i in range(7) if buckets.get(i, 0) == 0]
     if 5 in zero_days and 6 in zero_days and total >= 30:
         out.append(
             {
                 "kind": "rollup_weekday_only",
                 "text": (
-                    f"{entity_id} has no recorded transitions on "
-                    "Saturday or Sunday over the last 90 days "
-                    f"({total} total weekday transitions). "
-                    "Trigger restricted to weekdays?"
+                    f"Note: {entity_id} only transitions on weekdays "
+                    "in the last 90 days — never Saturdays or Sundays "
+                    f"({total} weekday events). Informational context "
+                    "for understanding the home's rhythm; not "
+                    "necessarily a reason to add a weekday condition "
+                    "if the trigger already gates firing."
                 ),
                 "confidence": 0.85,
                 "metrics": {
@@ -393,6 +403,7 @@ def _dow_observations(
                     "weekday_transitions": total,
                     "weekend_transitions": 0,
                     "dimension": DIM_DOW,
+                    "context_only": True,
                 },
             }
         )
@@ -405,16 +416,19 @@ def _dow_observations(
                 {
                     "kind": "rollup_dow_dark_days",
                     "text": (
-                        f"{entity_id} has zero transitions on "
-                        f"{day_names} over 90 days ({total} total "
-                        "elsewhere). Conditional on day-of-week?"
+                        f"Note: {entity_id} never transitions on "
+                        f"{day_names} over 90 days ({total} events on "
+                        "other days). Informational only — adding a "
+                        "day-of-week condition is usually unnecessary "
+                        "when the trigger entity already gates firing."
                     ),
-                    "confidence": 0.7,
+                    "confidence": 0.6,
                     "metrics": {
                         "entity_id": entity_id,
                         "zero_days": [_DOW_NAMES[d] for d in zero_days],
                         "total": total,
                         "dimension": DIM_DOW,
+                        "context_only": True,
                     },
                 }
             )

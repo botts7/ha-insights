@@ -2496,14 +2496,52 @@ async def ws_audit_suggest(
 
     # Feedback is the deterministic observations rendered as plain
     # text bullets. Keep it tight — the LLM doesn't need flowery
-    # framing, just the facts.
+    # framing, just the facts. Guardrails follow the findings: real
+    # users (Dan, in the user-feedback that landed this fix) caught
+    # the LLM adding day-of-week conditions to trigger-based
+    # automations where the trigger already gates firing. That's
+    # noise, not improvement; the rules below tell the LLM to stop
+    # making that mistake.
     feedback_lines = ["Audit findings for this automation:"]
+    has_context_only = False
     for obs in observations:
         feedback_lines.append(f"- {obs.get('text', '').strip()}")
-    feedback_lines.append(
-        "\nSuggest concrete YAML edits that address each finding. "
-        "Preserve any structure not directly related to a finding."
+        if (obs.get("metrics") or {}).get("context_only"):
+            has_context_only = True
+    feedback_lines.extend(
+        [
+            "",
+            "Rules for your suggestion:",
+            "1. Findings labeled 'Note:' or with `context_only: true` "
+            "metrics are INFORMATIONAL ONLY — do not make YAML edits "
+            "in response to them. Use them only to understand the "
+            "home's rhythm.",
+            "2. Do not add `condition:` blocks restricting day-of-week, "
+            "time-of-day, or sun-state when the automation has a STATE "
+            "trigger on an entity. A state trigger only fires when the "
+            "entity changes — if the entity doesn't change on Wed, the "
+            "automation already won't run on Wed. Adding a redundant "
+            "condition just clutters the YAML.",
+            "3. Conditions are only valuable when they describe state "
+            "that is INDEPENDENT of the trigger (e.g. 'only fire if "
+            "someone is home', 'only fire if it's dark out'). Never "
+            "add a condition that duplicates information the trigger "
+            "already enforces.",
+            "4. If the only actionable findings are entities being "
+            "`unavailable` / missing from the registry, the right fix "
+            "is to point them out — DON'T silently swap them for "
+            "guessed replacements.",
+            "5. Preserve any structure unrelated to a finding. Don't "
+            "rewrite working YAML for stylistic preferences.",
+            "",
+            "Output the refined YAML and rationale.",
+        ]
     )
+    if has_context_only:
+        feedback_lines.insert(
+            1,
+            "(One or more findings below are CONTEXT-ONLY — see rule 1.)",
+        )
     feedback = "\n".join(feedback_lines)
 
     blocked = _resolve_blocked_entities(hass, get_blocked_entities)
