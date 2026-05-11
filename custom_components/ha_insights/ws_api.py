@@ -1954,6 +1954,25 @@ def ws_dev_inject_event(
 # ---------------------------------------------------------------------------
 
 
+def _attempt_to_dict(attempt: Any) -> dict[str, Any]:
+    """Serialize an AttemptAudit (frozen dataclass with no to_dict())
+    into a JSON-safe dict. Both ws_refine_automation and
+    ws_audit_suggest previously called .to_dict() which doesn't
+    exist on the AttemptAudit class — masked until audit_suggest
+    actually fired and tripped it.
+    """
+    from dataclasses import asdict, is_dataclass
+
+    if is_dataclass(attempt) and not isinstance(attempt, type):
+        return asdict(attempt)
+    return {
+        "chosen_agent_id": getattr(attempt, "chosen_agent_id", None),
+        "bytes_sent": getattr(attempt, "bytes_sent", 0),
+        "bytes_received": getattr(attempt, "bytes_received", 0),
+        "success": getattr(attempt, "success", False),
+    }
+
+
 def _sanitize_yaml_safe(value: Any) -> Any:
     """Round-trip a value through JSON so PyYAML's safe_dump can
     represent it.
@@ -2201,7 +2220,7 @@ async def ws_refine_automation(
             "chosen_agent_id": result.chosen_agent_id,
             "conversation_id": result.conversation_id,
             "attempts": (
-                [a.to_dict() for a in result.attempts]
+                [_attempt_to_dict(a) for a in result.attempts]
                 if result.attempts else []
             ),
         },
@@ -2348,12 +2367,28 @@ async def ws_audit_suggest(
     cache_key = compute_cache_key(raw, observation_kinds)
     cached = cache_get(cache_key)
     if isinstance(cached, CachedSuggestion):
+        try:
+            import yaml as _yaml
+
+            cached_original = _yaml.safe_dump(
+                raw, sort_keys=False, default_flow_style=False
+            )
+            cached_refined = _yaml.safe_dump(
+                cached.refined_yaml,
+                sort_keys=False,
+                default_flow_style=False,
+            )
+        except Exception:  # noqa: BLE001
+            cached_original = str(raw)
+            cached_refined = str(cached.refined_yaml)
         connection.send_result(
             msg["id"],
             {
                 "automation_id": automation_id,
                 "alias": raw.get("alias"),
                 "refined_config": cached.refined_yaml,
+                "original_yaml": cached_original,
+                "refined_yaml": cached_refined,
                 "rationale": cached.rationale,
                 "diff_summary": cached.diff_summary,
                 "cached": True,
@@ -2436,12 +2471,32 @@ async def ws_audit_suggest(
         store, result.attempts, insight_id=virtual_insight.id, redactor=redactor
     )
 
+    # Render both sides as proper YAML so the side-by-side diff
+    # is readable. JSON looks like garbage in a YAML context;
+    # the user expects what they'd see in HA's automation editor.
+    try:
+        import yaml as _yaml
+
+        original_yaml_str = _yaml.safe_dump(
+            raw, sort_keys=False, default_flow_style=False
+        )
+        refined_yaml_str = _yaml.safe_dump(
+            result.refined_payload,
+            sort_keys=False,
+            default_flow_style=False,
+        )
+    except Exception:  # noqa: BLE001
+        original_yaml_str = str(raw)
+        refined_yaml_str = str(result.refined_payload)
+
     connection.send_result(
         msg["id"],
         {
             "automation_id": automation_id,
             "alias": raw.get("alias"),
             "refined_config": result.refined_payload,
+            "original_yaml": original_yaml_str,
+            "refined_yaml": refined_yaml_str,
             "rationale": result.rationale,
             "diff_summary": result.diff_summary,
             "cached": False,
@@ -2450,7 +2505,7 @@ async def ws_audit_suggest(
             "chosen_agent_id": result.chosen_agent_id,
             "conversation_id": result.conversation_id,
             "attempts": (
-                [a.to_dict() for a in result.attempts]
+                [_attempt_to_dict(a) for a in result.attempts]
                 if result.attempts else []
             ),
         },
