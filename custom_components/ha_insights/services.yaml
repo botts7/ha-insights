@@ -32,3 +32,13 @@ backfill:
           max: 30
           step: 1
           mode: slider
+
+reload_ui:
+  name: Reload UI bundle
+  description: >
+    Re-register the HA Insights sidebar panel with a fresh cache-bust
+    query string so a freshly-deployed ha-insights-panel.js / ha-insights-
+    card.js is picked up without an HA restart. Workflow: copy the new
+    bundle into /config/www/, call this service, then hard-refresh the
+    browser. The "🔄 Reload UI" button in the panel header calls this
+    same service.

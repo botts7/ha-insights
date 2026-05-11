@@ -463,9 +463,22 @@ def _async_register_services(hass: HomeAssistant) -> None:
                 summary["lookback_days"],
             )
 
+    async def _reload_ui(call: ServiceCall) -> None:
+        """Re-register the sidebar panel with a fresh cache-bust query
+        string so deployed bundle changes land without an HA restart.
+
+        Workflow: deploy new ha-insights-panel.js to /config/www/, call
+        this service (or click the "🔄 Reload UI" panel button), then
+        hard-refresh the browser. The browser sees a new module_url
+        (different ?v=...) and skips its cache.
+        """
+        await _async_register_panel(hass)
+        _LOGGER.info("HA Insights panel re-registered (cache-bust refreshed)")
+
     hass.services.async_register(DOMAIN, "purge_observations", _purge_observations)
     hass.services.async_register(DOMAIN, "scan_now", _scan_now)
     hass.services.async_register(DOMAIN, "backfill", _backfill)
+    hass.services.async_register(DOMAIN, "reload_ui", _reload_ui)
 
 
 async def _async_register_panel(hass: HomeAssistant) -> None:
@@ -476,48 +489,68 @@ async def _async_register_panel(hass: HomeAssistant) -> None:
     just registers the URL path + sidebar metadata.
 
     The module_url is bumped with a cache-buster based on the panel JS
-    file's mtime (falls back to startup time). HA's static handler serves
-    /local/* with a 31-day Cache-Control, so without a fresh query string
-    the browser can hold a stale build for weeks. Bumping on every HA
-    setup makes "deploy new panel.js + restart HA" a clean update path.
+    file's mtime + size (mtime alone has second-precision collisions on
+    fast deploys). HA's static handler serves /local/* with a 31-day
+    Cache-Control, so without a fresh query string the browser can hold
+    a stale build for weeks.
+
+    CRITICAL: we ALWAYS `async_remove_panel` first so a fresh URL is
+    re-registered. The previous version caught the "already registered"
+    ValueError and swallowed it, which meant the URL was frozen at the
+    first-ever startup mtime — config-entry reloads couldn't refresh the
+    cache-buster, and only a full HA restart would let the browser see
+    a new bundle. That was the user-reported "had to restart HA + disable
+    cache" symptom.
 
     `os.path.getmtime` is sync I/O so it must run via the executor —
     HA's blocking-call detector flags every event-loop stat() as a
     warning otherwise. (v1.0 review #11.)
     """
-    from homeassistant.components.frontend import async_register_built_in_panel
+    from homeassistant.components.frontend import (
+        async_register_built_in_panel,
+        async_remove_panel,
+    )
 
     panel_path = hass.config.path("www/ha-insights-panel.js")
 
-    def _read_mtime() -> int:
+    def _read_signature() -> str:
+        """Composite signature: mtime + size. Size catches edits that
+        happen within a 1-second mtime window, which fast `npm run build
+        && cp` cycles produce on local dev."""
         try:
-            return int(os.path.getmtime(panel_path))
+            st = os.stat(panel_path)
+            return f"{int(st.st_mtime)}-{st.st_size}"
         except OSError:
-            return int(time.time())
+            return str(int(time.time()))
 
-    cache_bust = await hass.async_add_executor_job(_read_mtime)
+    cache_bust = await hass.async_add_executor_job(_read_signature)
 
+    # Always unregister + re-register so the URL refreshes every time.
+    # `async_remove_panel` is idempotent — no-op if nothing's registered.
     try:
-        async_register_built_in_panel(
-            hass,
-            component_name="custom",
-            sidebar_title="Insights",
-            sidebar_icon="mdi:chart-arc",
-            frontend_url_path=_PANEL_URL_PATH,
-            config={
-                "_panel_custom": {
-                    "name": "ha-insights-panel",
-                    "embed_iframe": False,
-                    "trust_external": False,
-                    "module_url": f"/local/ha-insights-panel.js?v={cache_bust}",
-                },
+        async_remove_panel(hass, _PANEL_URL_PATH)
+    except Exception:  # noqa: BLE001 — defensive; never block setup over this
+        _LOGGER.debug("async_remove_panel raised (likely not yet registered)")
+
+    async_register_built_in_panel(
+        hass,
+        component_name="custom",
+        sidebar_title="Insights",
+        sidebar_icon="mdi:chart-arc",
+        frontend_url_path=_PANEL_URL_PATH,
+        config={
+            "_panel_custom": {
+                "name": "ha-insights-panel",
+                "embed_iframe": False,
+                "trust_external": False,
+                "module_url": f"/local/ha-insights-panel.js?v={cache_bust}",
             },
-            require_admin=False,
-        )
-    except ValueError:
-        # Already registered — we use a flag to avoid this but the API is
-        # idempotent-by-error; swallow so duplicate setup doesn't crash.
-        _LOGGER.debug("HA Insights panel already registered")
+        },
+        require_admin=False,
+    )
+    _LOGGER.debug(
+        "Registered HA Insights panel with cache-bust v=%s", cache_bust
+    )
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
