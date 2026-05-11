@@ -1954,233 +1954,108 @@ def ws_dev_inject_event(
 # ---------------------------------------------------------------------------
 
 
-_REFINE_PRINCIPLES = """
-# Principles (read before suggesting any change)
-
-## 1. Minimal change is the default
-If the user's request does not point to a CLEAR, SAFE, ACTIONABLE fix,
-leave that part of the YAML alone. 'No change' is a valid response —
-return the original YAML with a rationale explaining what you
-considered and why you judged it not worth changing. Confidence in the
-user's existing setup beats your prior on what's idiomatic.
-
-## 2. Walk a regression check BEFORE editing
-For every change you're about to make, answer in your rationale:
-'What could go wrong with this edit? What edge case is the existing
-YAML handling that I might be removing?' Examples of edge cases the
-user may have deliberately encoded:
- - `for:` durations that prevent flicker on noisy sensors
- - `mode: single` / `max: N` / `max_exceeded:` that prevent queue
-   buildup or race conditions
- - `initial_state` that controls behavior at reboot
- - condition blocks guarding against state combinations you don't have
-   visibility into
- - template `entity_id:` lists computed at trigger time
- - explicit `service_data` / `target` shapes required by specific
-   platforms (Hue scenes, MQTT JSON modes, etc.)
- - notification side-effects (persistent_notification.create,
-   notify.* calls) that the user relies on
-If you can't explain why a field is safe to remove, KEEP IT.
-
-## 3. Preserve unknowns
-Custom services, weird-looking templates, oddly-named entities,
-comments embedded in `description:` — preserve verbatim unless a
-finding explicitly tells you they're broken. Reformat is NOT
-improvement.
-
-## 4. Trigger and structure are load-bearing
-Do not change `platform:`, `from:`, `to:`, `for:`, `attribute:`,
-`event_type:`, or `event_data:` unless a finding identifies a
-specific bug there. Same for `condition.condition`,
-`action[].service`, `action[].target` shape.
-
-## 5. Don't duplicate what the trigger already enforces
-A STATE trigger on entity X only fires when X changes. Adding a
-`weekday:` / `time:` / `sun:` condition that filters days the trigger
-entity is naturally silent on is redundant noise. Conditions are for
-state INDEPENDENT of the trigger (someone home, sun position when the
-trigger isn't sun-based, etc.).
-
-## 6. Never silently swap entities
-If a finding says an entity is `unavailable` or missing, the fix is to
-FLAG it in your rationale — never to guess a replacement entity_id and
-write it into the YAML. The user has to choose the substitute.
-
-## 7. Show your work in `rationale`
-For every change: name it, justify it against the findings, AND name
-one edge case you considered and ruled out. If no changes were
-warranted after the regression check, say so explicitly with the
-reasoning. Empty diff_summary with a clear 'no change' rationale is a
-valid and welcome outcome.
-
-Output the refined YAML and rationale.
-""".strip()
+# Compressed for tokens. ~120 tokens vs ~370 before. Each rule one line.
+_REFINE_PRINCIPLES = (
+    "RULES:\n"
+    "1. Default to no change. Empty diff_summary is a valid answer.\n"
+    "2. Before editing, name one edge case the change could break. "
+    "If unsure, KEEP the field.\n"
+    "3. Don't change platform/from/to/for/attribute/condition/"
+    "service/target shape unless a finding pinpoints it as buggy.\n"
+    "4. Don't add weekday/time/sun conditions when a state trigger "
+    "on the same entity already gates firing.\n"
+    "5. Unavailable entity? FLAG it, never guess a replacement.\n"
+    "6. Preserve mode:/max:/initial_state:/for:/templates/custom "
+    "services verbatim unless flagged.\n"
+    "7. Rationale: per change, name it + one edge case ruled out."
+)
 
 
-# Per-observation-kind hints. Each one tells the LLM how to handle
-# that SPECIFIC kind of finding — separate from the base principles
-# so behaviours can evolve per-finding without bloating the shared
-# prompt. Keys match the `kind` field in audit Observations.
+# Per-observation-kind one-line hints. Token-conscious — each is a
+# verb-led action the LLM applies for that finding type. Add new
+# kinds here; future hints SHOULD stay ≤ ~20 tokens each.
 _OBS_KIND_HINTS: dict[str, str] = {
-    # Buffer-level
     "long_on_duration": (
-        "Action: consider raising / adding a `for:` duration. Tight "
-        "scope — do not restructure triggers or conditions."
+        "→ raise/add `for:`. Don't touch triggers/conditions."
     ),
     "trigger_time_drift": (
-        "Action: shift the `at:` minute by the observed delta, "
-        "rounded to a sensible 5-minute boundary. Do not change "
-        "weekdays, conditions, or actions."
+        "→ shift `at:` by observed delta (5-min boundary). Nothing else."
     ),
     "entity_silent": (
-        "Action: FLAG the dead/unavailable entity in your rationale. "
-        "DO NOT guess a replacement entity_id — the user must choose "
-        "the substitute themselves. Leave the YAML unchanged unless "
-        "another finding warrants a change."
+        "→ FLAG in rationale. Never guess a replacement."
     ),
     "redundant_target": (
-        "Action: drop the listed member entries from the target's "
-        "entity_id list. The container target already covers them. "
-        "This is a tight mechanical edit — don't expand scope."
+        "→ drop the listed member entries. Mechanical, tight scope."
     ),
-    # Trace-derived
     "trace_dormant": (
-        "Action: surface 'this automation hasn't fired in N days' in "
-        "your rationale. A safe edit is to set `initial_state: false` "
-        "or recommend the user disable it. Do not rewrite logic — the "
-        "automation may simply not be needed anymore."
+        "→ FLAG; suggest user disable. Don't rewrite logic."
     ),
     "trace_condition_blocks": (
-        "Action: a condition is blocking most fires. Consider whether "
-        "the condition is too strict OR whether the trigger is too "
-        "broad. Suggest loosening the condition only when you can "
-        "explain WHY the blocked runs would have been intentional. "
-        "Don't drop the condition entirely without justification."
+        "→ loosen condition only if blocked runs were unintentional. "
+        "Else KEEP."
     ),
     "trace_action_errors": (
-        "Action: an action step is erroring. Point to it in the "
-        "rationale and suggest investigation. DO NOT rewrite the "
-        "action — you don't have the failing trace text, so you "
-        "can't safely guess the fix."
+        "→ FLAG the erroring step. Don't rewrite — no failing trace."
     ),
-    # Rollup (long-term, context-only)
-    "rollup_weekday_only": (
-        "Context only — do NOT add a `weekday:` condition. If the "
-        "automation has a state trigger on the same entity, the "
-        "trigger already gates firing on weekend days where the "
-        "entity is silent. See principle 5."
-    ),
-    "rollup_dow_dark_days": (
-        "Context only — do NOT add a `weekday:` or day-of-week "
-        "condition. Same logic as rollup_weekday_only."
-    ),
-    "rollup_month_start_spike": (
-        "Context only — informational about the user's rhythm. Do "
-        "NOT add a date-based condition unless the user has asked "
-        "for one."
-    ),
+    "rollup_weekday_only": "→ CONTEXT ONLY. Don't add weekday condition.",
+    "rollup_dow_dark_days": "→ CONTEXT ONLY. Don't add weekday condition.",
+    "rollup_month_start_spike": "→ CONTEXT ONLY. No date condition.",
     "rollup_seasonal_silence": (
-        "Context only — the automation may be seasonal. A reasonable "
-        "edit is to add a `month:` condition IF the trigger is "
-        "time-based or sun-based (not entity-state-based — that "
-        "already gates itself)."
+        "→ CONTEXT. Add `month:` cond ONLY if trigger is time/sun-based."
     ),
-    "has_recent_insights": (
-        "Context only — related detector findings exist for the "
-        "same entities. Skim them via the related_insight_ids "
-        "passed below for additional context; do not act on them "
-        "directly."
-    ),
+    "has_recent_insights": "→ CONTEXT. Related findings exist; don't act.",
 }
 
 
 def _build_audit_feedback(observations: list[dict[str, Any]]) -> str:
-    """Build the audit_suggest feedback string from observations.
-
-    Two-tier framing:
-      1. Findings list with per-finding hints (per-kind from
-         _OBS_KIND_HINTS) — tells the LLM what kind of edit is
-         appropriate for THIS specific finding type.
-      2. Shared principles — the regression-awareness checklist
-         applied across all findings.
-
-    If every finding is `context_only`, we add an explicit "consider
-    'no change' as the most likely correct answer" header so the LLM
-    doesn't feel pressure to find SOMETHING to edit.
+    """Token-tight feedback builder. Layout:
+        FINDINGS:
+        - text
+          <kind-hint>
+        ...
+        RULES: <compressed principles>
     """
-    lines = ["# Audit findings for this automation:"]
+    findings: list[str] = []
     has_context_only = False
     has_actionable = False
-    kinds_seen: set[str] = set()
     for obs in observations:
         kind = obs.get("kind") or ""
-        kinds_seen.add(kind)
         text = (obs.get("text") or "").strip()
         is_context = bool((obs.get("metrics") or {}).get("context_only"))
         if is_context:
             has_context_only = True
         else:
             has_actionable = True
-        lines.append(f"- {text}")
+        findings.append(f"- {text}")
         hint = _OBS_KIND_HINTS.get(kind)
         if hint:
-            lines.append(f"  → {hint}")
+            findings.append(f"  {hint}")
 
+    header = "FINDINGS:"
     if has_context_only and not has_actionable:
-        lines.insert(
-            1,
-            "⚠️ Every finding here is CONTEXT-ONLY. The most likely "
-            "correct response is `diff_summary: []` with a rationale "
-            "explaining that the automation is fine. Do not invent "
-            "changes to look productive.",
+        header = (
+            "ALL findings are CONTEXT-ONLY. Likely correct answer: "
+            "no change.\nFINDINGS:"
         )
-    elif has_context_only:
-        lines.insert(
-            1,
-            "(Mixed findings: some are CONTEXT-ONLY informational "
-            "context — do not edit on those. Per-finding hints "
-            "indicate which is which.)",
-        )
-
-    lines.extend(["", _REFINE_PRINCIPLES])
-    return "\n".join(lines)
+    return "\n".join([header, *findings, "", _REFINE_PRINCIPLES])
 
 
 def _wrap_user_feedback(
     user_feedback: str, *, conversation_turn: int = 0
 ) -> str:
-    """Wrap the user's typed ✏️ Refine feedback.
+    """Token-tight user-feedback wrap.
 
-    First turn: full principles preamble — the LLM has no prior
-    context. Subsequent turns (conversation_turn > 0): minimal
-    preamble — the LLM remembers the principles from turn 1 via
-    the conversation_id thread, and re-sending them wastes tokens
-    + bloats the prompt for big YAMLs.
+    Turn 0: USER request + RULES.
+    Turn N>0: USER request only. Conversation_id thread carries the
+    rules — re-sending them is wasted tokens on big YAMLs.
     """
-    user_text = (user_feedback or "").strip()
-    if not user_text:
-        user_text = (
-            "(No specific change requested — review the automation for "
-            "obvious bugs only and return 'no change' if nothing is "
-            "clearly wrong.)"
-        )
-    if conversation_turn > 0:
-        return (
-            "# Follow-up request from the user\n\n"
-            f"{user_text}\n\n"
-            "Same principles as turn 1 apply — execute the request "
-            "faithfully, minimal scope creep, regression-check before "
-            "editing, preserve unknowns."
-        )
-    return (
-        "# User request\n\n"
-        f"{user_text}\n\n"
-        "Bias toward executing this request as written. Do not add "
-        "unrelated changes. Apply the principles below as a safety "
-        "net — they are a check on YOUR edits, not an invitation to "
-        "ignore the user's ask.\n\n"
-        + _REFINE_PRINCIPLES
+    user_text = (user_feedback or "").strip() or (
+        "(No specific request — flag obvious bugs only; "
+        "return no-change if nothing is clearly wrong.)"
     )
+    if conversation_turn > 0:
+        return f"USER: {user_text}"
+    return f"USER: {user_text}\n\n{_REFINE_PRINCIPLES}"
 
 
 def _attempt_to_dict(attempt: Any) -> dict[str, Any]:
