@@ -78,6 +78,7 @@ def async_register(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_get_automation)
     websocket_api.async_register_command(hass, ws_refine_automation)
     websocket_api.async_register_command(hass, ws_apply_automation_refinement)
+    websocket_api.async_register_command(hass, ws_audit_suggest)
 
 
 def _get_store(
@@ -2216,5 +2217,206 @@ async def ws_apply_automation_refinement(
             "automation_id": automation_id,
             "applied": True,
             "url": f"/config/automation/edit/{automation_id}",
+        },
+    )
+
+
+# ---------------------------------------------------------------------------
+# AutomationAudit Phase C — LLM suggest for "report"-format audit insights
+# ---------------------------------------------------------------------------
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "home_insights/audit_suggest",
+        vol.Required("insight_id"): str,
+    }
+)
+@websocket_api.async_response
+async def ws_audit_suggest(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Run an audit insight through the LLM refine pipeline to get
+    concrete YAML edits. Only meaningful for audit insights whose
+    payload_format is "report" — automation-format insights already
+    have a deterministic refined YAML and ship with Apply directly.
+
+    Pipeline:
+      1. Load the audit insight from the store
+      2. Check the content-hash cache (skip LLM on hit)
+      3. Build a virtual Insight using the underlying automation YAML
+      4. Synthesize "feedback" text from the observations
+      5. Run through refine_insight (existing redactor + agent
+         failover + audit log)
+      6. Cache the result + return refined YAML / rationale / diff
+
+    Privacy: same Redactor and same audit log as ws_refine_automation.
+    No bespoke LLM path here — we reuse the proven pipeline.
+    """
+    from datetime import UTC, datetime as _dt
+
+    from .audit.cache import (
+        CachedSuggestion,
+        compute_cache_key,
+        get as cache_get,
+        put as cache_put,
+    )
+    from .config_flow import get_blocked_entities
+    from .insight import Insight, InsightKind
+    from .llm import RedactionMode, Redactor, refine_insight
+
+    insight_id = msg["insight_id"]
+    store = _get_store(hass)
+    if store is None:
+        connection.send_error(msg["id"], "not_set_up", "Store not initialized")
+        return
+    audit_insight = await store.get_insight(insight_id)
+    if audit_insight is None:
+        connection.send_error(
+            msg["id"], "not_found", f"No audit insight with id {insight_id}"
+        )
+        return
+    if audit_insight.detector != "automation_audit":
+        connection.send_error(
+            msg["id"],
+            "wrong_kind",
+            "audit_suggest only works on automation_audit insights",
+        )
+        return
+
+    payload = audit_insight.payload or {}
+    observations = payload.get("observations") or []
+    automation_id = payload.get("automation_id")
+    if not automation_id:
+        connection.send_error(
+            msg["id"], "incomplete", "Audit insight is missing automation_id"
+        )
+        return
+
+    # Load the current automation YAML from HA — the audit insight's
+    # payload may be stale by the time the user clicks.
+    raw = await hass.async_add_executor_job(
+        _find_automation_by_id, hass, automation_id
+    )
+    if raw is None:
+        connection.send_error(
+            msg["id"],
+            "not_found",
+            f"No automation with id/alias {automation_id!r}",
+        )
+        return
+
+    # Cache lookup: yaml + observation kinds. Order-insensitive.
+    observation_kinds = [o.get("kind", "") for o in observations]
+    cache_key = compute_cache_key(raw, observation_kinds)
+    cached = cache_get(cache_key)
+    if isinstance(cached, CachedSuggestion):
+        connection.send_result(
+            msg["id"],
+            {
+                "automation_id": automation_id,
+                "alias": raw.get("alias"),
+                "refined_config": cached.refined_yaml,
+                "rationale": cached.rationale,
+                "diff_summary": cached.diff_summary,
+                "cached": True,
+                "bytes_sent": 0,
+                "bytes_received": 0,
+            },
+        )
+        return
+
+    # Build the virtual insight + feedback text from observations.
+    virtual_fingerprint = {
+        "automation_id": automation_id,
+        "kind": "automation_audit_suggest",
+    }
+    virtual_insight = Insight(
+        id=Insight.compute_id(
+            InsightKind.AUTOMATION_PROPOSAL, virtual_fingerprint
+        ),
+        kind=InsightKind.AUTOMATION_PROPOSAL,
+        detector="user_audit",
+        area_id=None,
+        title=(
+            "Refine existing automation based on audit findings: "
+            f"{raw.get('alias') or automation_id}"
+        ),
+        confidence=1.0,
+        fingerprint=virtual_fingerprint,
+        payload=raw,
+        payload_format="automation",
+        created_at=_dt.now(tz=UTC),
+    )
+
+    # Feedback is the deterministic observations rendered as plain
+    # text bullets. Keep it tight — the LLM doesn't need flowery
+    # framing, just the facts.
+    feedback_lines = ["Audit findings for this automation:"]
+    for obs in observations:
+        feedback_lines.append(f"- {obs.get('text', '').strip()}")
+    feedback_lines.append(
+        "\nSuggest concrete YAML edits that address each finding. "
+        "Preserve any structure not directly related to a finding."
+    )
+    feedback = "\n".join(feedback_lines)
+
+    blocked = _resolve_blocked_entities(hass, get_blocked_entities)
+    redactor = Redactor(
+        store, mode=RedactionMode.AGGRESSIVE, blocked_entities=blocked
+    )
+    preferred = _resolve_preferred_agent_id(hass)
+
+    try:
+        result = await refine_insight(
+            hass,
+            agent_id=msg.get("agent_id"),
+            insight=virtual_insight,
+            redactor=redactor,
+            feedback=feedback,
+            preferred_agent_id=preferred,
+        )
+    except Exception as err:  # noqa: BLE001
+        connection.send_error(msg["id"], "refine_failed", str(err))
+        return
+
+    if not result.success or result.refined_payload is None:
+        connection.send_error(
+            msg["id"],
+            "refine_failed",
+            result.error or "LLM refinement returned no payload",
+        )
+        return
+
+    # Cache + audit log.
+    cache_put(
+        cache_key,
+        refined_yaml=result.refined_payload,
+        rationale=result.rationale,
+        diff_summary=result.diff_summary,
+    )
+    await _audit_attempts(
+        store, result.attempts, insight_id=virtual_insight.id, redactor=redactor
+    )
+
+    connection.send_result(
+        msg["id"],
+        {
+            "automation_id": automation_id,
+            "alias": raw.get("alias"),
+            "refined_config": result.refined_payload,
+            "rationale": result.rationale,
+            "diff_summary": result.diff_summary,
+            "cached": False,
+            "bytes_sent": result.bytes_sent,
+            "bytes_received": result.bytes_received,
+            "chosen_agent_id": result.chosen_agent_id,
+            "conversation_id": result.conversation_id,
+            "attempts": (
+                [a.to_dict() for a in result.attempts]
+                if result.attempts else []
+            ),
         },
     )
