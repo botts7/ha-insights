@@ -463,6 +463,63 @@ def _async_register_services(hass: HomeAssistant) -> None:
                 summary["lookback_days"],
             )
 
+    async def _run_audit_rollup(call: ServiceCall) -> None:
+        """Manual rollup trigger — materialize recorder aggregates for
+        the next stale batch of audit-target entities. Conservative
+        defaults: small batch (5), 20s per-entity timeout, 120s
+        per-batch budget, single-flight lock so concurrent calls
+        no-op. Use this to verify on a small slice before any
+        scheduled run.
+        """
+        from .audit.rollup import (
+            ROLLUP_BATCH_SMALL,
+            collect_audit_target_entities,
+            run_rollup_batch,
+        )
+        from .detectors import _load_existing_automations
+
+        autos = await _load_existing_automations(hass)
+        target_eids = collect_audit_target_entities(autos)
+        if not target_eids:
+            _LOGGER.info("audit rollup: no audit-target entities found, nothing to do")
+            return
+        batch_size = int(call.data.get("batch_size") or ROLLUP_BATCH_SMALL)
+        # Hard cap from outside — even if caller asks for 500, we
+        # cap at the per-run config knob to protect HA.
+        from .audit.rollup import ROLLUP_BATCH_PER_RUN
+        batch_size = min(batch_size, ROLLUP_BATCH_PER_RUN)
+
+        from .config_flow import get_blocked_entities
+
+        for entry_id, entry_data in hass.data.get(DOMAIN, {}).items():
+            if not isinstance(entry_data, dict) or "store" not in entry_data:
+                continue
+            entry = hass.config_entries.async_get_entry(entry_id)
+            blocked = (
+                get_blocked_entities(entry) if entry else frozenset()
+            )
+            store_obj = entry_data["store"]
+            summary = await run_rollup_batch(
+                hass,
+                store_obj,
+                target_entity_ids=target_eids,
+                blocked_entities=blocked,
+                batch_size=batch_size,
+            )
+            _LOGGER.info(
+                "audit rollup: processed=%d errors=%d timed_out=%d "
+                "budget_exceeded=%s next_due=%d duration=%ss "
+                "skipped_inflight=%s",
+                summary.get("entities_processed", 0),
+                summary.get("errors", 0),
+                len(summary.get("timed_out_entities", []) or []),
+                summary.get("budget_exceeded", False),
+                summary.get("next_due_count", 0),
+                summary.get("batch_duration_sec", 0),
+                summary.get("skipped_inflight", False),
+            )
+            break  # one entry's store is shared; don't double-run
+
     async def _reload_ui(call: ServiceCall) -> None:
         """Re-register the sidebar panel with a fresh cache-bust query
         string so deployed bundle changes land without an HA restart.
@@ -479,6 +536,7 @@ def _async_register_services(hass: HomeAssistant) -> None:
     hass.services.async_register(DOMAIN, "scan_now", _scan_now)
     hass.services.async_register(DOMAIN, "backfill", _backfill)
     hass.services.async_register(DOMAIN, "reload_ui", _reload_ui)
+    hass.services.async_register(DOMAIN, "run_audit_rollup", _run_audit_rollup)
 
 
 async def _async_register_panel(hass: HomeAssistant) -> None:

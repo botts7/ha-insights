@@ -104,6 +104,7 @@ def build_audit_packet(
     recent_insights: list["Insight"] | None = None,
     blocked_entities: frozenset[str] = frozenset(),
     trace_aggregates: Any | None = None,
+    rollup_by_entity: dict[str, dict[str, dict[int, int]]] | None = None,
     now: datetime | None = None,
 ) -> AuditPacket:
     """Build an AuditPacket for one automation. Pure function.
@@ -205,6 +206,28 @@ def build_audit_packet(
                     metrics=obs_dict.get("metrics", {}),
                 )
             )
+
+    # ---- Long-term rollup observations (Phase A2) ----
+    # Pre-fetched from the audit_rollups cache by the detector
+    # (cheap SELECT, no recorder query). Skipped entirely when no
+    # rollup exists yet — first-scan installs get only short-term
+    # findings until the rollup scheduler catches up.
+    if rollup_by_entity:
+        from .rollup import observations_from_rollups
+
+        for eid in sorted(all_entities):
+            entity_rollups = rollup_by_entity.get(eid)
+            if not entity_rollups:
+                continue
+            for obs_dict in observations_from_rollups(eid, entity_rollups):
+                observations.append(
+                    Observation(
+                        kind=obs_dict["kind"],
+                        text=obs_dict["text"],
+                        confidence=obs_dict["confidence"],
+                        metrics=obs_dict.get("metrics", {}),
+                    )
+                )
 
     # ---- Join: any recent insights touching these entities ----
     related_ids: list[str] = []

@@ -95,6 +95,12 @@ class AutomationAuditDetector(Detector):
                 if isinstance(result, TraceAggregates):
                     trace_map[key] = result
 
+        # Pre-fetch rollup data for every entity we'll touch. Cheap
+        # SELECT against the audit_rollups table. Empty dict per
+        # entity if no rollup has been materialized yet (first-scan
+        # installs degrade gracefully — short-term observations only).
+        rollup_by_entity = await self._load_rollups(ctx, audit_targets)
+
         # Build packets + emit insights. Pure / fast per automation.
         now = datetime.now(tz=UTC)
         insights: list[Insight] = []
@@ -110,12 +116,55 @@ class AutomationAuditDetector(Detector):
                 trace_aggregates=trace_map.get(
                     auto.get("id") or auto.get("alias") or ""
                 ),
+                rollup_by_entity=rollup_by_entity,
                 now=now,
             )
             if not packet.observations:
                 continue
             insights.append(self._build_insight(packet, now=now))
         return insights
+
+    async def _load_rollups(
+        self,
+        ctx: DetectorContext,
+        audit_targets: list[dict[str, Any]],
+    ) -> dict[str, dict[str, dict[int, int]]]:
+        """Pull every audit-target entity's rollup buckets in one
+        pass. Returns {} when no store is available — packet then
+        skips rollup observations entirely."""
+        try:
+            from ..apply.conflict_scanner import _as_list, _extract_target_entities
+            from ..const import DOMAIN
+
+            store = None
+            for entry_data in ctx.hass.data.get(DOMAIN, {}).values():
+                if isinstance(entry_data, dict) and "store" in entry_data:
+                    store = entry_data["store"]
+                    break
+            if store is None:
+                return {}
+
+            eids: set[str] = set()
+            for auto in audit_targets:
+                eids.update(_extract_target_entities(auto.get("action")))
+                for trig in _as_list(auto.get("trigger")):
+                    if not isinstance(trig, dict):
+                        continue
+                    tid = trig.get("entity_id")
+                    if isinstance(tid, str):
+                        eids.add(tid)
+                    elif isinstance(tid, list):
+                        eids.update(e for e in tid if isinstance(e, str))
+
+            out: dict[str, dict[str, dict[int, int]]] = {}
+            for eid in eids:
+                rollups = await store.get_rollups_for_entity(eid)
+                if rollups:
+                    out[eid] = rollups
+            return out
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.debug("audit: rollup lookup failed: %s", err)
+            return {}
 
     def _select_audit_targets(
         self,

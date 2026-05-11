@@ -42,3 +42,26 @@ reload_ui:
     bundle into /config/www/, call this service, then hard-refresh the
     browser. The "🔄 Reload UI" button in the panel header calls this
     same service.
+
+run_audit_rollup:
+  name: Run audit rollup (small batch)
+  description: >
+    Materialize day-of-week / day-of-month / month-of-year aggregates
+    for the next stale batch of audit-target entities, off the scan
+    loop. Single-flight protected (concurrent calls no-op), per-entity
+    timeout 20s, batch budget 120s. Default batch size 5 — safe to
+    run on any install. Re-run to roll up the next batch; results
+    persist in the audit_rollups SQLite table for 7 days.
+  fields:
+    batch_size:
+      name: Batch size
+      description: >
+        How many entities to roll up this run. Default 5 (small-test);
+        capped at 50 even when a larger value is provided.
+      example: 5
+      selector:
+        number:
+          min: 1
+          max: 50
+          step: 1
+          mode: slider

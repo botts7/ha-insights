@@ -625,3 +625,113 @@ class InsightStore:
             secrets.choice(string.ascii_lowercase + string.digits) for _ in range(6)
         )
         return f"{domain}.entity_{suffix}"
+
+    # --- AuditRollups (v1.1 schema v2) ---
+    #
+    # Three dimensions per entity: dow (day-of-week, 0-6), dom
+    # (day-of-month, 1-31), moy (month-of-year, 1-12). A "rollup row"
+    # is one (entity_id, dimension, bucket, transitions) tuple. The
+    # rollup job (audit/rollup.py) computes all 24+31+12 = 67 buckets
+    # per entity from the HA recorder in one pass and upserts them
+    # atomically. Audit packet builder reads via get_rollups_for_entity.
+
+    async def upsert_rollups(
+        self,
+        entity_id: str,
+        rows: list[tuple[str, int, int]],
+        window_days: int,
+        computed_at_ts: float,
+    ) -> None:
+        """Replace all rollup rows for `entity_id` with `rows`.
+
+        rows: list of (dimension, bucket, transitions) tuples.
+
+        We DELETE-then-INSERT in one transaction so a partial failure
+        leaves the entity's rollup either fully old or fully new —
+        never half-migrated. Saves us a per-row UPSERT that older
+        sqlite versions don't support uniformly.
+        """
+        await self._c.execute(
+            "DELETE FROM audit_rollups WHERE entity_id = ?", (entity_id,)
+        )
+        if rows:
+            await self._c.executemany(
+                """
+                INSERT INTO audit_rollups (
+                    entity_id, dimension, bucket, transitions,
+                    window_days, computed_at
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    (entity_id, dim, bucket, count, window_days, computed_at_ts)
+                    for (dim, bucket, count) in rows
+                ],
+            )
+        await self._c.commit()
+
+    async def get_rollups_for_entity(
+        self, entity_id: str
+    ) -> dict[str, dict[int, int]]:
+        """Return a {dimension: {bucket: transitions}} dict for an
+        entity. Empty dict if no rollup exists yet."""
+        out: dict[str, dict[int, int]] = {}
+        async with self._c.execute(
+            "SELECT dimension, bucket, transitions FROM audit_rollups "
+            "WHERE entity_id = ?",
+            (entity_id,),
+        ) as cur:
+            async for row in cur:
+                dim = row["dimension"]
+                out.setdefault(dim, {})[int(row["bucket"])] = int(
+                    row["transitions"]
+                )
+        return out
+
+    async def list_stale_rollup_entities(
+        self,
+        all_entity_ids: list[str],
+        stale_after_ts: float,
+    ) -> list[str]:
+        """Return entity_ids that EITHER have no rollup OR were last
+        computed before `stale_after_ts`. Used by the rollup scheduler
+        to pick the next batch.
+
+        We feed in the full set of audit-target entities so an entity
+        that was rolled up once but then dropped out of any
+        automation's targets doesn't keep being refreshed forever.
+        """
+        if not all_entity_ids:
+            return []
+        # SQLite has a parameter limit (default 999) — chunk if huge
+        rolled_up_at: dict[str, float] = {}
+        async with self._c.execute(
+            "SELECT entity_id, MAX(computed_at) AS ts FROM audit_rollups "
+            "GROUP BY entity_id"
+        ) as cur:
+            async for row in cur:
+                rolled_up_at[row["entity_id"]] = float(row["ts"])
+        stale: list[str] = []
+        for eid in all_entity_ids:
+            last = rolled_up_at.get(eid)
+            if last is None or last < stale_after_ts:
+                stale.append(eid)
+        return stale
+
+    async def prune_rollups_for_entities(
+        self, keep_entity_ids: list[str]
+    ) -> int:
+        """Drop rollups for entities NOT in `keep_entity_ids`. Useful
+        when the user removes an automation — its target entities may
+        no longer need long-term aggregates. Returns the count of
+        rows deleted."""
+        if not keep_entity_ids:
+            cur = await self._c.execute("DELETE FROM audit_rollups")
+            await self._c.commit()
+            return cur.rowcount
+        placeholders = ",".join(["?"] * len(keep_entity_ids))
+        cur = await self._c.execute(
+            f"DELETE FROM audit_rollups WHERE entity_id NOT IN ({placeholders})",
+            keep_entity_ids,
+        )
+        await self._c.commit()
+        return cur.rowcount
