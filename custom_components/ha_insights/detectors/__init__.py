@@ -609,8 +609,17 @@ def _dedup_grouped_insights(
     Re-scans produce the same merged id (fingerprint includes the
     parent + sorted member list) so dedup is stable across runs.
     """
-    if not insights or not entity_dependencies:
+    if not insights:
         return insights
+    # NOTE: the `not entity_dependencies` short-circuit that used to live
+    # here was a bug. v1.2's hierarchy migration left entity_dependencies
+    # sparse / empty on many installs (the relationships moved to the
+    # central EntityHierarchy), and the guard made the dedup helper
+    # return raw lists. Result: the 51-entity "home NVR" orphan-device
+    # cohort never merged. The hierarchy.find_common_parent path + the
+    # heuristic same-domain co-fingerprint fallback both work fine
+    # without entity_dependencies — its only consumer is the legacy
+    # _find_common_container path, which already tolerates an empty map.
 
     from collections import defaultdict as _defaultdict
 

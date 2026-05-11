@@ -647,13 +647,23 @@ def _display_time_dedup(
 
     from collections import defaultdict as _dd
 
-    buckets: dict[tuple[str, str, str], list[dict]] = _dd(list)
+    # Bucket key includes the entity's DOMAIN so mixed-domain buckets
+    # never form. Previously, an NVR offline for 8 days produced 35
+    # binary_sensors + 11 switches with identical normalized titles
+    # ("<E> hasn't reported in 8d. …") — they all bucketed together,
+    # but _resolve_cohort_label rejected the bucket because mixed
+    # domains can't share an entity-id prefix. So all 51 fell
+    # through unmerged. Splitting by domain at the bucket level
+    # means binary_sensor.home_nvr_* groups cleanly into one cohort
+    # and switch.home_nvr_* into another.
+    buckets: dict[tuple[str, str, str, str], list[dict]] = _dd(list)
     for d in enriched:
         eids = d.get("_eids_for_dedup") or []
         sig = (
             d.get("kind") or "",
             d.get("detector") or "",
             _normalize_title_for_dedup(d.get("title") or "", eids),
+            d.get("domain") or "",
         )
         buckets[sig].append(d)
 
