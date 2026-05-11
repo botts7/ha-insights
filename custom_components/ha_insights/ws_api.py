@@ -2519,8 +2519,23 @@ async def ws_audit_suggest(
         return
 
     payload = audit_insight.payload or {}
-    observations = payload.get("observations") or []
-    automation_id = payload.get("automation_id")
+    # Deterministic-fix audits (payload_format="automation") put the
+    # refined YAML at the top level and stash audit metadata under
+    # `_audit`. Report-format audits put automation_id + observations
+    # at the top level. Handle BOTH shapes so the LLM-refine-further
+    # flow off a 📋 Preview works.
+    audit_meta = (
+        payload.get("_audit") if isinstance(payload.get("_audit"), dict) else {}
+    )
+    automation_id = (
+        payload.get("automation_id")
+        or audit_meta.get("automation_id")
+    )
+    observations = (
+        payload.get("observations")
+        or audit_meta.get("observations")
+        or []
+    )
     if not automation_id:
         connection.send_error(
             msg["id"], "incomplete", "Audit insight is missing automation_id"
