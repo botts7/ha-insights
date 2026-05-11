@@ -19,6 +19,7 @@ import logging
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
+from ..audit.fixes import apply_deterministic_fixes
 from ..audit.packet import (
     AuditPacket,
     Observation,
@@ -211,28 +212,60 @@ class AutomationAuditDetector(Detector):
             "observation_kinds": sorted({o.kind for o in packet.observations}),
         }
 
-        payload = {
-            "automation_id": packet.automation_id,
-            "automation_alias": packet.automation_alias,
-            "observations": [
-                {
-                    "kind": o.kind,
-                    "text": o.text,
-                    "confidence": o.confidence,
-                    "metrics": o.metrics,
-                }
-                for o in packet.observations
-            ],
-            "related_insight_ids": list(packet.related_insight_ids),
-            "target_entities": sorted(packet.target_entities),
-            "trigger_entities": sorted(packet.trigger_entities),
-            "advice": (
-                "These are observations about your existing automation. "
-                "Click '🤖 Suggest improvements' to ask the LLM for "
-                "specific edits, or use the findings to refine the "
-                "automation manually in HA's automation editor."
-            ),
-        }
+        observation_payload = [
+            {
+                "kind": o.kind,
+                "text": o.text,
+                "confidence": o.confidence,
+                "metrics": o.metrics,
+            }
+            for o in packet.observations
+        ]
+
+        # Phase B.5: try to build a deterministic YAML edit covering
+        # one or more observations. When at least one fix lands, the
+        # insight becomes apply-able WITHOUT calling the LLM. Saves
+        # tokens for the cases that genuinely need them.
+        refined_yaml, fix_summaries = apply_deterministic_fixes(
+            packet.automation_yaml, observation_payload
+        )
+
+        if refined_yaml is not None and fix_summaries:
+            # Build a full Apply-able automation payload. The card's
+            # existing apply path validates + writes via the
+            # AutomationWriter.
+            payload: dict[str, Any] = {
+                **refined_yaml,
+                # Audit-specific metadata trails along on the payload
+                # so the card can render the observations + fix list
+                # alongside the YAML preview.
+                "_audit": {
+                    "automation_id": packet.automation_id,
+                    "automation_alias": packet.automation_alias,
+                    "observations": observation_payload,
+                    "fix_summaries": fix_summaries,
+                    "related_insight_ids": list(packet.related_insight_ids),
+                    "deterministic": True,
+                },
+            }
+            payload_format = "automation"
+        else:
+            # No deterministic fix; ship as report. Phase C's
+            # 🤖 Suggest button will offer LLM refinement.
+            payload = {
+                "automation_id": packet.automation_id,
+                "automation_alias": packet.automation_alias,
+                "observations": observation_payload,
+                "related_insight_ids": list(packet.related_insight_ids),
+                "target_entities": sorted(packet.target_entities),
+                "trigger_entities": sorted(packet.trigger_entities),
+                "advice": (
+                    "Observations only — no deterministic fix applies. "
+                    "Use '🤖 Suggest improvements' to ask the LLM for "
+                    "specific edits, or refine the automation manually."
+                ),
+            }
+            payload_format = "report"
 
         return Insight(
             id=Insight.compute_id(InsightKind.AUTOMATION_IMPROVEMENT, fingerprint),
@@ -243,8 +276,6 @@ class AutomationAuditDetector(Detector):
             confidence=confidence,
             fingerprint=fingerprint,
             payload=payload,
-            # payload_format=report → no auto-apply button; we add a
-            # dedicated 🤖 Suggest improvements button in Phase C/E.
-            payload_format="report",
+            payload_format=payload_format,
             created_at=now,
         )
