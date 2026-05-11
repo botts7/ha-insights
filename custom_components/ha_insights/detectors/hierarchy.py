@@ -112,6 +112,13 @@ class EntityHierarchy:
     entities_with_label: dict[str, frozenset[str]] = field(default_factory=dict)
     entities_from_integration: dict[str, frozenset[str]] = field(default_factory=dict)
 
+    # Display-name lookups (id → friendly label, registry-defined).
+    # Used by the panel chip UI ("Kitchen" vs raw "kitchen_3a8b...") and
+    # group_by:area / group_by:floor section headers. Defaults to {} so
+    # callers fall back to the id when no friendly name exists.
+    area_name_by_id: dict[str, str] = field(default_factory=dict)
+    floor_name_by_id: dict[str, str] = field(default_factory=dict)
+
     # Logical grouping via state attributes + script targets
     members_of: dict[str, frozenset[str]] = field(default_factory=dict)
     """Strict parent → children, asymmetric. group/scene/group_light/script."""
@@ -264,14 +271,29 @@ def build_hierarchy(hass: HomeAssistant) -> EntityHierarchy:
     except Exception:  # pragma: no cover — defensive
         pass
 
-    # Build area → floor mapping (HA 2024+).
+    # Build area → floor mapping (HA 2024+) and area_id → name lookup.
     area_to_floor: dict[str, str | None] = {}
+    area_name_by_id: dict[str, str] = {}
     try:
         from homeassistant.helpers import area_registry as ar
 
         area_reg = ar.async_get(hass)
         for area in area_reg.areas.values():
             area_to_floor[area.id] = getattr(area, "floor_id", None)
+            if area.name:
+                area_name_by_id[area.id] = area.name
+    except Exception:  # pragma: no cover
+        pass
+
+    # Floor id → name (HA 2024+, optional).
+    floor_name_by_id: dict[str, str] = {}
+    try:
+        from homeassistant.helpers import floor_registry as fr
+
+        floor_reg = fr.async_get(hass)
+        for floor in floor_reg.floors.values():
+            if floor.name:
+                floor_name_by_id[floor.floor_id] = floor.name
     except Exception:  # pragma: no cover
         pass
 
@@ -415,4 +437,6 @@ def build_hierarchy(hass: HomeAssistant) -> EntityHierarchy:
         derived_of={k: frozenset(v) for k, v in derived_of.items()},
         source_of=source_of,
         siblings_of={k: frozenset(v) for k, v in siblings.items()},
+        area_name_by_id=area_name_by_id,
+        floor_name_by_id=floor_name_by_id,
     )

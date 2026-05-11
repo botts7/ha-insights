@@ -473,6 +473,26 @@ async def ws_list(
         else:
             d["domain"] = None
             d["device_class"] = None
+        # v1.2 Phase 5: surface the three new filter axes — area, floor,
+        # integration. IDs power filter equality; names power the chip
+        # labels + group_by section headers. All five may be None when
+        # the insight isn't pinned to a single entity (cohorts) or the
+        # entity isn't in any area/floor.
+        d["area_id"] = None
+        d["area_name"] = None
+        d["floor_id"] = None
+        d["floor_name"] = None
+        d["integration"] = None
+        if isinstance(eid, str) and hierarchy is not None:
+            aid = hierarchy.area_of.get(eid)
+            d["area_id"] = aid
+            if aid:
+                d["area_name"] = hierarchy.area_name_by_id.get(aid) or aid
+            fid = hierarchy.floor_of.get(eid)
+            d["floor_id"] = fid
+            if fid:
+                d["floor_name"] = hierarchy.floor_name_by_id.get(fid) or fid
+            d["integration"] = hierarchy.integration_of.get(eid)
         # External-schedule hint. We only surface it when the entity is
         # NOT already tied to an HA automation — otherwise it's the
         # user's own automation doing the work and the pill is wrong.
