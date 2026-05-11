@@ -464,6 +464,25 @@ async def run_all_detectors(
                 swept,
             )
 
+    # Sync audit findings to HA's Repairs registry so users see them
+    # in Settings → Repairs alongside HA's standard issue notifications.
+    # Idempotent — no-op when nothing changed. Errors are swallowed
+    # inside sync_audit_issues so a Repairs failure can't break a scan.
+    try:
+        from ..audit.repairs import sync_audit_issues
+
+        current_insights = await store.list_insights(
+            include_dismissed=False,
+            include_applied=False,
+            include_snoozed=False,
+        )
+        sync_audit_issues(
+            hass,
+            [i for i in current_insights if i.detector == "automation_audit"],
+        )
+    except Exception as err:  # noqa: BLE001
+        _LOGGER.debug("audit Repairs sync skipped: %s", err)
+
     if return_summary:
         return {
             "added": added,

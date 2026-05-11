@@ -968,9 +968,22 @@ async def ws_purge_all(
         return
     events_dropped = buffer_.clear()
     counts = await store.purge_observations()
+    # Sweep our Repairs entries too — a purge means the underlying
+    # insights are gone, so the Repairs surface shouldn't keep
+    # showing stale findings.
+    try:
+        from .audit.repairs import clear_all_audit_issues
+
+        cleared_repairs = clear_all_audit_issues(hass)
+    except Exception:  # noqa: BLE001
+        cleared_repairs = 0
     connection.send_result(
         msg["id"],
-        {"events_dropped": events_dropped, **counts},
+        {
+            "events_dropped": events_dropped,
+            "repairs_cleared": cleared_repairs,
+            **counts,
+        },
     )
 
 
@@ -1029,6 +1042,14 @@ async def ws_dismiss(
             msg["id"], "not_found", f"No insight {msg['insight_id']!r}"
         )
         return
+    # Mirror the dismiss into HA's Repairs registry if this insight
+    # had a Repairs entry. Idempotent — no-op when no entry exists.
+    try:
+        from .audit.repairs import clear_issue_for_insight
+
+        clear_issue_for_insight(hass, msg["insight_id"])
+    except Exception:  # noqa: BLE001
+        pass
     connection.send_result(msg["id"])
 
 

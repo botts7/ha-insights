@@ -71,5 +71,11 @@
         }
       }
     }
+  },
+  "issues": {
+    "audit_finding": {
+      "title": "HA Insights: review automation '{automation}'",
+      "description": "An audit of your existing automation found something worth checking:\n\n{summary}\n\nOpen the HA Insights panel for the full diff and one-click apply / dismiss flow."
+    }
   }
 }

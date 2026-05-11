@@ -991,4 +991,14 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
         async_remove_panel(hass, _PANEL_URL_PATH)
         hass.data[DOMAIN][_PANEL_REGISTERED_FLAG] = False
+        # Sweep our Repairs entries on full unload so they don't
+        # linger in HA after the integration is removed. On reload
+        # (vs uninstall) the next scan re-emits whatever still
+        # applies. Idempotent.
+        try:
+            from .audit.repairs import clear_all_audit_issues
+
+            clear_all_audit_issues(hass)
+        except Exception:  # noqa: BLE001
+            pass
     return True
