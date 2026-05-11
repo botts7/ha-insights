@@ -1954,6 +1954,29 @@ def ws_dev_inject_event(
 # ---------------------------------------------------------------------------
 
 
+def _sanitize_yaml_safe(value: Any) -> Any:
+    """Round-trip a value through JSON so PyYAML's safe_dump can
+    represent it.
+
+    HA's automation registry surfaces raw_config dicts that often
+    include non-JSON Python types: `Template` objects, `Selector`,
+    `mappingproxy`, OrderedDict subclasses, custom enums. PyYAML's
+    `safe_dump` raises `RepresenterError("cannot represent an
+    object", repr_of_value)` on those.
+
+    Casting to JSON first with `default=str` collapses every unknown
+    type to its string repr — losing fidelity for Templates (which
+    become their `{{ … }}` source string) but keeping the prompt
+    serializable, which is what the LLM pipeline needs.
+    """
+    import json as _json
+
+    try:
+        return _json.loads(_json.dumps(value, default=str))
+    except Exception:  # noqa: BLE001 — defensive last resort
+        return value
+
+
 def _find_automation_by_id(
     hass: HomeAssistant, automation_id: str
 ) -> dict | None:
@@ -2029,6 +2052,10 @@ async def ws_get_automation(
             f"No automation with id/alias {automation_id!r}",
         )
         return
+    # Sanitize the raw_config dict so PyYAML.safe_dump can serialize
+    # it downstream (HA injects Template / Selector / etc. objects
+    # PyYAML can't represent → RepresenterError otherwise).
+    raw = _sanitize_yaml_safe(raw)
     try:
         import yaml as _yaml
 
@@ -2081,6 +2108,10 @@ async def ws_refine_automation(
             f"No automation with id/alias {automation_id!r}",
         )
         return
+    # Sanitize the raw_config dict so PyYAML.safe_dump can serialize
+    # it downstream (HA injects Template / Selector / etc. objects
+    # PyYAML can't represent → RepresenterError otherwise).
+    raw = _sanitize_yaml_safe(raw)
 
     virtual_fingerprint = {
         "automation_id": automation_id,
@@ -2307,6 +2338,10 @@ async def ws_audit_suggest(
             f"No automation with id/alias {automation_id!r}",
         )
         return
+    # Sanitize the raw_config dict so PyYAML.safe_dump can serialize
+    # it downstream (HA injects Template / Selector / etc. objects
+    # PyYAML can't represent → RepresenterError otherwise).
+    raw = _sanitize_yaml_safe(raw)
 
     # Cache lookup: yaml + observation kinds. Order-insensitive.
     observation_kinds = [o.get("kind", "") for o in observations]

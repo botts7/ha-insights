@@ -388,6 +388,149 @@ async def _run_initial_backfill(
 
 
 @callback
+async def _notify_audit_failure(
+    hass: HomeAssistant,
+    automation_id: str,
+    alias: str | None,
+    err: Exception,
+) -> None:
+    """Show a persistent_notification in HA's UI so a batch failure
+    doesn't disappear into the logs. Users see the toast + can
+    dismiss it from Settings → Notifications.
+    """
+    label = alias or automation_id
+    await hass.services.async_call(
+        "persistent_notification",
+        "create",
+        {
+            "title": "HA Insights: audit suggest failed",
+            "message": (
+                f"Failed while suggesting improvements for "
+                f"`{label}` (id {automation_id}): {err}.\n\n"
+                "The batch stopped at this row. Other audit "
+                "insights still apply via their Apply buttons. "
+                "Click 🤖 Suggest on individual rows to retry one "
+                "at a time."
+            ),
+            "notification_id": f"ha_insights_audit_fail_{automation_id}",
+        },
+        blocking=False,
+    )
+
+
+async def _emit_batch_summary_insight(
+    store,
+    *,
+    processed: int,
+    picked: int,
+    spend_usd: float,
+    cap_usd: float,
+    budget_applies: bool,
+) -> None:
+    """Emit one summary insight after each audit_suggest_batch run
+    so users see results in the panel, not just logs. Stable id —
+    re-runs replace the previous summary instead of stacking."""
+    from datetime import UTC, datetime as _dt
+
+    from .insight import Insight, InsightKind
+
+    fp = {"kind": "audit_suggest_batch_summary"}
+    budget_note = (
+        f"month-to-date ${spend_usd:.2f} of ${cap_usd:.2f}"
+        if budget_applies
+        else "local agent (no budget tracking)"
+    )
+    title = (
+        f"Audit Suggest batch: ran {processed} of {picked} pending "
+        f"audit insights · {budget_note}."
+    )
+    if processed == 0 and picked > 0:
+        title = (
+            f"Audit Suggest batch: 0 of {picked} processed — "
+            "check Notifications for the first error."
+        )
+    await store.add_insight(
+        Insight(
+            id=Insight.compute_id(InsightKind.ANOMALY, fp),
+            kind=InsightKind.ANOMALY,
+            detector="audit_suggest_batch",
+            area_id=None,
+            title=title,
+            confidence=0.5,
+            fingerprint=fp,
+            payload={
+                "processed": processed,
+                "picked": picked,
+                "spend_usd": spend_usd,
+                "cap_usd": cap_usd,
+                "budget_applies": budget_applies,
+                "advice": (
+                    "This insight summarizes the most recent "
+                    "audit_suggest_batch run. Dismiss it when you've "
+                    "reviewed the suggestions. Re-running the service "
+                    "replaces this insight with the new result."
+                ),
+            },
+            payload_format="report",
+            created_at=_dt.now(tz=UTC),
+        )
+    )
+
+
+async def _emit_rollup_summary_insight(
+    store, summary: dict,
+) -> None:
+    """Same pattern as the suggest-batch summary: one stable-id
+    insight that updates on each rollup run."""
+    from datetime import UTC, datetime as _dt
+
+    from .insight import Insight, InsightKind
+
+    fp = {"kind": "audit_rollup_summary"}
+    processed = summary.get("entities_processed", 0)
+    errors = summary.get("errors", 0)
+    timed_out = len(summary.get("timed_out_entities") or [])
+    next_due = summary.get("next_due_count", 0)
+    duration = summary.get("batch_duration_sec", 0)
+    skipped = summary.get("skipped_inflight", False)
+    if skipped:
+        title = (
+            "Audit rollup skipped — a previous batch is still in "
+            "flight. Try again in a moment."
+        )
+    else:
+        parts = [f"Audit rollup: processed {processed} entities in {duration}s"]
+        if errors:
+            parts.append(f"{errors} error{'s' if errors != 1 else ''}")
+        if timed_out:
+            parts.append(f"{timed_out} timed out")
+        if next_due > 0:
+            parts.append(f"{next_due} more pending — run again to continue")
+        else:
+            parts.append("all target entities fresh")
+        title = "; ".join(parts) + "."
+    await store.add_insight(
+        Insight(
+            id=Insight.compute_id(InsightKind.ANOMALY, fp),
+            kind=InsightKind.ANOMALY,
+            detector="audit_rollup",
+            area_id=None,
+            title=title,
+            confidence=0.4,
+            fingerprint=fp,
+            payload={
+                **summary,
+                "advice": (
+                    "This summary updates each time you run "
+                    "ha_insights.run_audit_rollup. Dismiss when done."
+                ),
+            },
+            payload_format="report",
+            created_at=_dt.now(tz=UTC),
+        )
+    )
+
+
 def _async_register_services(hass: HomeAssistant) -> None:
     """Register the user-callable services."""
 
@@ -518,6 +661,7 @@ def _async_register_services(hass: HomeAssistant) -> None:
                 summary.get("batch_duration_sec", 0),
                 summary.get("skipped_inflight", False),
             )
+            await _emit_rollup_summary_insight(store_obj, summary)
             break  # one entry's store is shared; don't double-run
 
     async def _audit_suggest_batch(call: ServiceCall) -> None:
@@ -624,6 +768,12 @@ def _async_register_services(hass: HomeAssistant) -> None:
                 )
                 if raw is None:
                     continue
+                # Same sanitizer the WS endpoint uses — PyYAML can't
+                # represent HA's Template / Selector / OrderedDict
+                # injections. Flatten through JSON first.
+                from .ws_api import _sanitize_yaml_safe
+
+                raw = _sanitize_yaml_safe(raw)
                 obs_kinds = [o.get("kind", "") for o in observations]
                 cache_key = compute_cache_key(raw, obs_kinds)
                 if cache_get(cache_key) is not None:
@@ -671,6 +821,11 @@ def _async_register_services(hass: HomeAssistant) -> None:
                         automation_id,
                         err,
                     )
+                    # Surface in HA UI so the user doesn't have to
+                    # dig through logs.
+                    await _notify_audit_failure(
+                        hass, automation_id, raw.get("alias"), err
+                    )
                     break  # Stop on first failure — backoff
                 if result.success and result.refined_payload is not None:
                     cache_put(
@@ -689,6 +844,16 @@ def _async_register_services(hass: HomeAssistant) -> None:
                 len(picked),
                 spend.estimated_usd,
                 cap_usd,
+            )
+            # Surface the batch outcome ON THE PANEL as a single
+            # insight so users see what happened without checking logs.
+            await _emit_batch_summary_insight(
+                store_obj,
+                processed=processed,
+                picked=len(picked),
+                spend_usd=spend.estimated_usd,
+                cap_usd=cap_usd,
+                budget_applies=budget_applies,
             )
             break  # only one entry's store needed
 
