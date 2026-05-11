@@ -115,9 +115,16 @@ class OrphanDeviceDetector(Detector):
         fingerprint = {
             "entity_id": entity_id,
             "kind": "orphan_device",
-            # Round last_seen to the day so re-scans on the same day produce
-            # the same insight id (idempotent).
-            "last_seen_day": last_seen.date().isoformat(),
+            # Use silence_days bucket (rounded count of days the entity
+            # has been silent) instead of last_seen.date() — same
+            # idempotency (re-scans on the same day produce the same
+            # bucket) AND lets the dedup helper merge entities that all
+            # went offline at the same time. Previously, two entities
+            # whose last_seen straddled midnight got DIFFERENT
+            # last_seen_day values, defeating the dedup and producing
+            # one insight per entity even when 33 entities on the same
+            # NVR all dropped together.
+            "silence_days_bucket": silence_days,
         }
 
         # Compose a notify-when-back-online automation. Apply-able for

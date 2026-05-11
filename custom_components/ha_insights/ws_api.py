@@ -254,6 +254,11 @@ async def ws_list(
     # registry once per insight. Empty dict if registry is unavailable —
     # the enrichment is purely additive; missing values just become null.
     device_class_by_entity: dict[str, str | None] = {}
+    # Also capture each entity's integration platform so we can surface
+    # "this is managed by an external integration's own schedule" — pet
+    # feeders, robot vacuums, smart fans, thermostat schedules, etc. all
+    # have device-side automations HA can't see or modify.
+    platform_by_entity: dict[str, str | None] = {}
     try:
         from homeassistant.helpers import entity_registry as er
 
@@ -262,8 +267,9 @@ async def ws_list(
             device_class_by_entity[ent_entry.entity_id] = (
                 ent_entry.device_class or ent_entry.original_device_class
             )
+            platform_by_entity[ent_entry.entity_id] = ent_entry.platform
     except Exception:  # noqa: BLE001
-        pass  # fall through with empty dict
+        pass  # fall through with empty dicts
 
     # Build entity → list-of-automation-names map so each insight can
     # surface "🤖 used in 3 automations" with the actual aliases. Reads
@@ -416,6 +422,54 @@ async def ws_list(
             out.append(entry)
         return out
 
+    # Platforms whose entities commonly carry DEVICE-SIDE automation
+    # logic that HA never sees: feeding schedules, vacuum schedules,
+    # smart switch timers configured in the vendor app, thermostat
+    # schedules pushed from the device's web UI, etc. If an insight's
+    # entity is from one of these AND has no HA automation reference,
+    # we tag it with external_source so the card can surface a
+    # "🏷️ managed externally" pill — the user knows we noticed the
+    # pattern but it's not something they should "automate in HA."
+    _EXTERNAL_SCHEDULE_PLATFORMS = frozenset(
+        {
+            "tuya",
+            "tuya_local",
+            "localtuya",
+            "smartlife",
+            "ewelink",
+            "ewelink_local",
+            "smartthinq",
+            "samsungtv_smart",
+            "roborock",
+            "xiaomi_vacuum",
+            "miio",
+            "midea_ac_lan",
+            "homematic",
+            "homematicip_local",
+            "tasmota_irhvac",
+            "shelly",
+            # Robot pet feeders / cat boxes / aquaponic systems / etc.
+            "petkit",
+            "feeder",
+        }
+    )
+    _EXTERNAL_PLATFORM_LABEL: dict[str, str] = {
+        "tuya": "Tuya app",
+        "tuya_local": "Tuya app",
+        "localtuya": "Tuya app",
+        "smartlife": "Smart Life app",
+        "ewelink": "eWeLink app",
+        "ewelink_local": "eWeLink app",
+        "smartthinq": "LG ThinQ app",
+        "roborock": "Roborock app",
+        "xiaomi_vacuum": "Mi Home app",
+        "miio": "Mi Home app",
+        "midea_ac_lan": "Midea app",
+        "homematic": "HomeMatic CCU",
+        "homematicip_local": "HomeMatic CCU",
+        "petkit": "PetKit app",
+    }
+
     enriched: list[dict[str, Any]] = []
     for ins in insights:
         d = ins.to_dict()
@@ -432,6 +486,20 @@ async def ws_list(
         else:
             d["domain"] = None
             d["device_class"] = None
+        # External-schedule hint. We only surface it when the entity is
+        # NOT already tied to an HA automation — otherwise it's the
+        # user's own automation doing the work and the pill is wrong.
+        platform = platform_by_entity.get(eid) if isinstance(eid, str) else None
+        d["external_source"] = None
+        if (
+            platform is not None
+            and platform in _EXTERNAL_SCHEDULE_PLATFORMS
+        ):
+            entity_refs = entity_to_automations.get(eid, [])
+            if not entity_refs and not ins.conflicts_with:
+                d["external_source"] = _EXTERNAL_PLATFORM_LABEL.get(
+                    platform, platform
+                )
         # Which existing automations reference any of this insight's
         # entities? De-dup'd list of aliases. Empty when none.
         referenced_in: list[str] = []
@@ -442,6 +510,15 @@ async def ws_list(
                     seen.add(label)
                     referenced_in.append(label)
         d["referenced_in_automations"] = referenced_in
+        # Surface cohort members so the card can show an expand toggle
+        # ("(+N similar entities)" → click to see the list).
+        cohort = ins.fingerprint.get("_member_entities")
+        d["cohort_members"] = (
+            list(cohort)
+            if isinstance(cohort, (list, tuple))
+            else []
+        )
+        d["cohort_label"] = ins.fingerprint.get("_grouped_under")
         # Structured automation links — both for `conflicts_with` (the
         # 🔁 strict-duplicate match) AND `referenced_in_automations`
         # (the 🤖 entity-context match). Card renders each as a

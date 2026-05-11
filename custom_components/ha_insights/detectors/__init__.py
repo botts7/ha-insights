@@ -361,7 +361,10 @@ async def run_all_detectors(
         # 7 garden lights all firing the same 17:34 streak — they
         # belong to one user routine, not seven.
         insights = _dedup_grouped_insights(
-            insights, entity_dependencies, container_to_members
+            insights,
+            entity_dependencies,
+            container_to_members,
+            device_id_by_entity,
         )
         for insight in insights:
             # Annotate (don't suppress) insights that match an existing
@@ -451,10 +454,40 @@ async def run_all_detectors(
 _MAX_GROUP_SIZE_FOR_SIBLING_FILTER = 6
 
 
+def _common_entity_prefix(entity_ids: list[str]) -> str | None:
+    """Longest common prefix across entity_ids (post-domain). Useful as a
+    friendly device label when N entities all share the same name root,
+    e.g. `binary_sensor.home_nvr_*` (33 entities) or
+    `switch.front_door_*` (3 entities). Returns None for prefixes < 4
+    chars (too generic to be useful) or when the input set spans
+    multiple domains.
+    """
+    if len(entity_ids) < 2:
+        return None
+    domains = {eid.split(".", 1)[0] for eid in entity_ids if "." in eid}
+    if len(domains) != 1:
+        return None
+    domain = next(iter(domains))
+    names = [eid.split(".", 1)[1] for eid in entity_ids if "." in eid]
+    if not names:
+        return None
+    prefix = names[0]
+    for n in names[1:]:
+        while prefix and not n.startswith(prefix):
+            prefix = prefix[:-1]
+        if not prefix:
+            return None
+    prefix = prefix.rstrip("_")
+    if len(prefix) < 4:
+        return None
+    return f"{domain}.{prefix}_*"
+
+
 def _find_common_container(
     entity_ids: list[str],
     entity_dependencies: dict[str, frozenset[str]],
     container_to_members: dict[str, frozenset[str]] | None = None,
+    device_id_by_entity: dict[str, str | None] | None = None,
 ) -> str | None:
     """Return a parent (scene, group, group_light) that contains every
     entity in entity_ids — or None if no single container covers them all.
@@ -476,6 +509,23 @@ def _find_common_container(
     """
     if len(entity_ids) < 2:
         return None
+
+    # Case 0: all inputs share the same HA `device_id`. Strongest signal
+    # — entities literally living on the same physical device, even
+    # when their fingerprints don't match a state-machine container
+    # (e.g., NVR with 33 binary_sensors silent at once, front door
+    # device with 3 mode switches). Use the longest common entity-id
+    # prefix as a human-readable hint instead of a UUID.
+    if device_id_by_entity:
+        device_ids = {device_id_by_entity.get(eid) for eid in entity_ids}
+        device_ids.discard(None)
+        if len(device_ids) == 1:
+            shared = next(iter(device_ids))
+            if shared:
+                prefix_label = _common_entity_prefix(entity_ids)
+                if prefix_label:
+                    return prefix_label
+                return f"device:{shared}"
 
     # Case 1: one input is the parent of the others. Use the strict
     # container_to_members map so we know it's a real parent (not a
@@ -512,6 +562,7 @@ def _dedup_grouped_insights(
     insights: list,
     entity_dependencies: dict[str, frozenset[str]],
     container_to_members: dict[str, frozenset[str]] | None = None,
+    device_id_by_entity: dict[str, str | None] | None = None,
 ) -> list:
     """Collapse insights that share a fingerprint (mod entity_id) AND
     whose entities live under the same group/scene container.
@@ -574,7 +625,10 @@ def _dedup_grouped_insights(
             continue
         # Primary path: discover a real shared container in the dep map.
         parent = _find_common_container(
-            eids, entity_dependencies, container_to_members
+            eids,
+            entity_dependencies,
+            container_to_members,
+            device_id_by_entity,
         )
         merge_label: str | None = None
         if parent is not None:
