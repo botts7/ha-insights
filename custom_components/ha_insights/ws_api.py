@@ -1954,8 +1954,8 @@ def ws_dev_inject_event(
 # ---------------------------------------------------------------------------
 
 
-# Compressed for tokens. ~120 tokens vs ~370 before. Each rule one line.
-_REFINE_PRINCIPLES = (
+# Concise variant — ~150 tokens, the default.
+_REFINE_PRINCIPLES_CONCISE = (
     "RULES:\n"
     "1. Default to no change. Empty diff_summary is a valid answer.\n"
     "2. Before editing, name one edge case the change could break. "
@@ -1969,6 +1969,85 @@ _REFINE_PRINCIPLES = (
     "services verbatim unless flagged.\n"
     "7. Rationale: per change, name it + one edge case ruled out."
 )
+
+# In-depth variant — ~600 tokens. Same rules with examples + a
+# requested reasoning protocol. Better for tricky automations.
+_REFINE_PRINCIPLES_INDEPTH = """RULES (think through each before responding):
+
+1. MINIMAL CHANGE IS DEFAULT. If no finding points to a CLEAR, SAFE
+   fix, return original YAML with rationale explaining what you
+   considered. Empty diff_summary with a no-change rationale is a
+   valid, welcome outcome. Confidence in the user's existing setup
+   beats your prior on what's idiomatic.
+
+2. REGRESSION CHECK BEFORE EVERY EDIT. For each proposed change,
+   answer in your rationale: "what edge case is the existing YAML
+   handling that this edit could break?" Examples to consider:
+    - `for:` durations preventing flicker on noisy sensors
+    - `mode: single` / `max:` / `max_exceeded:` preventing queue
+      buildup or race conditions
+    - `initial_state` controlling behaviour at reboot
+    - condition blocks guarding state combinations you can't see
+    - template `entity_id:` lists computed at trigger time
+    - explicit `service_data` / `target` shapes required by specific
+      platforms (Hue scenes, MQTT JSON modes, etc.)
+    - notification side-effects (persistent_notification.create,
+      notify.* calls) the user relies on
+   If you can't explain why a field is safe to remove, KEEP IT.
+
+3. PRESERVE UNKNOWNS. Custom services, weird-looking templates,
+   oddly-named entities, comments inside `description:` — preserve
+   verbatim. Reformat is NOT improvement.
+
+4. TRIGGER + STRUCTURE ARE LOAD-BEARING. Don't change `platform:`,
+   `from:`, `to:`, `for:`, `attribute:`, `event_type:`, `event_data:`,
+   `condition.condition`, `action[].service`, or `action[].target`
+   shape unless a finding explicitly identifies a specific bug there.
+
+5. DON'T DUPLICATE THE TRIGGER. A STATE trigger on entity X only
+   fires when X changes. Adding a `weekday:` / `time:` / `sun:`
+   condition that filters days X is naturally silent on is redundant
+   noise. Conditions are for state INDEPENDENT of the trigger
+   (someone home, sun position when not sun-triggered, etc.).
+
+6. NEVER SILENTLY SWAP ENTITIES. If a finding says an entity is
+   unavailable/missing, FLAG it in your rationale. Never guess a
+   replacement entity_id and write it into YAML.
+
+7. WALK YOUR REASONING IN `rationale`. For every change: name it,
+   justify it against the findings, AND explicitly name one edge
+   case you considered and ruled out. Reasoning quality > number
+   of changes."""
+
+# Backwards-compat alias. Most call sites use _REFINE_PRINCIPLES;
+# new resolver code below switches based on depth.
+_REFINE_PRINCIPLES = _REFINE_PRINCIPLES_CONCISE
+
+
+def _principles_for(depth: str) -> str:
+    """Return the principles block matching the configured depth."""
+    return (
+        _REFINE_PRINCIPLES_INDEPTH
+        if depth == "indepth"
+        else _REFINE_PRINCIPLES_CONCISE
+    )
+
+
+def _resolve_audit_depth(
+    hass: HomeAssistant, override: str | None = None
+) -> str:
+    """Resolve depth: per-call override > first entry's OptionsFlow >
+    'concise' default. Returns 'concise' or 'indepth'."""
+    if override in ("concise", "indepth"):
+        return override
+    try:
+        from .config_flow import get_audit_analysis_depth
+
+        for entry in hass.config_entries.async_entries(DOMAIN):
+            return get_audit_analysis_depth(entry)
+    except Exception:  # noqa: BLE001
+        pass
+    return "concise"
 
 
 # Per-observation-kind one-line hints. Token-conscious — each is a
@@ -2007,14 +2086,13 @@ _OBS_KIND_HINTS: dict[str, str] = {
 }
 
 
-def _build_audit_feedback(observations: list[dict[str, Any]]) -> str:
-    """Token-tight feedback builder. Layout:
-        FINDINGS:
-        - text
-          <kind-hint>
-        ...
-        RULES: <compressed principles>
-    """
+def _build_audit_feedback(
+    observations: list[dict[str, Any]],
+    *,
+    depth: str = "concise",
+) -> str:
+    """Audit feedback builder. `depth` chooses concise (~150 tok)
+    vs indepth (~600 tok) principles."""
     findings: list[str] = []
     has_context_only = False
     has_actionable = False
@@ -2037,17 +2115,20 @@ def _build_audit_feedback(observations: list[dict[str, Any]]) -> str:
             "ALL findings are CONTEXT-ONLY. Likely correct answer: "
             "no change.\nFINDINGS:"
         )
-    return "\n".join([header, *findings, "", _REFINE_PRINCIPLES])
+    return "\n".join([header, *findings, "", _principles_for(depth)])
 
 
 def _wrap_user_feedback(
-    user_feedback: str, *, conversation_turn: int = 0
+    user_feedback: str,
+    *,
+    conversation_turn: int = 0,
+    depth: str = "concise",
 ) -> str:
-    """Token-tight user-feedback wrap.
+    """User-feedback wrap.
 
-    Turn 0: USER request + RULES.
-    Turn N>0: USER request only. Conversation_id thread carries the
-    rules — re-sending them is wasted tokens on big YAMLs.
+    Turn 0: USER request + RULES (depth-aware).
+    Turn N>0: USER request only — conversation_id thread carries
+    the rules.
     """
     user_text = (user_feedback or "").strip() or (
         "(No specific request — flag obvious bugs only; "
@@ -2055,7 +2136,7 @@ def _wrap_user_feedback(
     )
     if conversation_turn > 0:
         return f"USER: {user_text}"
-    return f"USER: {user_text}\n\n{_REFINE_PRINCIPLES}"
+    return f"USER: {user_text}\n\n{_principles_for(depth)}"
 
 
 def _attempt_to_dict(attempt: Any) -> dict[str, Any]:
@@ -2277,6 +2358,8 @@ async def ws_get_automation(
         vol.Required("automation_id"): str,
         vol.Required("feedback"): str,
         vol.Optional("agent_id"): vol.Any(str, None),
+        vol.Optional("conversation_id"): vol.Any(str, None),
+        vol.Optional("analysis_depth"): vol.In(["concise", "indepth"]),
     }
 )
 @websocket_api.require_admin
@@ -2346,9 +2429,11 @@ async def ws_refine_automation(
     # First turn gets the full preamble; follow-ups within the same
     # conversation_id get a lighter touch since the LLM remembers
     # the principles from turn 1.
+    depth = _resolve_audit_depth(hass, msg.get("analysis_depth"))
     wrapped_feedback = _wrap_user_feedback(
         msg["feedback"],
         conversation_turn=1 if msg.get("conversation_id") else 0,
+        depth=depth,
     )
     try:
         result = await refine_insight(
@@ -2465,6 +2550,7 @@ async def ws_apply_automation_refinement(
     {
         vol.Required("type"): "home_insights/audit_suggest",
         vol.Required("insight_id"): str,
+        vol.Optional("analysis_depth"): vol.In(["concise", "indepth"]),
     }
 )
 @websocket_api.async_response
@@ -2609,7 +2695,8 @@ async def ws_audit_suggest(
     # Build via the use-case-aware helper. Per-observation-kind
     # hints + shared regression principles + dynamic "all
     # context-only" early-exit framing all live in one place.
-    feedback = _build_audit_feedback(observations)
+    depth = _resolve_audit_depth(hass, msg.get("analysis_depth"))
+    feedback = _build_audit_feedback(observations, depth=depth)
 
     blocked = _resolve_blocked_entities(hass, get_blocked_entities)
     redactor = Redactor(

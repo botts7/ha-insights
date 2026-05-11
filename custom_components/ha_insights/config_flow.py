@@ -92,6 +92,20 @@ def get_active_mode(entry: ConfigEntry) -> str:
     )
 
 
+def get_audit_analysis_depth(entry: ConfigEntry) -> str:
+    """Verbosity of the audit_suggest / refine LLM prompts.
+
+    "concise" (default) — ~150 token rules, minimal framing. Cheap.
+    "indepth" — ~600 token rules with examples, requested reasoning
+        steps, deeper regression checks. Better answers on tricky
+        automations; ~4× more input tokens per call.
+
+    Returned as a plain string so callers can compare directly.
+    """
+    raw = entry.options.get("audit_analysis_depth", "concise")
+    return raw if raw in ("concise", "indepth") else "concise"
+
+
 def get_audit_monthly_budget_usd(entry: ConfigEntry) -> float:
     """USD/month cap for the AutomationAudit background suggest
     batch. Default $5, range 0..50. Setting to 0 effectively
