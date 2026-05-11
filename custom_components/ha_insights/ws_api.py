@@ -2551,6 +2551,16 @@ async def ws_apply_automation_refinement(
         vol.Required("type"): "home_insights/audit_suggest",
         vol.Required("insight_id"): str,
         vol.Optional("analysis_depth"): vol.In(["concise", "indepth"]),
+        # Two-stage refinement: when present, use this dict as the
+        # starting YAML instead of the original automation. Pattern:
+        # user clicks 📋 Preview on a deterministic audit, then asks
+        # the LLM to further-refine the algorithm's output. The card
+        # passes the algorithm's refined config here. Server prompt
+        # frames it as "here is the YAML AFTER our deterministic
+        # fixes; further-refine based on the observations + the
+        # user's extra feedback."
+        vol.Optional("seed_config"): dict,
+        vol.Optional("extra_feedback"): str,
     }
 )
 @websocket_api.async_response
@@ -2633,16 +2643,40 @@ async def ws_audit_suggest(
     # PyYAML can't represent → RepresenterError otherwise).
     raw = _sanitize_yaml_safe(raw)
 
-    # Cache lookup: yaml + observation kinds. Order-insensitive.
+    # Two-stage refinement: if the caller passed a seed_config (the
+    # algorithm's already-refined YAML from a 📋 Preview), use THAT
+    # as the starting point. The LLM further-refines it instead of
+    # re-doing what the deterministic stage already handled. Saves
+    # tokens, prevents the LLM from undoing safe edits.
+    seed_config_raw = msg.get("seed_config")
+    use_seed = isinstance(seed_config_raw, dict) and seed_config_raw
+    if use_seed:
+        starting_payload = _sanitize_yaml_safe(seed_config_raw)
+        # Strip out any audit metadata the card may have left in
+        # before sending — we don't want it inside the YAML sent to
+        # the LLM.
+        if isinstance(starting_payload, dict):
+            starting_payload.pop("_audit", None)
+    else:
+        starting_payload = raw
+
+    # Cache lookup. Cache key uses the EFFECTIVE starting payload so
+    # a two-stage call with a different seed gets its own cache slot.
     observation_kinds = [o.get("kind", "") for o in observations]
-    cache_key = compute_cache_key(raw, observation_kinds)
+    cache_extras = list(observation_kinds)
+    extra_feedback = msg.get("extra_feedback") or ""
+    if extra_feedback:
+        cache_extras.append(f"extra_fb:{extra_feedback[:200]}")
+    if use_seed:
+        cache_extras.append("stage:two")
+    cache_key = compute_cache_key(starting_payload, cache_extras)
     cached = cache_get(cache_key)
     if isinstance(cached, CachedSuggestion):
         try:
             import yaml as _yaml
 
             cached_original = _yaml.safe_dump(
-                raw, sort_keys=False, default_flow_style=False
+                starting_payload, sort_keys=False, default_flow_style=False
             )
             cached_refined = _yaml.safe_dump(
                 cached.refined_yaml,
@@ -2650,19 +2684,22 @@ async def ws_audit_suggest(
                 default_flow_style=False,
             )
         except Exception:  # noqa: BLE001
-            cached_original = str(raw)
+            cached_original = str(starting_payload)
             cached_refined = str(cached.refined_yaml)
         connection.send_result(
             msg["id"],
             {
                 "automation_id": automation_id,
-                "alias": raw.get("alias"),
+                "alias": starting_payload.get("alias")
+                if isinstance(starting_payload, dict)
+                else None,
                 "refined_config": cached.refined_yaml,
                 "original_yaml": cached_original,
                 "refined_yaml": cached_refined,
                 "rationale": cached.rationale,
                 "diff_summary": cached.diff_summary,
                 "cached": True,
+                "stage_two": use_seed,
                 "bytes_sent": 0,
                 "bytes_received": 0,
             },
@@ -2683,11 +2720,11 @@ async def ws_audit_suggest(
         area_id=None,
         title=(
             "Refine existing automation based on audit findings: "
-            f"{raw.get('alias') or automation_id}"
+            f"{(starting_payload or {}).get('alias') if isinstance(starting_payload, dict) else automation_id}"
         ),
         confidence=1.0,
         fingerprint=virtual_fingerprint,
-        payload=raw,
+        payload=starting_payload,
         payload_format="automation",
         created_at=_dt.now(tz=UTC),
     )
@@ -2697,6 +2734,22 @@ async def ws_audit_suggest(
     # context-only" early-exit framing all live in one place.
     depth = _resolve_audit_depth(hass, msg.get("analysis_depth"))
     feedback = _build_audit_feedback(observations, depth=depth)
+    if use_seed:
+        # Frame the second-stage call: the LLM is iterating on the
+        # algorithm's output, not starting from scratch.
+        feedback = (
+            "STAGE TWO: The YAML below has already been processed by "
+            "our deterministic fixer (member-target dedup, time-drift "
+            "shift, auto-off `for:` raise). Build on those edits — "
+            "do not undo them. Focus on the audit observations that "
+            "DIDN'T have a deterministic fix.\n\n"
+            + feedback
+        )
+    if extra_feedback.strip():
+        feedback += (
+            "\n\nUSER ADDITIONAL REQUEST:\n"
+            + extra_feedback.strip()
+        )
 
     blocked = _resolve_blocked_entities(hass, get_blocked_entities)
     redactor = Redactor(
@@ -2739,11 +2792,15 @@ async def ws_audit_suggest(
     # Render both sides as proper YAML so the side-by-side diff
     # is readable. JSON looks like garbage in a YAML context;
     # the user expects what they'd see in HA's automation editor.
+    # For stage-two calls the "original" is the algorithm's output
+    # (starting_payload), not the raw automation — that's what the
+    # user is comparing the LLM's further-refinement against.
+    diff_baseline = starting_payload if use_seed else raw
     try:
         import yaml as _yaml
 
         original_yaml_str = _yaml.safe_dump(
-            raw, sort_keys=False, default_flow_style=False
+            diff_baseline, sort_keys=False, default_flow_style=False
         )
         refined_yaml_str = _yaml.safe_dump(
             result.refined_payload,
@@ -2751,7 +2808,7 @@ async def ws_audit_suggest(
             default_flow_style=False,
         )
     except Exception:  # noqa: BLE001
-        original_yaml_str = str(raw)
+        original_yaml_str = str(diff_baseline)
         refined_yaml_str = str(result.refined_payload)
 
     connection.send_result(

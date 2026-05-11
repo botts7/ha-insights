@@ -289,6 +289,20 @@ class AutomationAuditDetector(Detector):
         )
 
         if refined_yaml is not None and fix_summaries:
+            # Pre-serialize the refined YAML so the card's 📋 Preview
+            # button can render a proper YAML diff without doing its
+            # own JSON.stringify (which produces hard-to-read prose).
+            try:
+                import yaml as _yaml
+
+                refined_yaml_str = _yaml.safe_dump(
+                    refined_yaml,
+                    sort_keys=False,
+                    default_flow_style=False,
+                )
+            except Exception:  # noqa: BLE001
+                refined_yaml_str = ""
+
             # Build a full Apply-able automation payload. The card's
             # existing apply path validates + writes via the
             # AutomationWriter.
@@ -304,6 +318,7 @@ class AutomationAuditDetector(Detector):
                     "fix_summaries": fix_summaries,
                     "related_insight_ids": list(packet.related_insight_ids),
                     "deterministic": True,
+                    "refined_yaml_text": refined_yaml_str,
                 },
             }
             payload_format = "automation"
