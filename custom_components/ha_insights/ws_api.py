@@ -373,9 +373,13 @@ async def ws_list(
                 pass
         return out
 
-    # Build alias → id lookup so we can hand the card structured links
-    # (id powers the deep-link URL; alias powers the visible label).
+    # Two-way lookup so the same builder handles alias-labels and id-labels.
+    # `find_conflicts` returns the automation's *id* (preferred) into
+    # conflicts_with; `referenced_in_automations` (built above) records
+    # the *alias*. Without id_to_alias, the conflicts_with path lost
+    # its URL → 🔁 pill silently fell back to /config/automation/dashboard.
     alias_to_id: dict[str, str] = {}
+    id_to_alias: dict[str, str] = {}
     try:
         from .detectors import _load_existing_automations as _lea
 
@@ -383,26 +387,42 @@ async def ws_list(
         for auto in autos_for_ids:
             aid = auto.get("id")
             alias = auto.get("alias")
-            if isinstance(alias, str) and isinstance(aid, str):
-                alias_to_id[alias] = aid
-            elif isinstance(aid, str):
-                # Fallback: id-as-label installs (older YAML)
-                alias_to_id[aid] = aid
+            if isinstance(aid, str):
+                if isinstance(alias, str):
+                    alias_to_id[alias] = aid
+                    id_to_alias[aid] = alias
+                else:
+                    # No alias — id IS the visible label (older YAML).
+                    alias_to_id[aid] = aid
+                    id_to_alias[aid] = aid
     except Exception:  # noqa: BLE001
         pass
 
     def _build_automation_links(labels: "list | tuple") -> list[dict]:
-        """Resolve a list of automation labels (alias or id) into
+        """Resolve a list of automation labels (alias OR id) into
         [{id?, alias, url?}] entries the card can render as clickable
-        chips. Skips duplicates within a single insight."""
+        chips. Accepts both forms because `conflicts_with` ships ids and
+        `referenced_in_automations` ships aliases. Skips duplicates
+        within a single insight."""
         seen_local: set[str] = set()
         out: list[dict] = []
         for label in labels:
             if not isinstance(label, str) or label in seen_local:
                 continue
             seen_local.add(label)
-            entry: dict[str, str] = {"alias": label}
-            aid = alias_to_id.get(label)
+            # Branch on whether the label looks like an id (matches a
+            # known automation id) or an alias.
+            aid: str | None = None
+            alias_for_display = label
+            if label in id_to_alias:
+                # label IS an id; use its alias for display
+                aid = label
+                alias_for_display = id_to_alias[label]
+            elif label in alias_to_id:
+                # label is an alias; look up its id
+                aid = alias_to_id[label]
+                alias_for_display = label
+            entry: dict[str, str] = {"alias": alias_for_display}
             if aid:
                 entry["id"] = aid
                 entry["url"] = f"/config/automation/edit/{aid}"
