@@ -1855,7 +1855,14 @@ def ws_dev_inject_event(
 # ---------------------------------------------------------------------------
 
 
-# Concise variant — ~180 tokens, the default.
+# Concise variant — ~170 tokens, the default.
+#
+# Rule 5 was previously a hard "never remove entities" — too blunt:
+# audit findings legitimately authorize specific removals, and a
+# user typing "remove the dead lights" should be honored. The new
+# wording defers to an AUTHORIZED EDITS section the caller appends
+# from findings or user feedback. When neither authorizes a
+# removal, the conservative default holds.
 _REFINE_PRINCIPLES_CONCISE = (
     "RULES:\n"
     "1. Default to no change. Empty diff_summary is a valid answer.\n"
@@ -1865,9 +1872,9 @@ _REFINE_PRINCIPLES_CONCISE = (
     "service/target shape unless a finding pinpoints it as buggy.\n"
     "4. Don't add weekday/time/sun conditions when a state trigger "
     "on the same entity already gates firing.\n"
-    "5. NEVER remove entities from action targets unless a finding "
-    "EXPLICITLY names that exact entity. Do NOT infer 'unavailable' "
-    "or 'redundant' from the entity name alone.\n"
+    "5. You may ONLY make edits listed under AUTHORIZED EDITS below. "
+    "If a finding lists an entity, you can act on THAT entity — "
+    "don't generalise to others.\n"
     "6. Preserve mode:/max:/initial_state:/for:/templates/custom "
     "services + `action:` vs `service:` key style verbatim.\n"
     "7. Rationale: per change, name it + one edge case ruled out."
@@ -2018,7 +2025,141 @@ def _build_audit_feedback(
             "ALL findings are CONTEXT-ONLY. Likely correct answer: "
             "no change.\nFINDINGS:"
         )
-    return "\n".join([header, *findings, "", _principles_for(depth)])
+
+    # Derive the per-call authorization list. Rule 5 says "you may
+    # ONLY make edits listed below" — this is "below".
+    authorized = _authorized_edits_from_observations(observations)
+
+    return "\n".join(
+        [header, *findings, "", authorized, "", _principles_for(depth)]
+    )
+
+
+def _authorized_edits_from_observations(
+    observations: list[dict[str, Any]],
+) -> str:
+    """Build an `AUTHORIZED EDITS:` block from the observation list.
+
+    Each observation kind unlocks a specific edit class on a specific
+    entity / step. Anything not listed is implicitly forbidden by
+    Rule 5. This is the contextual-rule architecture the user
+    requested — instead of a universal "never remove entities" rule,
+    we tell the LLM exactly which removals / changes the findings
+    actually justify.
+    """
+    lines: list[str] = []
+    remove_targets: list[str] = []
+    raise_for_targets: list[str] = []
+    shift_triggers: list[tuple[str, str]] = []
+    drop_redundant: list[tuple[str, list[str]]] = []
+    disable_dormant = False
+    investigate_action_errors = False
+    loosen_conditions: list[str] = []
+
+    for obs in observations:
+        kind = obs.get("kind") or ""
+        metrics = obs.get("metrics") or {}
+        if (metrics or {}).get("context_only"):
+            continue
+        if kind == "entity_silent":
+            eid = metrics.get("entity_id")
+            if isinstance(eid, str):
+                remove_targets.append(eid)
+        elif kind == "long_on_duration":
+            eid = metrics.get("entity_id")
+            if isinstance(eid, str):
+                raise_for_targets.append(eid)
+        elif kind == "trigger_time_drift":
+            tt = metrics.get("trigger_time")
+            delta = metrics.get("delta_min")
+            if isinstance(tt, str) and isinstance(delta, (int, float)):
+                sign = "+" if delta > 0 else ""
+                shift_triggers.append((tt, f"{sign}{delta:.0f} min"))
+        elif kind == "redundant_target":
+            container = metrics.get("container")
+            members = metrics.get("redundant_members") or []
+            if isinstance(container, str) and members:
+                drop_redundant.append((container, list(members)))
+        elif kind == "trace_dormant":
+            disable_dormant = True
+        elif kind == "trace_action_errors":
+            investigate_action_errors = True
+        elif kind == "trace_condition_blocks":
+            step = metrics.get("step")
+            if isinstance(step, str):
+                loosen_conditions.append(step)
+
+    if remove_targets:
+        lines.append(
+            "- REMOVE these entities from action targets (they are "
+            f"unavailable / missing): {', '.join(sorted(set(remove_targets)))}"
+        )
+    if drop_redundant:
+        for container, members in drop_redundant:
+            lines.append(
+                f"- REMOVE redundant members of {container} from action "
+                f"targets: {', '.join(members)}"
+            )
+    if raise_for_targets:
+        lines.append(
+            "- RAISE the `for:` clause on actions targeting: "
+            f"{', '.join(sorted(set(raise_for_targets)))}"
+        )
+    if shift_triggers:
+        parts = [f"{t} by {d}" for t, d in shift_triggers]
+        lines.append(
+            "- SHIFT time trigger(s) toward observed reality: "
+            + "; ".join(parts)
+        )
+    if disable_dormant:
+        lines.append(
+            "- FLAG the automation as dormant (no fires in 30d+). A "
+            "safe edit is to set `initial_state: false` OR recommend "
+            "disable in your rationale; don't rewrite logic."
+        )
+    if investigate_action_errors:
+        lines.append(
+            "- FLAG action-error steps in your rationale; DO NOT "
+            "rewrite the failing action (no failing trace available)."
+        )
+    if loosen_conditions:
+        lines.append(
+            "- CONSIDER loosening these condition steps (most fires "
+            f"blocked): {', '.join(loosen_conditions)}"
+        )
+
+    if not lines:
+        return (
+            "AUTHORIZED EDITS:\n"
+            "- (none from findings — only safe meta-edits like fixing "
+            "alias typos, normalising YAML formatting, or adding a "
+            "clarifying `description:` are permitted. Do NOT touch "
+            "triggers, conditions, or action targets.)"
+        )
+    return "AUTHORIZED EDITS:\n" + "\n".join(lines)
+
+
+def _authorized_from_user_text(user_text: str) -> str:
+    """Build an AUTHORIZED EDITS block for user-typed refines.
+
+    Without specific findings, the user's request IS the authorisation.
+    We don't try to parse it — just echo it as the canonical
+    authority for what's allowed, in the prompt the LLM sees. The
+    Refine principles already say "execute the request faithfully."
+    """
+    text = (user_text or "").strip()
+    if not text:
+        return (
+            "AUTHORIZED EDITS:\n"
+            "- (no specific request — apply only obvious bug fixes; "
+            "default to no change if nothing is clearly broken.)"
+        )
+    return (
+        "AUTHORIZED EDITS:\n"
+        f"- Execute the user request: {text}\n"
+        "- Only side-edits required to make that request work are "
+        "permitted. Do NOT add unrequested restructuring."
+    )
 
 
 def _wrap_user_feedback(
@@ -2029,17 +2170,27 @@ def _wrap_user_feedback(
 ) -> str:
     """User-feedback wrap.
 
-    Turn 0: USER request + RULES (depth-aware).
+    Turn 0: USER request + AUTHORIZED EDITS (derived from request)
+            + RULES (depth-aware).
     Turn N>0: USER request only — conversation_id thread carries
     the rules.
     """
-    user_text = (user_feedback or "").strip() or (
-        "(No specific request — flag obvious bugs only; "
-        "return no-change if nothing is clearly wrong.)"
-    )
+    user_text = (user_feedback or "").strip()
     if conversation_turn > 0:
-        return f"USER: {user_text}"
-    return f"USER: {user_text}\n\n{_principles_for(depth)}"
+        return f"USER: {user_text or '(no follow-up text)'}"
+    authorized = _authorized_from_user_text(user_text)
+    user_section = (
+        f"USER: {user_text}" if user_text
+        else "USER: (no specific request — flag obvious bugs only; "
+             "return no-change if nothing is clearly wrong.)"
+    )
+    return (
+        user_section
+        + "\n\n"
+        + authorized
+        + "\n\n"
+        + _principles_for(depth)
+    )
 
 
 def _humanize_llm_error(raw: str) -> str:
