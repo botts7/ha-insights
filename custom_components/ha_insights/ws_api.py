@@ -629,42 +629,28 @@ async def ws_list(
 
 # ---------------------------------------------------------------------------
 # Display-time dedup (v1.1 — runs in ws_list after enrichment)
+#
+# Pure-logic core lives in lib/dedup.py so it's testable without HA.
+# This wrapper walks the entity registry to build the device_id map.
 # ---------------------------------------------------------------------------
-import re as _re
 
 
 def _normalize_title_for_dedup(title: str, eids: list[str]) -> str:
-    """Strip per-entity tokens from an insight title so two insights that
-    differ only in their entity name produce the same signature.
+    """Backwards-compat shim — kept for any inline callers. New code
+    should use lib.dedup.normalize_title_for_dedup directly."""
+    from .lib.dedup import normalize_title_for_dedup as _impl
 
-    Examples (with eids ["binary_sensor.home_nvr_garage_motion"]):
-      "binary_sensor.home_nvr_garage_motion hasn't reported in 8d. ..."
-      → "<E> hasn't reported in 8d. ..."
-
-    Numeric tokens (durations, counts) are preserved because they ARE
-    the signal — two entities silent for different durations shouldn't
-    merge.
-    """
-    out = title
-    for eid in eids:
-        out = out.replace(eid, "<E>")
-    # Strip any leftover bare entity_id-like tokens (matches domain.name)
-    out = _re.sub(r"\b[a-z_]+\.[A-Za-z0-9_]+\b", "<E>", out)
-    return out
+    return _impl(title, eids)
 
 
 def _display_time_dedup(
     enriched: list[dict[str, Any]], hass: HomeAssistant
 ) -> list[dict[str, Any]]:
-    """Group enriched insights by (kind, detector, normalized title)
-    and collapse groups of 2+ that share a device_id or domain into a
-    single representative row. Other groups pass through unchanged.
-
-    Cohort metadata (cohort_members + cohort_label) is filled in on
-    the representative so the card's expand toggle still works.
+    """Thin wrapper: walk HA's entity_registry once, hand off to the
+    pure dedup helper in lib/dedup.py. All real logic lives there
+    so it can be unit-tested without the HA stack.
     """
-    if not enriched:
-        return enriched
+    from .lib.dedup import display_time_dedup
 
     # Build device_id lookup for cross-entity device-shared dedup.
     device_id_by_entity: dict[str, str | None] = {}
@@ -677,113 +663,7 @@ def _display_time_dedup(
     except Exception:  # noqa: BLE001
         pass
 
-    from collections import defaultdict as _dd
-
-    # Bucket key includes the entity's DOMAIN so mixed-domain buckets
-    # never form. Previously, an NVR offline for 8 days produced 35
-    # binary_sensors + 11 switches with identical normalized titles
-    # ("<E> hasn't reported in 8d. …") — they all bucketed together,
-    # but _resolve_cohort_label rejected the bucket because mixed
-    # domains can't share an entity-id prefix. So all 51 fell
-    # through unmerged. Splitting by domain at the bucket level
-    # means binary_sensor.home_nvr_* groups cleanly into one cohort
-    # and switch.home_nvr_* into another.
-    buckets: dict[tuple[str, str, str, str], list[dict]] = _dd(list)
-    for d in enriched:
-        eids = d.get("_eids_for_dedup") or []
-        sig = (
-            d.get("kind") or "",
-            d.get("detector") or "",
-            _normalize_title_for_dedup(d.get("title") or "", eids),
-            d.get("domain") or "",
-        )
-        buckets[sig].append(d)
-
-    result: list[dict[str, Any]] = []
-    for bucket in buckets.values():
-        if len(bucket) < 2:
-            for d in bucket:
-                d.pop("_eids_for_dedup", None)
-                result.append(d)
-            continue
-        # Collect all entity_ids across the group
-        all_eids: list[str] = []
-        for d in bucket:
-            all_eids.extend(d.get("_eids_for_dedup") or [])
-        all_eids = sorted(set(all_eids))
-        if len(all_eids) < 2:
-            for d in bucket:
-                d.pop("_eids_for_dedup", None)
-                result.append(d)
-            continue
-        # Determine cohort label: prefer shared device_id, then domain prefix.
-        cohort_label = _resolve_cohort_label(all_eids, device_id_by_entity)
-        if cohort_label is None:
-            # No coherent group — keep them separate.
-            for d in bucket:
-                d.pop("_eids_for_dedup", None)
-                result.append(d)
-            continue
-        # Pick representative: highest confidence.
-        rep = max(bucket, key=lambda d: float(d.get("confidence") or 0))
-        rep = dict(rep)
-        rep.pop("_eids_for_dedup", None)
-        others = len(bucket) - 1
-        # Don't double-append the suffix if it's already there from a
-        # scan-time merge.
-        if "similar entities" not in (rep.get("title") or ""):
-            rep["title"] = (
-                f"{rep.get('title') or ''} "
-                f"(+{others} similar entities: {cohort_label})"
-            )
-        rep["cohort_members"] = all_eids
-        rep["cohort_label"] = cohort_label
-        result.append(rep)
-    return result
-
-
-def _resolve_cohort_label(
-    entity_ids: list[str],
-    device_id_by_entity: dict[str, str | None],
-) -> str | None:
-    """Pick a friendly label for a cohort: shared device → entity-id
-    prefix; otherwise same-domain cohort label."""
-    # Shared device → longest common entity-id prefix.
-    device_ids = {device_id_by_entity.get(e) for e in entity_ids}
-    device_ids.discard(None)
-    if len(device_ids) == 1:
-        prefix = _longest_common_entity_prefix(entity_ids)
-        if prefix:
-            return prefix
-    # Same-domain fallback.
-    domains = {e.split(".", 1)[0] for e in entity_ids if "." in e}
-    if len(domains) == 1:
-        return f"{next(iter(domains))}.* (cohort)"
-    return None
-
-
-def _longest_common_entity_prefix(entity_ids: list[str]) -> str | None:
-    """Return `domain.prefix_*` if all entity_ids share a domain AND a
-    name prefix of >=4 chars. Same shape as the detector-side helper."""
-    if len(entity_ids) < 2:
-        return None
-    domains = {e.split(".", 1)[0] for e in entity_ids if "." in e}
-    if len(domains) != 1:
-        return None
-    domain = next(iter(domains))
-    names = [e.split(".", 1)[1] for e in entity_ids if "." in e]
-    if not names:
-        return None
-    prefix = names[0]
-    for n in names[1:]:
-        while prefix and not n.startswith(prefix):
-            prefix = prefix[:-1]
-        if not prefix:
-            return None
-    prefix = prefix.rstrip("_")
-    if len(prefix) < 4:
-        return None
-    return f"{domain}.{prefix}_*"
+    return display_time_dedup(enriched, device_id_by_entity)
 
 
 @websocket_api.websocket_command(
