@@ -1855,7 +1855,7 @@ def ws_dev_inject_event(
 # ---------------------------------------------------------------------------
 
 
-# Concise variant — ~150 tokens, the default.
+# Concise variant — ~180 tokens, the default.
 _REFINE_PRINCIPLES_CONCISE = (
     "RULES:\n"
     "1. Default to no change. Empty diff_summary is a valid answer.\n"
@@ -1865,9 +1865,11 @@ _REFINE_PRINCIPLES_CONCISE = (
     "service/target shape unless a finding pinpoints it as buggy.\n"
     "4. Don't add weekday/time/sun conditions when a state trigger "
     "on the same entity already gates firing.\n"
-    "5. Unavailable entity? FLAG it, never guess a replacement.\n"
+    "5. NEVER remove entities from action targets unless a finding "
+    "EXPLICITLY names that exact entity. Do NOT infer 'unavailable' "
+    "or 'redundant' from the entity name alone.\n"
     "6. Preserve mode:/max:/initial_state:/for:/templates/custom "
-    "services verbatim unless flagged.\n"
+    "services + `action:` vs `service:` key style verbatim.\n"
     "7. Rationale: per change, name it + one edge case ruled out."
 )
 

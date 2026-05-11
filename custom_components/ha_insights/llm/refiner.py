@@ -571,6 +571,16 @@ async def _refine_one_attempt(
         )
 
     rationale, parsed, parse_error = parse_refine_response(speech)
+    # Dereference the rationale ONCE here — it surfaces in:
+    #   - the diff modal's "Why these changes" panel
+    #   - the refined YAML's `description` backfill (further down)
+    #   - error-path returns
+    # Without this step the LLM's pseudonym references (e.g.
+    # "light.entity_1y3s70 — redundant with light.entity_5ywga1") leak
+    # to the user as gibberish IDs instead of their real entities.
+    rationale = (
+        redaction_map.dereference(rationale) if rationale else rationale
+    )
     if parse_error or parsed is None:
         return RefinementResult.failure(
             error=f"could not parse refinement: {parse_error}",
