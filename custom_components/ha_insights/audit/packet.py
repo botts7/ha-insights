@@ -103,6 +103,7 @@ def build_audit_packet(
     hierarchy: "EntityHierarchy | None",
     recent_insights: list["Insight"] | None = None,
     blocked_entities: frozenset[str] = frozenset(),
+    trace_aggregates: Any | None = None,
     now: datetime | None = None,
 ) -> AuditPacket:
     """Build an AuditPacket for one automation. Pure function.
@@ -186,6 +187,24 @@ def build_audit_packet(
                 hierarchy=hierarchy,
             )
         )
+
+    # ---- Trace-derived observations: ground truth from HA itself ----
+    # Pre-fetched by the detector on the event loop and passed in.
+    # Each entry is a dict {kind, text, confidence, metrics}; convert
+    # to Observation here to keep the trace module decoupled from
+    # this file (avoids circular imports).
+    if trace_aggregates is not None:
+        from .traces import observations_from_traces
+
+        for obs_dict in observations_from_traces(trace_aggregates, now=now):
+            observations.append(
+                Observation(
+                    kind=obs_dict["kind"],
+                    text=obs_dict["text"],
+                    confidence=obs_dict["confidence"],
+                    metrics=obs_dict.get("metrics", {}),
+                )
+            )
 
     # ---- Join: any recent insights touching these entities ----
     related_ids: list[str] = []
