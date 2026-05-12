@@ -73,11 +73,17 @@ def display_time_dedup(
     )
     for d in enriched:
         eids = d.get("_eids_for_dedup") or []
+        # Lowercase the signature components so insights persisted by
+        # earlier code versions (which may have used different case
+        # for the kind enum or detector name) still bucket together
+        # with current-version insights. The actual rendered title in
+        # the output preserves its original case — only the dedup
+        # signature is lowered.
         sig = (
-            d.get("kind") or "",
-            d.get("detector") or "",
+            (d.get("kind") or "").lower(),
+            (d.get("detector") or "").lower(),
             normalize_title_for_dedup(d.get("title") or "", eids),
-            d.get("domain") or "",
+            (d.get("domain") or "").lower(),
         )
         buckets[sig].append(d)
 
