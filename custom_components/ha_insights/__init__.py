@@ -942,7 +942,13 @@ def _async_register_services(hass: HomeAssistant) -> None:
 
                 raw = _sanitize_yaml_safe(raw)
                 obs_kinds = [o.get("kind", "") for o in observations]
-                cache_key = compute_cache_key(raw, obs_kinds)
+                # Include integration_version in the cache key so a
+                # detector/prompt rewrite in a new release invalidates
+                # cached LLM refinements for the same YAML automatically.
+                from .ws_api import _get_integration_version
+
+                _iv = await _get_integration_version(hass)
+                cache_key = compute_cache_key(raw, obs_kinds, _iv)
                 if cache_get(cache_key) is not None:
                     # Already cached — skip, no tokens needed
                     continue

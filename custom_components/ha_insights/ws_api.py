@@ -2989,7 +2989,10 @@ async def ws_audit_suggest(
         cache_extras.append(f"extra_fb:{extra_feedback[:200]}")
     if use_seed:
         cache_extras.append("stage:two")
-    cache_key = compute_cache_key(starting_payload, cache_extras)
+    # integration_version invalidates cached refinements when the
+    # prompt logic / detector behavior changes in a new release.
+    _iv = await _get_integration_version(hass)
+    cache_key = compute_cache_key(starting_payload, cache_extras, _iv)
     cached = cache_get(cache_key)
     if isinstance(cached, CachedSuggestion):
         try:
