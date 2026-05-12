@@ -422,6 +422,37 @@ async def _setup_entry_body(
 
     entry.async_on_unload(entry.add_update_listener(_on_options_updated))
 
+    # Restore Repairs entries from the persisted insights as soon as
+    # the integration loads. Without this, every HA restart would leave
+    # the Repairs surface empty until the next scheduled scan ran.
+    # Lightweight — just a registry diff against insights already in
+    # SQLite. Errors swallowed so a bad Repairs sync can't block setup.
+    async def _restore_repairs_on_boot() -> None:
+        try:
+            from .audit.repairs import sync_audit_issues
+
+            current_insights = await store.list_insights(
+                include_dismissed=False,
+                include_applied=False,
+                include_snoozed=False,
+            )
+            audit_insights = [
+                i for i in current_insights if i.detector == "automation_audit"
+            ]
+            counters = sync_audit_issues(hass, audit_insights)
+            if counters.get("created") or counters.get("updated"):
+                _LOGGER.debug(
+                    "Repairs restore on boot: %d created, %d refreshed",
+                    counters.get("created", 0),
+                    counters.get("updated", 0),
+                )
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.debug("Repairs restore on boot skipped: %s", err)
+
+    entry.async_create_background_task(
+        hass, _restore_repairs_on_boot(), "ha_insights_restore_repairs"
+    )
+
     return True
 
 
@@ -1130,14 +1161,32 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
         async_remove_panel(hass, _PANEL_URL_PATH)
         hass.data[DOMAIN][_PANEL_REGISTERED_FLAG] = False
-        # Sweep our Repairs entries on full unload so they don't
-        # linger in HA after the integration is removed. On reload
-        # (vs uninstall) the next scan re-emits whatever still
-        # applies. Idempotent.
-        try:
-            from .audit.repairs import clear_all_audit_issues
-
-            clear_all_audit_issues(hass)
-        except Exception:  # noqa: BLE001
-            pass
+        # NOTE: Repairs entries are intentionally NOT cleared on
+        # unload. HA's Repairs surface is expected to persist
+        # across restarts, like any other integration's issues.
+        # The actual sweep happens in `async_remove_entry` below,
+        # which only fires on uninstall — not on restart or reload.
     return True
+
+
+async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Called only on full uninstall (not on restart / reload).
+
+    Sweep our Repairs entries so we don't leave orphan rows in
+    HA's issue registry. Without this, an uninstalled HA Insights
+    would still appear as unresolved Repairs forever.
+
+    HA invokes this AFTER `async_unload_entry`, so the integration
+    is already torn down — we just clean the registry.
+    """
+    try:
+        from .audit.repairs import clear_all_audit_issues
+
+        cleared = clear_all_audit_issues(hass)
+        if cleared:
+            _LOGGER.info(
+                "HA Insights uninstall: cleared %d Repairs entries",
+                cleared,
+            )
+    except Exception as err:  # noqa: BLE001
+        _LOGGER.debug("Repairs cleanup on uninstall failed: %s", err)
