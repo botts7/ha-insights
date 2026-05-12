@@ -1166,6 +1166,17 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # across restarts, like any other integration's issues.
         # The actual sweep happens in `async_remove_entry` below,
         # which only fires on uninstall — not on restart or reload.
+        # Clear module-level cached state so a reload picks up a clean
+        # slate. None of these belong on the entry — they're shared
+        # across the integration. Includes the rollup progress dict
+        # (so the WS endpoint doesn't keep returning a previous load's
+        # finished_ts/last_summary).
+        try:
+            from .audit.rollup import reset_progress as _reset_rollup_progress
+
+            _reset_rollup_progress()
+        except Exception:  # noqa: BLE001
+            pass
     return True
 
 

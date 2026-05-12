@@ -28,26 +28,20 @@ WS_PROTOCOL_VERSION = 1
 
 async def _get_integration_version(hass: HomeAssistant) -> str:
     """Resolve the integration version dynamically from manifest.json
-    via HA's loader. Cached in `hass.data[DOMAIN]["_version_cache"]`
-    so subsequent hello() calls don't hit the loader.
-
-    Reading the manifest at runtime is the idiomatic HA pattern —
-    avoids drift between manifest.json and a hardcoded constant.
+    via HA's loader. NO local caching here — `async_get_integration`
+    is itself cached by HA's loader (process-lifetime, invalidated on
+    integration upgrade), and an extra layer just buys us a staleness
+    bug: a previous version was cached on `hass.data[DOMAIN]` which
+    `async_unload_entry` doesn't touch, so a reloaded integration
+    after a manifest bump kept reporting the old version.
     """
-    cache_key = "_integration_version_cache"
-    domain_data = hass.data.setdefault(DOMAIN, {})
-    cached = domain_data.get(cache_key)
-    if isinstance(cached, str):
-        return cached
     try:
         from homeassistant.loader import async_get_integration
 
         integration = await async_get_integration(hass, DOMAIN)
-        version = str(integration.version) if integration.version else "unknown"
+        return str(integration.version) if integration.version else "unknown"
     except Exception:  # noqa: BLE001
-        version = "unknown"
-    domain_data[cache_key] = version
-    return version
+        return "unknown"
 
 SUPPORTED_METHODS = (
     "hello",

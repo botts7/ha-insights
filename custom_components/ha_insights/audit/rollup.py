@@ -121,6 +121,24 @@ _PROGRESS: dict[str, Any] = {
 }
 
 
+def reset_progress() -> None:
+    """Wipe live progress state. Called from `async_unload_entry` so a
+    reloaded integration doesn't inherit a previous load's stale
+    `last_summary` / `finished_ts` in the WS endpoint output."""
+    _PROGRESS.update(
+        running=False,
+        total=0,
+        processed=0,
+        errors=0,
+        timed_out=0,
+        current_entity_id=None,
+        started_ts=None,
+        finished_ts=None,
+        window_days=ROLLUP_WINDOW_DAYS,
+        last_summary=None,
+    )
+
+
 def get_rollup_progress() -> dict[str, Any]:
     """Snapshot of the current/last rollup batch. Cheap dict copy."""
     snap = dict(_PROGRESS)

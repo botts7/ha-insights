@@ -56,16 +56,24 @@ _CACHE: _CacheState = _CacheState()
 def compute_cache_key(
     automation_yaml: dict[str, Any],
     observation_kinds: list[str],
+    integration_version: str = "0",
 ) -> str:
-    """sha256 of the canonical YAML + sorted observation kinds.
+    """sha256 of canonical YAML + sorted observation kinds + integration version.
 
     Order-insensitive on observation_kinds and dict keys so trivial
     re-ordering doesn't break cache hits.
+
+    `integration_version` is included so a detector / prompt rewrite
+    in a new release invalidates cached suggestions automatically —
+    otherwise a 30-day-old refinement built against v1.1's prompts
+    could silently override the v1.2 prompt logic for the same YAML.
+    Callers that don't pass it default to "0" (back-compat); production
+    paths should always pass `hass`-resolved version.
     """
     canonical_yaml = json.dumps(automation_yaml, sort_keys=True, default=str)
     canonical_obs = ",".join(sorted(set(observation_kinds)))
     digest = hashlib.sha256(
-        f"{canonical_yaml}|{canonical_obs}".encode("utf-8")
+        f"{integration_version}|{canonical_yaml}|{canonical_obs}".encode("utf-8")
     ).hexdigest()
     return digest
 
