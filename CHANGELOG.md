@@ -4,7 +4,122 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
-v1.0 release-candidate work. Internal-testing track; HACS submission deferred until the user verifies stability on their dev install.
+## [1.1.0] — 2026-05-12
+
+The audit release. v1.0 was pattern detection on what your home does;
+v1.1 is auditing what your automations already say they do.
+
+### Added
+
+- **AutomationAuditDetector** — reads every automation in `automations.yaml`,
+  `configuration.yaml`, and package files. Emits an AUTOMATION_IMPROVEMENT
+  insight per automation that has anything worth saying. Filtered to high-
+  confidence + actionable observation kinds; silent on automations with
+  zero findings.
+- **Eight observation primitives** (`audit/packet.py`):
+  - `long_on_duration` — entity stays on past sensible `for:` thresholds
+  - `trigger_time_drift` — `at:` differs from observed transition by >= 5min
+  - `entity_silent` — referenced entity is unavailable / missing from state machine
+  - `redundant_target` — action targets both a container and members
+  - `trace_dormant` — HA traces show no fires in 30d+
+  - `trace_condition_blocks` — condition step blocks > 50% of fires
+  - `trace_action_errors` — actions throw exceptions in N% of runs
+  - `rollup_*` — day-of-week / day-of-month / seasonal patterns
+- **HA Automation Traces integration** (`audit/traces.py`) — pulls from
+  `hass.data[DATA_TRACE]` directly via the documented internal API
+- **Recorder rollup cache** (`audit/rollup.py`) — 90-day day-of-week /
+  day-of-month / month-of-year transition counts materialized into a
+  new `audit_rollups` SQLite table off the scan loop. Single-flight
+  lock, 20s per-entity timeout, 120s batch budget, 7-day TTL. Service:
+  `ha_insights.run_audit_rollup`.
+- **Deterministic YAML fix builder** (`audit/fixes.py`) — when an
+  observation has an obvious safe fix (redundant_target, long_on_duration,
+  trigger_time_drift), emit the audit insight with `payload_format="automation"`
+  + a pre-computed refined YAML. Apply works without ever calling the LLM.
+- **`home_insights/audit_suggest` WS endpoint** — for findings without a
+  deterministic fix, route through the existing refine_insight pipeline
+  with an AUTHORIZED EDITS block derived from the observations. Content-
+  hash cache (30d TTL, 500-entry LRU). Two-stage refinement: pass
+  `seed_config` to layer LLM ideas on top of the algorithm's output.
+- **Repairs registry dual-emit** (`audit/repairs.py`) — high-confidence
+  actionable findings surface in `Settings → Repairs` alongside HA's
+  standard issue notifications. Auto-clears on dismiss / apply / purge.
+  Translation key `audit_finding` with `{automation}` + `{summary}`
+  placeholders.
+- **Side-by-side IDE-style diff modal** (card) — LCS line alignment,
+  red `-` / green `+` gutters, stage-aware titles + pane labels
+  (`Current YAML (live)` → `Algorithm Fix (no LLM)` → `LLM Refinement (stage 2)`),
+  phone-responsive (stacked at ≤720px).
+- **📋 Preview button** on deterministic-fix audit rows — opens the
+  diff modal pre-populated with the algorithm's edit. Zero LLM tokens.
+- **🤖 Refine further with LLM** button inside Preview modal —
+  layered refinement: algorithm fix as the starting point, optional
+  user follow-up text, LLM iterates.
+- **Concise / In-depth analysis depth toggle** (panel header) —
+  switches the LLM prompt between ~150-token rules and ~600-token
+  rules with examples. Persisted in localStorage; per-call override
+  via `analysis_depth` field in audit_suggest WS message.
+- **OptionsFlow `audit_monthly_budget_usd`** — per-month USD cap on
+  background batch suggest. Default $5, range 0..50. Local LLM agents
+  bypass the budget gate automatically.
+- **Token usage row** in refine modals — shows `≈ X in / Y out tokens`
+  estimated via bytes/4.
+- **24 unit tests** for the pure dedup + audit packet + fix-builder logic
+  in `tests/test_lib_dedup.py`, `tests/test_audit_packet.py`,
+  `tests/test_audit_fixes.py`.
+
+### Changed
+
+- **Display-time dedup bucket key** now includes domain — collapses 51
+  mixed-domain NVR rows into per-domain cohorts (35 binary_sensors +
+  11 switches → 2 cohort rows).
+- **Scan-time dedup** no longer short-circuits when `entity_dependencies`
+  is empty (regression introduced during v1.2 hierarchy migration).
+- **Display-time dedup extracted to `lib/dedup.py`** as pure functions
+  with no HA imports. ws_api wraps with a thin registry walker.
+- **Refine prompts** rebuilt with per-use-case framing + AUTHORIZED
+  EDITS list derived from observations or user request, replacing
+  the universal "never remove entities" rule. LLM gets a specific
+  list of authorized changes per call.
+- **Refiner post-processing** preserves `id:`, `mode:`, `max:`,
+  `initial_state:`, `trace:`, `variables:` from the original (LLMs
+  drop them). Normalises `action:` vs `service:` key style.
+- **Rationale dereferences pseudonyms** before display — prior bug
+  surfaced `light.entity_1y3s70` to users instead of the real entity.
+- **Sidebar panel re-registers** on every config-entry setup so the
+  cache-bust URL refreshes (previous bug locked it to first-startup
+  mtime, requiring a full HA restart to deploy new bundles).
+- **`ha_insights.reload_ui` service + 🔄 Reload UI button** — bumps
+  the panel URL + force-reloads the tab so a deploy-and-test cycle
+  takes seconds, not an HA restart.
+
+### Fixed
+
+- 51 NVR cameras silent for 8 days now collapse to 2 cohort rows
+  (one per domain) instead of 51 individual insights.
+- `_eids_for_dedup` internal field stripped from every outbound dict.
+- PyYAML can no longer raise `RepresenterError("cannot represent an
+  object", "id")` on automation raw_configs — every site sanitises
+  through `json.dumps(..., default=str)` first.
+- `home_insights/audit_suggest` no longer crashes with
+  `AttributeError: 'AttemptAudit' object has no attribute 'to_dict'`.
+- `home_insights/get_automation` walks packages + `configuration.yaml`,
+  not just `automations.yaml`, so package-defined automations are
+  reachable.
+- Stage-two refines force concise depth so Gemini's `max_output_tokens`
+  budget covers the YAML rewrite.
+
+### Security
+
+- Repairs registry entries respect blocked_entities (per-automation
+  audits skipped entirely when all entities are blocked).
+- Audit suggest cache key includes content hashes; no raw payloads stored.
+- LLM response rationale dereferenced before storage in the audit log.
+
+## [1.0.0] — 2026-04-26
+
+Initial public release. Pattern detection, multi-turn LLM Refine, multi-
+config-entry, full privacy posture. Detail below.
 
 ### Security & resilience hardening (v1.0 review)
 
