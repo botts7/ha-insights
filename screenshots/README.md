@@ -1,73 +1,39 @@
-# Screenshot capture guide
+# Screenshots
 
-The README references four screenshots in this directory. Capture them in this
-order — each one builds visual momentum for the HACS browse-and-click flow.
+Live captures of HA Insights running on a 1000-entity install. Captured at
+1400×900 in a light HA theme.
 
-All shots: **light HA theme**, browser at **1440 × 900**, dev-tools closed.
+| File | What it shows |
+|---|---|
+| `01-panel.png` | Main panel — full insights list with audit, streak, schedule, orphan_device, etc. Header shows version + filter chips |
+| `02-preview-diff.png` | 📋 Preview deterministic fix — side-by-side YAML diff of redundant_target removal (no LLM) |
+| `03-llm-refine-diff.png` | 🤖 Algorithm + LLM Refine stage 2 — line-aligned diff with the refine-with-more-guidance textarea |
+| `04-repairs.png` | Standard HA Repairs page showing audit findings dual-emitted into the issue registry |
+| `05-options-flow.png` | Configure dialog — privacy mode, lookback, notifications, digest, audit options |
 
-## 1. `panel-overview.png` — the integration's main panel
+## Re-capturing
 
-**URL:** `/ha-insights` (sidebar entry)
+The README at the repo root references these by filename. To re-shoot:
 
-**Setup:**
-- Several insights of mixed types visible (audit, streak, schedule, orphan_device)
-- At least one row with the 🔁 already-automated pill expanded showing 2+ automations
-- At least one row with the 🏷️ "managed externally (Tuya app)" pill
-- At least one row with a ▸ show N cohort expander
+1. **Panel** — open `/ha-insights` from sidebar, screenshot full panel.
+2. **Preview diff** — click 📋 Preview on an `automation_audit` row with a
+   `redundant_target` finding. Screenshot the modal.
+3. **LLM refine diff** — click 🤖 Suggest, wait for the LLM round-trip,
+   screenshot the resulting stage-2 modal.
+4. **Repairs page** — Settings → Repairs. Show at least one
+   `HA Insights: review automation '<name>'` entry, click to open the
+   detail modal, screenshot.
+5. **OptionsFlow** — Settings → Devices & Services → HA Insights →
+   Configure. Screenshot the full form.
 
-**Crop:** entire panel content, including the title bar with detector count chips.
+Keep them small: PNG, ≤ 200 KB each. Crop to content (don't include the
+whole browser chrome).
 
-## 2. `audit-row.png` — an audit insight with findings expanded
+## Bonus shots (optional)
 
-**URL:** `/ha-insights`
-
-**Setup:**
-- Find an `automation_audit` row with `payload_format="automation"` (deterministic-fix)
-- Click the **▾** to expand the findings list
-- Should show observations as bullet points + the green "🔧 Auto-fix preview" block
-- Apply / 📋 Preview / 🔁 already-automated pill all visible
-
-**Crop:** just the one expanded row from title down through the green block.
-
-## 3. `diff-modal.png` — the side-by-side IDE-style diff
-
-**URL:** `/ha-insights` → click 📋 Preview on any audit row
-
-**Setup:**
-- Modal open with the diff visible
-- Title shows `📋 Preview deterministic fix for '<automation name>'`
-- Left pane: red border + "Current YAML (live)" header
-- Right pane: green border + "Algorithm Fix (no LLM)" header
-- Red `-` rows and green `+` rows clearly visible somewhere mid-diff
-- "🤖 Refine again with more guidance?" textarea visible at the bottom
-
-**Crop:** entire modal including the gray overlay edges so it looks like a dialog.
-
-## 4. `repairs-entry.png` — HA's Repairs page showing an audit finding
-
-**URL:** **Settings → Repairs**
-
-**Setup:**
-- At least one `HA Insights: review automation '<name>'` Repairs entry
-- Click it open so the description text is visible
-- Should show the finding summary inside HA's standard repair dialog
-
-**Crop:** the open Repairs detail panel.
-
----
-
-## Bonus shots (if time)
-
-- `concise-vs-indepth.png` — the panel's depth toggle dropdown open showing
-  both options
-- `apply-button-stages.png` — three modal screenshots stacked vertically
-  showing the apply button label changing per stage
-- `token-usage.png` — the rationale block with the `≈ X in / Y out tokens`
-  line visible underneath
-
-## Tools
-
-GIFs (for animated demos):
-- macOS / Linux: `peek`, `gifski`
-- Windows: ScreenToGif (free, works well)
-- Target 720p, ≤ 6 MB, 4-12 seconds per loop
+- `06-rollup-progress.png` — progress bar mid-rollup (catch it during a
+  fresh chunk batch)
+- `07-recorder-hint.png` — the recorder-retention hint row when configured
+  window exceeds recorder retention (shows the amber warning + tip)
+- `08-multi-turn-refine.png` — the conversation-id continuation flow where
+  you re-prompt the same insight with new feedback

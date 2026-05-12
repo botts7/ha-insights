@@ -2,7 +2,7 @@
 
 > *Proactive pattern detection + AI-assisted automation auditing for Home Assistant. Watches your home, finds bugs in the automations you've already written, and suggests fixes.*
 
-![status: v1.1.0](https://img.shields.io/badge/status-v1.1.0-green)
+![status: v1.2.0](https://img.shields.io/badge/status-v1.2.0-green)
 ![python: 3.13](https://img.shields.io/badge/python-3.13-blue)
 ![home assistant: 2025.6+](https://img.shields.io/badge/home%20assistant-2025.6+-blue)
 ![license: MIT](https://img.shields.io/badge/license-MIT-lightgrey)
@@ -54,14 +54,15 @@ Click **Apply** and it writes a real `automation:` block to `automations.yaml`. 
 
 ## Screenshots
 
-> _The screenshots below show the v1.1 panel running on a 1000-entity home install. Add yours to `screenshots/` and replace these paths after a fresh install._
+> _Captured on a 1000-entity HA install running v1.2.0._
 
 | | |
 |---|---|
-| ![panel overview](screenshots/panel-overview.png) | The HA Insights panel — detector count chips, filter dropdowns, per-row context (🔌 integration, 🏷️ external-app, 🔁 already-automated, age) |
-| ![audit row](screenshots/audit-row.png) | An audit row with expanded findings: redundant_target + entity_silent. Green "Auto-fix preview" block shows what deterministic fix would do |
-| ![diff modal](screenshots/diff-modal.png) | IDE-style aligned diff (LCS line matching, red `-` / green `+` gutters). Stage-aware titles show whether you're previewing the algorithm or LLM stage |
-| ![repairs entry](screenshots/repairs-entry.png) | HA's standard **Settings → Repairs** also surfaces audit findings — users discover the integration via the native UI without needing the panel |
+| ![panel overview](screenshots/01-panel.png) | **Main panel.** Detector count chips, filter dropdowns, per-row context (🔌 integration, 🏷️ external-app, 🔁 already-automated, age). Audit and discovery insights mixed on one surface. |
+| ![preview diff](screenshots/02-preview-diff.png) | **📋 Preview deterministic fix.** Side-by-side IDE-style diff (LCS line alignment). Zero LLM tokens — algorithm computed the fix from the redundant_target observation. |
+| ![LLM refine diff](screenshots/03-llm-refine-diff.png) | **🤖 Algorithm + LLM Refine.** Stage 2 layers LLM iteration on top of the algorithm output. The "Refine again with more guidance" textarea drives multi-turn refinement. |
+| ![repairs page](screenshots/04-repairs.png) | **Standard HA Repairs page.** v1.2 dual-emits audit findings into HA's official issue registry, so users discover them via native UI without needing the panel open. |
+| ![config flow](screenshots/05-options-flow.png) | **OptionsFlow.** Privacy mode, daily digest, audit window, audit verbosity, monthly cloud-LLM budget, auto-rollup scheduler. Everything configurable from Settings → Devices & Services. |
 
 ---
 
