@@ -905,8 +905,37 @@ async def _load_existing_automations(hass: HomeAssistant) -> list[dict]:
     and just emits potentially-duplicate insights (cheaper than
     crashing the whole scan).
     """
+    # Dedup strategy: an automation is uniquely keyed by EITHER its id
+    # OR its alias. We track both and treat ANY collision in either
+    # axis as a duplicate (same automation from a different source).
+    # Anonymous automations (no id, no alias) can't be deduped — skip
+    # them rather than letting the previous `or id(entry)` fallback
+    # add them every time, which is what caused the user-reported
+    # "TV Lights audited twice" bug.
     seen_ids: set[str] = set()
+    seen_aliases: set[str] = set()
     automations: list[dict] = []
+    dup_count = 0
+    anon_count = 0
+
+    def _is_duplicate(raw: dict) -> bool:
+        nonlocal dup_count, anon_count
+        raw_id = raw.get("id")
+        raw_alias = raw.get("alias")
+        if not raw_id and not raw_alias:
+            anon_count += 1
+            return True  # anonymous — can't dedupe, skip
+        if raw_id and str(raw_id) in seen_ids:
+            dup_count += 1
+            return True
+        if raw_alias and str(raw_alias) in seen_aliases:
+            dup_count += 1
+            return True
+        if raw_id:
+            seen_ids.add(str(raw_id))
+        if raw_alias:
+            seen_aliases.add(str(raw_alias))
+        return False
 
     # Source 1: live automations from the automation component.
     # HA exposes them as `automation.*` entities. Walk the state machine
@@ -933,10 +962,8 @@ async def _load_existing_automations(hass: HomeAssistant) -> list[dict]:
                 )
                 if not isinstance(raw, dict):
                     continue
-                ident = raw.get("id") or raw.get("alias") or id(entry)
-                if ident in seen_ids:
+                if _is_duplicate(raw):
                     continue
-                seen_ids.add(ident)
                 automations.append(raw)
     except Exception:  # noqa: BLE001
         _LOGGER.debug(
@@ -970,13 +997,18 @@ async def _load_existing_automations(hass: HomeAssistant) -> list[dict]:
 
     yaml_entries = await hass.async_add_executor_job(_read_yaml)
     for raw in yaml_entries:
-        ident = raw.get("id") or raw.get("alias")
-        if ident is not None and ident in seen_ids:
+        if _is_duplicate(raw):
             continue
-        if ident is not None:
-            seen_ids.add(ident)
         automations.append(raw)
 
+    if dup_count or anon_count:
+        _LOGGER.debug(
+            "_load_existing_automations: returning %d unique "
+            "automations (dropped %d duplicates, %d anonymous)",
+            len(automations),
+            dup_count,
+            anon_count,
+        )
     return automations
 
 

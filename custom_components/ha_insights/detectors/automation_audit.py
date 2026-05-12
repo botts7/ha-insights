@@ -183,7 +183,11 @@ class AutomationAuditDetector(Detector):
         no-audit. Rotation across scans is implicit because the
         store retains audit insights with stable fingerprints — if a
         given automation's insight is already up-to-date, it stays;
-        if not (new observations), the scan-time dedup replaces it."""
+        if not (new observations), the scan-time dedup replaces it.
+
+        Dedup happens at the source (_load_existing_automations);
+        no per-detector dedup needed here.
+        """
         eligible = [
             a for a in automations if not self._should_skip(a)
         ]
