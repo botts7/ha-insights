@@ -300,13 +300,18 @@ class AutomationAuditDetector(Detector):
             3,
         )
 
-        # Stable id: automation_id + sorted observation kinds so a
-        # re-scan with the same findings produces the same id (dedupes
-        # via the store).
+        # Stable id: automation_id ONLY. Earlier versions also keyed
+        # on the sorted set of observation kinds, but that made the
+        # fingerprint sensitive to which findings happened to surface
+        # this run — e.g., a new trace-derived observation showing up
+        # in v1.2 would change the fingerprint and create a duplicate
+        # row rather than updating the existing one. Audit findings
+        # are about an AUTOMATION, not about a specific snapshot of
+        # findings; identity belongs to the automation. Observations
+        # live in the payload and get rewritten on every scan.
         fingerprint: dict[str, Any] = {
             "automation_id": packet.automation_id,
             "kind": "automation_audit",
-            "observation_kinds": sorted({o.kind for o in packet.observations}),
         }
 
         observation_payload = [
