@@ -22,9 +22,10 @@ venv/
 .DS_Store
 Thumbs.db
 
-# Dev harness state (Docker volumes, tokens)
+# Dev harness state (Docker volumes, tokens, seed scripts)
 dev/config/
 dev/token.txt
+dev/_*.py
 
 # Logs
 *.log

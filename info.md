@@ -1,24 +1,38 @@
 # HA Insights
 
-**Proactive routine detection and AI-assisted automation suggestions for Home Assistant.**
+**Audits the automations you've already written + spots new ones — proactive pattern detection with AI-assisted refinement.**
 
+> *"Your `TV Lights OFF` automation has 3 redundant target entries — drop them?"*
 > *"On weekdays at ~06:47 AM you turn on `light.kitchen` — automate this?"*
 
-Click **Apply** and the suggestion lands as a real HA automation. Optional LLM enrichment refines the YAML, explains the proposal, and proposes plausible causes for anomalies — with strict privacy controls and a full audit log of every byte that leaves your network.
+Click **Apply** and either suggestion lands as a real HA automation. Optional LLM enrichment with strict privacy controls and a full audit log of every byte that leaves your network.
 
-## What you get
+## What you get (v1.1)
 
-- **Eight built-in detectors** covering daily schedules, weekly patterns, entity-follows-entity correlations (with lag), long-running states, anomalies, orphan devices, streaks
+### Audit your existing automations (NEW)
+- **AutomationAuditDetector** reads every automation in `automations.yaml`, `configuration.yaml`, and package files
+- Flags **entity unavailable / missing**, **long-stay durations**, **redundant action targets**, **trigger drift vs reality**, **conditions too strict**, **action errors**, **dormant automations** (no fires in 30d+)
+- Findings with a **deterministic fix** (redundant_target, trigger_time_drift, long_on_duration) ship with a **📋 Preview** button — view + apply the fix in a side-by-side YAML diff, zero LLM tokens
+- Findings without a clean algorithmic fix offer **🤖 Suggest** — LLM is given an explicit AUTHORIZED EDITS list so it can only act on what the findings actually justify, no hallucinated removals
+- **Two-stage refinement** — algorithm first, then layer LLM iteration on top with extra user feedback
+- Audit findings ALSO surface in **Settings → Repairs** so users discover them via HA's native UI
+
+### Discover new patterns
+- **Eight built-in detectors**: schedule, seasonality, cooccurrence, lagged_correlation, long_tail, streak, orphan_device, frequency_anomaly
 - **Opt-in user-supplied detectors** loaded from `<config>/ha_insights_detectors/*.py` with AST-sandbox
-- **Multi-turn LLM Refine** — iterate the proposed automation through natural conversation
-- **Agent failover** — auto-pick walks preferred → Assist default → other agents on failure
-- **Per-call cost estimator + threshold confirm** — prevents surprise Opus-tier bills
-- **Three-mode privacy wizard** — Off (no LLM) / Local (Ollama / Wyoming) / Cloud (Anthropic, OpenAI, Google) with explicit consent
-- **Pseudonymization on by default** — real entity_ids never leave your network on cloud calls
+
+### Pipeline
+- **IDE-style side-by-side diff modal** with LCS line alignment, phone-responsive
+- **Concise vs In-depth analysis toggle** — trade LLM cost vs reasoning depth
+- **Token usage row** in every refine modal so you see what each call cost
+- **Multi-turn refine** via conversation_id
+- **Agent failover** — auto-walks preferred → Assist default → other agents
+- **Per-month USD budget cap** for cloud LLM batch operations (local LLMs bypass)
+- **Three-mode privacy wizard** — Off / Local / Cloud with pseudonymization on by default
+- **Per-entity opt-out + redacted-payload preview before every call**
 - **Sidebar panel + Lovelace card** — review, refine, apply, undo, drift-aware
-- **Full audit log** — every outbound call recorded with agent / locality / bytes / cost / success
-- **Daily digest + high-confidence notifications**
-- **Multi-config-entry** — independent insight scopes
+- **Full audit log** of every outbound call (agent / bytes / cost / success)
+- **Multi-config-entry** for independent insight scopes
 - **English + German translations**
 
 ## Companion card
