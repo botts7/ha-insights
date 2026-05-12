@@ -290,6 +290,138 @@ async def _setup_entry_body(
                 EVENT_HOMEASSISTANT_STARTED, _register_scheduler
             )
 
+    # v1.2: incremental rollup auto-scheduler. Opt-in via OptionsFlow
+    # — default OFF until users explicitly enable it. When enabled,
+    # we run one batch every 6 hours. Bounded to 25 entities/batch,
+    # 8 chunks/entity, 120s budget. Single-flight lock guarantees a
+    # manual click + the schedule can't pile up. Only registered
+    # after EVENT_HOMEASSISTANT_STARTED + a 5-minute warmup so we
+    # never kick the recorder during boot/state-firehose-catchup.
+    from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
+    from homeassistant.helpers.event import async_track_time_interval
+
+    from .config_flow import get_audit_auto_rollup_enabled
+
+    _ROLLUP_AUTO_INTERVAL = timedelta(hours=6)
+    _ROLLUP_INITIAL_KICK_DELAY_SEC = 300  # 5 min — past HA's boot recorder catchup
+    _ROLLUP_AUTO_BATCH_SIZE = 25
+
+    async def _scheduled_rollup(_now=None) -> None:
+        """Run one auto-rollup batch. Logs + swallows so the timer
+        never dies on a single bad scan."""
+        try:
+            from .audit.rollup import (
+                collect_audit_target_entities,
+                run_rollup_batch,
+            )
+            from .config_flow import get_blocked_entities
+            from .detectors import _load_existing_automations
+
+            autos = await _load_existing_automations(hass)
+            target_eids = collect_audit_target_entities(autos)
+            if not target_eids:
+                return
+            blocked = get_blocked_entities(entry)
+            entry_data_ = hass.data.get(DOMAIN, {}).get(entry.entry_id)
+            if not entry_data_:
+                return
+            store_obj = entry_data_.get("store")
+            if store_obj is None:
+                return
+            summary = await run_rollup_batch(
+                hass,
+                store_obj,
+                target_entity_ids=target_eids,
+                blocked_entities=blocked,
+                batch_size=_ROLLUP_AUTO_BATCH_SIZE,
+            )
+            _LOGGER.info(
+                "audit auto-rollup: processed=%d errors=%d timed_out=%d "
+                "next_due=%d duration=%ss skipped_inflight=%s",
+                summary.get("entities_processed", 0),
+                summary.get("errors", 0),
+                len(summary.get("timed_out_entities", []) or []),
+                summary.get("next_due_count", 0),
+                summary.get("batch_duration_sec", 0),
+                summary.get("skipped_inflight", False),
+            )
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.debug("audit auto-rollup failed: %s", err)
+
+    async def _initial_rollup_kick() -> None:
+        """Delayed first-run. Lives long enough past boot that the
+        recorder is no longer catching up on the state firehose.
+        Uses entry.async_create_background_task so it cancels
+        cleanly on unload."""
+        import asyncio as _asyncio
+
+        await _asyncio.sleep(_ROLLUP_INITIAL_KICK_DELAY_SEC)
+        await _scheduled_rollup()
+
+    async def _register_rollup_scheduler(_event=None) -> None:
+        cancel = async_track_time_interval(
+            hass, _scheduled_rollup, _ROLLUP_AUTO_INTERVAL
+        )
+        entry_data_ = hass.data.get(DOMAIN, {}).get(entry.entry_id)
+        if isinstance(entry_data_, dict):
+            entry_data_["rollup_scheduler_cancel"] = cancel
+        _LOGGER.info(
+            "HA Insights audit rollup auto-scheduler registered "
+            "(every %s, initial kick in %ds)",
+            _ROLLUP_AUTO_INTERVAL,
+            _ROLLUP_INITIAL_KICK_DELAY_SEC,
+        )
+        entry.async_create_background_task(
+            hass, _initial_rollup_kick(), "ha_insights_initial_rollup"
+        )
+
+    if get_audit_auto_rollup_enabled(entry):
+        if hass.is_running:
+            await _register_rollup_scheduler()
+        else:
+            hass.bus.async_listen_once(
+                EVENT_HOMEASSISTANT_STARTED, _register_rollup_scheduler
+            )
+    else:
+        _LOGGER.debug(
+            "audit auto-rollup disabled (opt-in via OptionsFlow)"
+        )
+
+    # OptionsFlow change listener. When the user bumps
+    # `audit_rollup_window_days`, prune any rollups computed against
+    # a different window so the next batch refills from scratch.
+    # Reload the entry so other options take effect.
+    async def _on_options_updated(
+        hass_: HomeAssistant, entry_: ConfigEntry
+    ) -> None:
+        try:
+            from .config_flow import get_audit_rollup_window_days
+
+            new_window = get_audit_rollup_window_days(entry_)
+            entry_data = hass_.data.get(DOMAIN, {}).get(entry_.entry_id) or {}
+            current_store = entry_data.get("store")
+            if current_store is not None:
+                deleted = await current_store.prune_rollups_with_wrong_window(
+                    new_window
+                )
+                # Always clear incremental progress on window change —
+                # the cursor was earned against the old window; the
+                # next batch must start fresh so historical buckets
+                # match the new window.
+                progress_cleared = await current_store.clear_rollup_progress()
+                if deleted or progress_cleared:
+                    _LOGGER.info(
+                        "audit: pruned %d rollup rows + %d progress cursors after window change to %d days",
+                        deleted,
+                        progress_cleared,
+                        new_window,
+                    )
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.debug("options-updated rollup prune skipped: %s", err)
+        await hass_.config_entries.async_reload(entry_.entry_id)
+
+    entry.async_on_unload(entry.add_update_listener(_on_options_updated))
+
     return True
 
 
@@ -608,14 +740,15 @@ def _async_register_services(hass: HomeAssistant) -> None:
 
     async def _run_audit_rollup(call: ServiceCall) -> None:
         """Manual rollup trigger — materialize recorder aggregates for
-        the next stale batch of audit-target entities. Conservative
-        defaults: small batch (5), 20s per-entity timeout, 120s
-        per-batch budget, single-flight lock so concurrent calls
-        no-op. Use this to verify on a small slice before any
-        scheduled run.
+        the next batch of audit-target entities that need work.
+        Defaults to 25 entities/batch, matching the auto-scheduler so
+        a single click does meaningful work without 12 clicks to
+        backfill a typical install. All safety rails apply (per-chunk
+        timeout, per-entity wall clock, 120s batch budget, single-
+        flight lock, 5000-row chunk cap). Caller may pass
+        `batch_size` to override; capped at ROLLUP_BATCH_PER_RUN (50).
         """
         from .audit.rollup import (
-            ROLLUP_BATCH_SMALL,
             collect_audit_target_entities,
             run_rollup_batch,
         )
@@ -626,7 +759,10 @@ def _async_register_services(hass: HomeAssistant) -> None:
         if not target_eids:
             _LOGGER.info("audit rollup: no audit-target entities found, nothing to do")
             return
-        batch_size = int(call.data.get("batch_size") or ROLLUP_BATCH_SMALL)
+        # Default 25 entities — same as the auto-scheduler so manual
+        # and auto have predictable parity. Override via service data.
+        _MANUAL_DEFAULT_BATCH = 25
+        batch_size = int(call.data.get("batch_size") or _MANUAL_DEFAULT_BATCH)
         # Hard cap from outside — even if caller asks for 500, we
         # cap at the per-run config knob to protect HA.
         from .audit.rollup import ROLLUP_BATCH_PER_RUN
@@ -972,6 +1108,9 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # listener so we don't keep firing scans after unload.
     if data.get("scan_scheduler_cancel") is not None:
         data["scan_scheduler_cancel"]()
+    # v1.2 auto-rollup scheduler cleanup. Same pattern.
+    if data.get("rollup_scheduler_cancel") is not None:
+        data["rollup_scheduler_cancel"]()
     # Cancel any in-flight initial backfill before closing the store —
     # otherwise it'll write to a closed connection on its next flush.
     backfill_task = data.get("backfill_task")

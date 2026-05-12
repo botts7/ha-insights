@@ -24,7 +24,30 @@ if TYPE_CHECKING:
 
 
 WS_PROTOCOL_VERSION = 1
-INTEGRATION_VERSION = "1.1.0"
+
+
+async def _get_integration_version(hass: HomeAssistant) -> str:
+    """Resolve the integration version dynamically from manifest.json
+    via HA's loader. Cached in `hass.data[DOMAIN]["_version_cache"]`
+    so subsequent hello() calls don't hit the loader.
+
+    Reading the manifest at runtime is the idiomatic HA pattern —
+    avoids drift between manifest.json and a hardcoded constant.
+    """
+    cache_key = "_integration_version_cache"
+    domain_data = hass.data.setdefault(DOMAIN, {})
+    cached = domain_data.get(cache_key)
+    if isinstance(cached, str):
+        return cached
+    try:
+        from homeassistant.loader import async_get_integration
+
+        integration = await async_get_integration(hass, DOMAIN)
+        version = str(integration.version) if integration.version else "unknown"
+    except Exception:  # noqa: BLE001
+        version = "unknown"
+    domain_data[cache_key] = version
+    return version
 
 SUPPORTED_METHODS = (
     "hello",
@@ -68,6 +91,8 @@ def async_register(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_refine)
     websocket_api.async_register_command(hass, ws_test_actions)
     websocket_api.async_register_command(hass, ws_backfill_status)
+    websocket_api.async_register_command(hass, ws_recorder_status)
+    websocket_api.async_register_command(hass, ws_rollup_progress)
     websocket_api.async_register_command(hass, ws_redaction_preview)
     websocket_api.async_register_command(hass, ws_audit_log)
     websocket_api.async_register_command(hass, ws_undo)
@@ -196,23 +221,30 @@ def _resolve_preferred_agent_id(hass: HomeAssistant) -> str | None:
         vol.Optional("card_version"): str,
     }
 )
-@callback
-def ws_hello(
+@websocket_api.async_response
+async def ws_hello(
     hass: HomeAssistant,
     connection: websocket_api.ActiveConnection,
     msg: dict[str, Any],
 ) -> None:
-    """Handshake — return integration metadata + supported methods + privacy mode."""
+    """Handshake — return integration metadata + supported methods + privacy mode.
+
+    Async so we can resolve the integration version via HA's
+    public loader (`async_get_integration`) instead of hardcoding
+    a string that drifts from manifest.json. The resolver caches
+    after the first call.
+    """
     from .config_flow import get_active_mode
 
     privacy_mode = "off"
     for entry in hass.config_entries.async_entries(DOMAIN):
         privacy_mode = get_active_mode(entry)
         break
+    integration_version = await _get_integration_version(hass)
     connection.send_result(
         msg["id"],
         {
-            "integration_version": INTEGRATION_VERSION,
+            "integration_version": integration_version,
             "ws_protocol_version": WS_PROTOCOL_VERSION,
             "supported_methods": list(SUPPORTED_METHODS),
             "privacy_mode": privacy_mode,
@@ -1750,6 +1782,181 @@ async def ws_audit_log(
         return
     rows = await store.get_outbound_calls(limit=msg["limit"])
     connection.send_result(msg["id"], {"calls": rows})
+
+
+@websocket_api.websocket_command(
+    {vol.Required("type"): "home_insights/recorder_status"}
+)
+@websocket_api.async_response
+async def ws_recorder_status(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Return how far back HA's recorder retains state history.
+
+    Surfaces three numbers so the card can show the user what's
+    actually possible vs. what's configured:
+
+      purge_keep_days       — what HA is configured to keep
+                              (recorder.purge_keep_days, default 10)
+      oldest_record_age_days — what's ACTUALLY in the DB right now
+                              (may be less if purge ran recently, or
+                              more if the user just lowered the keep
+                              setting and purge hasn't caught up)
+      available_window_days — min(the two above) — the safe number
+                              to display + use for rollup window
+
+    The user can then set audit_rollup_window_days up to this value
+    in OptionsFlow. Going beyond it just queries empty windows.
+    """
+    purge_keep_days: int | None = None
+    oldest_age_days: int | None = None
+    configured_audit_window_days: int | None = None
+    try:
+        from .config_flow import get_audit_rollup_window_days
+        from .const import DOMAIN
+
+        # Single-entry default, but if multi-entry the max wins (the
+        # rollup runs once against the largest window any entry wants).
+        entries = list(hass.config_entries.async_entries(DOMAIN))
+        if entries:
+            configured_audit_window_days = max(
+                get_audit_rollup_window_days(e) for e in entries
+            )
+    except Exception:  # noqa: BLE001
+        pass
+
+    try:
+        from homeassistant.components.recorder import get_instance
+
+        rec = get_instance(hass)
+        # `keep_days` is the documented public attr; older HA
+        # versions used `_keep_days`. Public form first.
+        purge_keep_days = getattr(rec, "keep_days", None) or getattr(
+            rec, "_keep_days", None
+        )
+
+        # Probe oldest data depth using ONLY public history API
+        # (`get_significant_states`). HA-core review safe — no
+        # `db_schema` / SQLAlchemy `select()` / private session
+        # access. Walks a small set of candidate depths and finds
+        # the deepest one that still returns data.
+        def _probe_oldest_age_days() -> int | None:
+            try:
+                from homeassistant.components.recorder.history import (
+                    get_significant_states,
+                )
+            except ImportError:
+                return None
+            from datetime import UTC as _UTC
+            from datetime import datetime as _dt
+            from datetime import timedelta as _td
+
+            # Candidate depths in days. Walks from CLOSE to FAR
+            # so we accumulate the deepest "yes" answer. Stops as
+            # soon as a probe returns empty — that's our retention
+            # ceiling. Each probe is a 1-hour slice with no entity
+            # filter, so it's cheap (recorder reads one tiny page).
+            probes_days = (
+                1, 3, 7, 14, 30, 60, 90,
+                120, 150, 180, 210, 270, 365,
+            )
+            now_dt = _dt.now(tz=_UTC)
+            deepest_with_data: int | None = None
+            for days in probes_days:
+                start = now_dt - _td(days=days)
+                end = start + _td(hours=1)
+                try:
+                    result = get_significant_states(
+                        hass,
+                        start,
+                        end,
+                        None,  # all entities — tiny probe slice
+                        significant_changes_only=True,
+                        minimal_response=True,
+                        no_attributes=True,
+                    )
+                except Exception as err:  # noqa: BLE001
+                    _LOGGER.debug(
+                        "recorder_status: probe at %dd failed: %s",
+                        days,
+                        err,
+                    )
+                    break
+                if result:
+                    deepest_with_data = days
+                    continue
+                # Empty result → we're past retention. Stop.
+                break
+            return deepest_with_data
+
+        # Route through the recorder's own executor so we serialize
+        # against in-flight writes instead of fighting the default
+        # pool.
+        oldest_age_days = await rec.async_add_executor_job(
+            _probe_oldest_age_days
+        )
+    except Exception as err:  # noqa: BLE001
+        _LOGGER.debug("recorder_status: probe failed: %s", err)
+
+    # Safe window is the smaller of the two when both known.
+    available_window_days: int | None = None
+    if purge_keep_days is not None and oldest_age_days is not None:
+        available_window_days = min(int(purge_keep_days), oldest_age_days)
+    elif purge_keep_days is not None:
+        available_window_days = int(purge_keep_days)
+    elif oldest_age_days is not None:
+        available_window_days = oldest_age_days
+
+    # Effective window = what the rollup will ACTUALLY cover. Even when
+    # the user sets `audit_rollup_window_days = 180`, the recorder can
+    # only return what it retains. Surface this explicitly so the card
+    # can show "180 configured, 10 effective" instead of just one of
+    # the numbers.
+    effective_window_days: int | None = None
+    if (
+        configured_audit_window_days is not None
+        and available_window_days is not None
+    ):
+        effective_window_days = min(
+            configured_audit_window_days, available_window_days
+        )
+    elif configured_audit_window_days is not None:
+        effective_window_days = configured_audit_window_days
+    elif available_window_days is not None:
+        effective_window_days = available_window_days
+
+    connection.send_result(
+        msg["id"],
+        {
+            "purge_keep_days": purge_keep_days,
+            "oldest_record_age_days": oldest_age_days,
+            "available_window_days": available_window_days,
+            "configured_audit_window_days": configured_audit_window_days,
+            "effective_window_days": effective_window_days,
+        },
+    )
+
+
+@websocket_api.websocket_command(
+    {vol.Required("type"): "home_insights/rollup_progress"}
+)
+@callback
+def ws_rollup_progress(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Return the current/last audit-rollup batch state.
+
+    Sync `@callback` is safe — `get_rollup_progress` is a pure
+    dict copy off module-level state with no I/O. Card polls this
+    while a batch is in flight to render its progress bar.
+    """
+    from .audit.rollup import get_rollup_progress
+
+    connection.send_result(msg["id"], get_rollup_progress())
 
 
 @websocket_api.websocket_command(

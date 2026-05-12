@@ -105,6 +105,7 @@ def build_audit_packet(
     blocked_entities: frozenset[str] = frozenset(),
     trace_aggregates: Any | None = None,
     rollup_by_entity: dict[str, dict[str, dict[int, int]]] | None = None,
+    rollup_window_days: int | None = None,
     live_states: dict[str, str] | None = None,
     now: datetime | None = None,
 ) -> AuditPacket:
@@ -215,13 +216,16 @@ def build_audit_packet(
     # rollup exists yet — first-scan installs get only short-term
     # findings until the rollup scheduler catches up.
     if rollup_by_entity:
-        from .rollup import observations_from_rollups
+        from .rollup import ROLLUP_WINDOW_DAYS, observations_from_rollups
 
+        win_days = rollup_window_days or ROLLUP_WINDOW_DAYS
         for eid in sorted(all_entities):
             entity_rollups = rollup_by_entity.get(eid)
             if not entity_rollups:
                 continue
-            for obs_dict in observations_from_rollups(eid, entity_rollups):
+            for obs_dict in observations_from_rollups(
+                eid, entity_rollups, window_days=win_days
+            ):
                 observations.append(
                     Observation(
                         kind=obs_dict["kind"],

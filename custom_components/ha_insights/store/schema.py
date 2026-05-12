@@ -6,7 +6,7 @@ Never edit a previously-shipped migration.
 """
 from __future__ import annotations
 
-CURRENT_VERSION = 2
+CURRENT_VERSION = 3
 
 MIGRATIONS: dict[int, str] = {
     1: """
@@ -107,5 +107,29 @@ MIGRATIONS: dict[int, str] = {
         ON audit_rollups(computed_at);
 
     INSERT OR REPLACE INTO schema_version (version) VALUES (2);
+    """,
+    # v1.2 — Incremental rollup progress tracker. One row per entity
+    # holding the unix timestamp of the latest fully-rolled-up day.
+    # Rollup batches resume from this cursor and ONLY query the gap
+    # between it and "today", merging new bucket counts additively
+    # into audit_rollups. Old buckets survive recorder purges — once
+    # a day is rolled up, its counts are ours forever (until the user
+    # changes window_days or purges).
+    #
+    # The audit_rollups table semantics also change: `upsert_rollups`
+    # becomes additive (ON CONFLICT increment) rather than replace.
+    # Existing v2 rows are kept; they'll be merged into on the next
+    # rollup pass.
+    3: """
+    CREATE TABLE IF NOT EXISTS audit_rollup_progress (
+        entity_id TEXT PRIMARY KEY,
+        last_complete_day_ts REAL NOT NULL,
+        computed_at REAL NOT NULL,
+        window_days INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS ix_rollup_progress_computed
+        ON audit_rollup_progress(computed_at);
+
+    INSERT OR REPLACE INTO schema_version (version) VALUES (3);
     """,
 }

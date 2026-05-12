@@ -51,16 +51,40 @@ _LOGGER = logging.getLogger(__name__)
 # in flight.
 _RUN_LOCK = asyncio.Lock()
 
-# Per-entity recorder query timeout. If one entity blocks the
-# executor for longer than this, we abandon it and log; next entity
-# in the batch still gets processed. Prevents one slow entity from
-# hanging an entire run.
-_PER_ENTITY_TIMEOUT_SEC = 20.0
+# Per-chunk recorder query timeout. v1.2: rollup now queries one
+# week at a time, so we time-bound each chunk independently. If a
+# chunk stalls, we abort it and the entity's cursor doesn't advance —
+# the next batch picks the same chunk up again.
+_PER_CHUNK_TIMEOUT_SEC = 15.0
+
+# Per-entity wall-clock cap across all of its chunks in a single
+# batch. Even when the per-chunk timeout protects each call, we
+# don't want one entity to monopolize the batch on first-time
+# backfill — cap and let the next batch resume.
+_PER_ENTITY_TIMEOUT_SEC = 60.0
 
 # Total per-batch wall-clock cap. Defensive — if the batch takes
 # more than this overall (busy recorder, slow disk), stop early
 # and let the next scheduled call pick up where we left off.
 _BATCH_BUDGET_SEC = 120.0
+
+# How many 7-day chunks of recorder history we'll backfill for one
+# entity in a single batch. 8 chunks = 56 days/batch/entity. With
+# the per-entity 60s wall-clock cap, this works out to ~7.5 s per
+# chunk worst case (typical: 1-2 s). Daily scheduler can fully
+# backfill a 90-day window in 2 batches, 180-day in 4.
+_MAX_CHUNKS_PER_ENTITY = 8
+
+# Chunk width. One week is short enough that even chatty entities
+# return a manageable payload (~10k events worst case), long enough
+# that we don't pay too many round-trip costs.
+_CHUNK_DAYS = 7
+
+# Defensive row cap per chunk. If a single 7-day query returns more
+# rows than this, the entity is too chatty to safely roll up — we
+# skip the chunk, log, and let the cursor stand (entity will be
+# retried next batch). Prevents memory blowups on edge installs.
+_CHUNK_ROW_CAP = 5000
 
 
 # Configuration knobs. Conservative defaults that don't crater
@@ -77,9 +101,69 @@ DIM_DOM = "dom"  # day-of-month, 1..31
 DIM_MOY = "moy"  # month-of-year, 1..12
 
 
+# Live progress for the in-flight rollup batch. Read by the
+# `home_insights/rollup_progress` WS endpoint so the card can show
+# a progress bar without polling the DB. Module-global is fine —
+# the run lock guarantees at most one batch at a time. Defined here
+# (not adjacent to _RUN_LOCK) because the initial `window_days` value
+# references ROLLUP_WINDOW_DAYS above.
+_PROGRESS: dict[str, Any] = {
+    "running": False,
+    "total": 0,
+    "processed": 0,
+    "errors": 0,
+    "timed_out": 0,
+    "current_entity_id": None,
+    "started_ts": None,
+    "finished_ts": None,
+    "window_days": ROLLUP_WINDOW_DAYS,
+    "last_summary": None,
+}
+
+
+def get_rollup_progress() -> dict[str, Any]:
+    """Snapshot of the current/last rollup batch. Cheap dict copy."""
+    snap = dict(_PROGRESS)
+    if snap["running"] and snap["started_ts"] is not None:
+        elapsed = datetime.now(tz=UTC).timestamp() - snap["started_ts"]
+        snap["elapsed_sec"] = round(elapsed, 1)
+        if snap["processed"] > 0 and snap["total"] > 0:
+            per_entity = elapsed / snap["processed"]
+            remaining = max(0, snap["total"] - snap["processed"])
+            snap["eta_sec"] = round(per_entity * remaining, 1)
+    return snap
+
+
 # ---------------------------------------------------------------------------
 # Rollup materialization
 # ---------------------------------------------------------------------------
+
+
+def _resolve_window_days(hass: "HomeAssistant", entry: Any = None) -> int:
+    """Resolve the rollup window for the audit pipeline.
+
+    Prefers an explicit `entry` (the per-entry detector path passes
+    its own ConfigEntry). Without one, takes the MAX across all
+    HA Insights config entries — that way the rollup batch runs
+    once and serves the largest window any entry wants. Smaller-
+    window entries just read a subset of the same buckets.
+
+    Falls back to the module default (90) when no entries exist
+    yet or the options lookup blows up.
+    """
+    try:
+        from ..config_flow import get_audit_rollup_window_days
+        from ..const import DOMAIN
+
+        if entry is not None:
+            return get_audit_rollup_window_days(entry)
+        entries = list(hass.config_entries.async_entries(DOMAIN))
+        if not entries:
+            return ROLLUP_WINDOW_DAYS
+        return max(get_audit_rollup_window_days(e) for e in entries)
+    except Exception:  # noqa: BLE001
+        pass
+    return ROLLUP_WINDOW_DAYS
 
 
 async def run_rollup_batch(
@@ -132,13 +216,20 @@ async def _run_rollup_batch_locked(
 ) -> dict[str, Any]:
     if now is None:
         now = datetime.now(tz=UTC)
-    stale_cutoff = (now - timedelta(days=ROLLUP_TTL_DAYS)).timestamp()
+    end_of_today_ts = _start_of_day_utc(now).timestamp()
     candidates_all = [e for e in target_entity_ids if e not in blocked_entities]
     blocked_count = len(target_entity_ids) - len(candidates_all)
-    candidates = await store.list_stale_rollup_entities(
-        candidates_all, stale_cutoff
+    # v1.2: incremental picker. Returns only entities whose cursor
+    # hasn't yet caught up to today. Caught-up entities are no-ops.
+    candidates = await store.list_entities_needing_rollup(
+        candidates_all, end_of_today_ts
     )
     batch = candidates[:batch_size]
+
+    # Resolve the rollup window from OptionsFlow once per batch.
+    # The detector pre-fetch path uses the same resolver so audit
+    # findings + the materialized cache stay in sync.
+    window_days = _resolve_window_days(hass)
 
     started = datetime.now(tz=UTC)
     processed = 0
@@ -146,57 +237,91 @@ async def _run_rollup_batch_locked(
     timed_out: list[str] = []
     budget_exceeded = False
 
-    for eid in batch:
-        # Per-batch wall clock guard — defensive against pathological
-        # recorder backends. Stop early; next call resumes.
-        elapsed = (datetime.now(tz=UTC) - started).total_seconds()
-        if elapsed > _BATCH_BUDGET_SEC:
-            budget_exceeded = True
-            _LOGGER.info(
-                "rollup: batch budget exceeded after %ds, %d processed; "
-                "remainder picked up on next run.",
-                int(elapsed),
-                processed,
-            )
-            break
-        try:
-            rows = await asyncio.wait_for(
-                _compute_rollups_for_entity(hass, eid, now=now),
-                timeout=_PER_ENTITY_TIMEOUT_SEC,
-            )
-            await store.upsert_rollups(
-                eid,
-                rows,
-                window_days=ROLLUP_WINDOW_DAYS,
-                computed_at_ts=now.timestamp(),
-            )
-            processed += 1
-        except TimeoutError:
-            timed_out.append(eid)
-            _LOGGER.warning(
-                "rollup: %s timed out after %ds — skipping",
-                eid,
-                int(_PER_ENTITY_TIMEOUT_SEC),
-            )
-        except Exception as err:  # noqa: BLE001
-            errors += 1
-            _LOGGER.debug("rollup failed for %s: %s", eid, err)
-        # Yield the event loop after every entity. The HA recorder
-        # query is the heaviest piece here; if it bursts CPU, the
-        # next entity waits naturally.
-        await asyncio.sleep(0)
+    # Initialize live progress for the card. Cleared on return.
+    _PROGRESS.update(
+        running=True,
+        total=len(batch),
+        processed=0,
+        errors=0,
+        timed_out=0,
+        current_entity_id=None,
+        started_ts=started.timestamp(),
+        finished_ts=None,
+        window_days=window_days,
+        last_summary=None,
+    )
 
-    return {
-        "entities_processed": processed,
-        "errors": errors,
-        "skipped_blocked": blocked_count,
-        "next_due_count": max(0, len(candidates) - processed - errors - len(timed_out)),
-        "timed_out_entities": timed_out,
-        "budget_exceeded": budget_exceeded,
-        "batch_duration_sec": round(
-            (datetime.now(tz=UTC) - started).total_seconds(), 1
-        ),
-    }
+    try:
+        for eid in batch:
+            # Per-batch wall clock guard — defensive against
+            # pathological recorder backends. Stop early; next call
+            # resumes.
+            elapsed = (datetime.now(tz=UTC) - started).total_seconds()
+            if elapsed > _BATCH_BUDGET_SEC:
+                budget_exceeded = True
+                _LOGGER.info(
+                    "rollup: batch budget exceeded after %ds, %d processed; "
+                    "remainder picked up on next run.",
+                    int(elapsed),
+                    processed,
+                )
+                break
+            _PROGRESS["current_entity_id"] = eid
+            try:
+                # Incremental: each call processes at most
+                # _MAX_CHUNKS_PER_ENTITY chunks of 7 days, then
+                # advances the cursor. Subsequent batches resume.
+                result = await asyncio.wait_for(
+                    _compute_rollups_for_entity_incremental(
+                        hass,
+                        store,
+                        eid,
+                        window_days=window_days,
+                        now=now,
+                    ),
+                    timeout=_PER_ENTITY_TIMEOUT_SEC,
+                )
+                if result.get("advanced"):
+                    processed += 1
+                    _PROGRESS["processed"] = processed
+            except TimeoutError:
+                timed_out.append(eid)
+                _PROGRESS["timed_out"] = len(timed_out)
+                _LOGGER.warning(
+                    "rollup: %s timed out after %ds — cursor not advanced; will retry",
+                    eid,
+                    int(_PER_ENTITY_TIMEOUT_SEC),
+                )
+            except Exception as err:  # noqa: BLE001
+                errors += 1
+                _PROGRESS["errors"] = errors
+                _LOGGER.debug("rollup failed for %s: %s", eid, err)
+            # Yield the event loop after every entity. The HA
+            # recorder query is the heaviest piece here; if it bursts
+            # CPU, the next entity waits naturally.
+            await asyncio.sleep(0)
+
+        summary = {
+            "entities_processed": processed,
+            "errors": errors,
+            "skipped_blocked": blocked_count,
+            "next_due_count": max(
+                0, len(candidates) - processed - errors - len(timed_out)
+            ),
+            "timed_out_entities": timed_out,
+            "budget_exceeded": budget_exceeded,
+            "batch_duration_sec": round(
+                (datetime.now(tz=UTC) - started).total_seconds(), 1
+            ),
+        }
+    finally:
+        _PROGRESS.update(
+            running=False,
+            current_entity_id=None,
+            finished_ts=datetime.now(tz=UTC).timestamp(),
+            last_summary=locals().get("summary"),
+        )
+    return summary
 
 
 def collect_audit_target_entities(
@@ -222,86 +347,236 @@ def collect_audit_target_entities(
     return sorted(seen)
 
 
-async def _compute_rollups_for_entity(
+def _start_of_day_utc(t: datetime) -> datetime:
+    """Midnight in HA local time, returned as UTC. We bucket on
+    LOCAL day boundaries so 'every Monday morning at 7' falls into
+    Monday consistently regardless of UTC offset."""
+    local = dt_util.as_local(t)
+    midnight_local = local.replace(hour=0, minute=0, second=0, microsecond=0)
+    return midnight_local.astimezone(UTC)
+
+
+async def _query_states_chunk(
     hass: "HomeAssistant",
     entity_id: str,
-    *,
-    now: datetime,
-) -> list[tuple[str, int, int]]:
-    """Walk the recorder for one entity, return (dim, bucket, count)
-    tuples ready for `Store.upsert_rollups`.
+    chunk_start: datetime,
+    chunk_end: datetime,
+) -> list[Any] | None:
+    """Run get_significant_states for one chunk on the recorder's
+    own executor. Idiomatic per HA core review guidelines — the
+    recorder serializes its own connection pool, so reads scheduled
+    here cooperate cleanly with concurrent recorder writes instead
+    of fighting them on the default executor.
 
-    Strategy: prefer the recorder Statistics API (cheap, pre-rolled
-    by HA) when the entity has statistics. Fall back to
-    `get_significant_states` for non-numeric / non-stat entities.
+    Returns None on any failure (caller skips the chunk). Bounded
+    to _CHUNK_ROW_CAP rows; over-cap chunks are rejected so memory
+    stays predictable.
     """
-    since = now - timedelta(days=ROLLUP_WINDOW_DAYS)
+    try:
+        from homeassistant.components.recorder import get_instance
+        from homeassistant.components.recorder.history import (
+            get_significant_states,
+        )
+    except ImportError:  # recorder not available — graceful no-op
+        return None
 
-    # Try the states path. Statistics-API path is more performant
-    # but only works for numeric sensors that HA's recorder has
-    # explicitly opted into (sensors with state_class). For the
-    # audit use case we mostly care about binary sensors / switches
-    # / lights, which use significant states. Keep this path simple
-    # for now; the statistics-first optimisation lands in a
-    # follow-up when we have benchmark numbers on real installs.
-    bucket_counts: dict[str, dict[int, int]] = {
-        DIM_DOW: {},
-        DIM_DOM: {},
-        DIM_MOY: {},
-    }
-
-    def _query_states() -> list[Any]:
-        # Run on the executor so the recorder DB query doesn't
-        # block the event loop. `get_significant_states` is the
-        # standard HA helper.
-        try:
-            from homeassistant.components.recorder.history import (
-                get_significant_states,
-            )
-        except Exception:  # noqa: BLE001
-            return []
+    def _query() -> list[Any] | None:
         try:
             result = get_significant_states(
                 hass,
-                since,
-                now,
+                chunk_start,
+                chunk_end,
                 [entity_id],
                 significant_changes_only=True,
                 minimal_response=True,
                 no_attributes=True,
             )
-            return result.get(entity_id) if isinstance(result, dict) else []
-        except Exception as err:  # noqa: BLE001
+        except Exception as err:  # noqa: BLE001  recorder errors vary by HA version
             _LOGGER.debug(
-                "rollup: get_significant_states failed for %s: %s",
+                "rollup: states query failed for %s [%s..%s]: %s",
                 entity_id,
+                chunk_start.isoformat(),
+                chunk_end.isoformat(),
                 err,
             )
-            return []
+            return None
+        rows = result.get(entity_id) if isinstance(result, dict) else []
+        rows = rows or []
+        if len(rows) > _CHUNK_ROW_CAP:
+            # Don't return the data — caller treats as safety skip.
+            # Allocating tens of thousands of rows is exactly what
+            # we want to avoid for OOM safety.
+            return None
+        return rows
 
-    states = await hass.async_add_executor_job(_query_states)
-    if not states:
-        return []
+    # `recorder.get_instance(hass).async_add_executor_job` routes
+    # the query through the recorder's dedicated thread, so it
+    # serializes against in-flight writes the same way HA's
+    # built-in history/statistics endpoints do.
+    return await get_instance(hass).async_add_executor_job(_query)
 
+
+def _state_to_bucket_deltas(
+    states: list[Any],
+) -> dict[str, dict[int, int]]:
+    """Aggregate a chunk's state list into per-dimension bucket
+    deltas. Pure function — no HA calls, easy to test."""
+    deltas: dict[str, dict[int, int]] = {
+        DIM_DOW: {},
+        DIM_DOM: {},
+        DIM_MOY: {},
+    }
     for st in states:
         ts = _state_timestamp(st)
         if ts is None:
             continue
         local_ts = dt_util.as_local(ts)
-        # weekday(): 0=Mon..6=Sun — matches our DIM_DOW convention
-        dow = local_ts.weekday()
+        dow = local_ts.weekday()  # 0=Mon..6=Sun
         dom = local_ts.day
         moy = local_ts.month
-        bucket_counts[DIM_DOW][dow] = bucket_counts[DIM_DOW].get(dow, 0) + 1
-        bucket_counts[DIM_DOM][dom] = bucket_counts[DIM_DOM].get(dom, 0) + 1
-        bucket_counts[DIM_MOY][moy] = bucket_counts[DIM_MOY].get(moy, 0) + 1
+        deltas[DIM_DOW][dow] = deltas[DIM_DOW].get(dow, 0) + 1
+        deltas[DIM_DOM][dom] = deltas[DIM_DOM].get(dom, 0) + 1
+        deltas[DIM_MOY][moy] = deltas[DIM_MOY].get(moy, 0) + 1
+    return deltas
 
-    # Flatten to upsert tuple list
-    out: list[tuple[str, int, int]] = []
-    for dim, buckets in bucket_counts.items():
-        for bucket, count in buckets.items():
-            out.append((dim, bucket, count))
-    return out
+
+async def _compute_rollups_for_entity_incremental(
+    hass: "HomeAssistant",
+    store: "HaInsightsStore",
+    entity_id: str,
+    *,
+    window_days: int = ROLLUP_WINDOW_DAYS,
+    now: datetime,
+) -> dict[str, Any]:
+    """Advance one entity's rollup by at most _MAX_CHUNKS_PER_ENTITY
+    weeks of recorder history. Merges chunks additively into
+    audit_rollups + advances audit_rollup_progress.
+
+    Returns a status dict so the batch loop knows whether work was
+    done (for the progress bar). Never raises on per-chunk failures —
+    skips and leaves the cursor where it stood.
+
+    Strategy:
+      1. Read the entity's cursor + window. If absent or window
+         changed, start at `max(now - window_days, recorder_oldest)`.
+      2. Compute end = midnight at start of today (don't double-
+         count partial days; today is still being written).
+      3. Walk forward in 7-day chunks, additively merging each
+         chunk's bucket counts.
+      4. After each chunk succeeds, advance the cursor by 7 days.
+         A failed chunk leaves the cursor untouched so the next
+         batch picks the same week up.
+      5. Stop when window is full, or _MAX_CHUNKS_PER_ENTITY hit.
+    """
+    end_ts = _start_of_day_utc(now).timestamp()
+
+    progress = await store.get_rollup_progress(entity_id)
+    if progress is None or progress[1] != window_days:
+        # First time, or window changed → fresh start. We won't
+        # query beyond what the recorder has — the WS endpoint
+        # tracks oldest age, but querying that here per-entity is
+        # expensive. Trust get_significant_states to return [] for
+        # pre-retention days; the query stays cheap.
+        cursor_ts = _start_of_day_utc(
+            now - timedelta(days=window_days)
+        ).timestamp()
+        # Wipe any v1.1-era buckets for this entity so the
+        # incremental merge starts from a clean slate. Otherwise old
+        # full-window totals + new chunk deltas = inflated counts.
+        # No-op for entities that have no prior rollup.
+        await store.clear_rollups_for_entity(entity_id)
+    else:
+        cursor_ts, _ = progress
+
+    if cursor_ts >= end_ts:
+        # Up to date.
+        return {"advanced": False, "reason": "current", "chunks": 0}
+
+    chunks_processed = 0
+    rows_seen = 0
+    entity_started = datetime.now(tz=UTC)
+    while chunks_processed < _MAX_CHUNKS_PER_ENTITY and cursor_ts < end_ts:
+        # Per-entity wall-clock guard inside the per-batch budget.
+        per_entity_elapsed = (
+            datetime.now(tz=UTC) - entity_started
+        ).total_seconds()
+        if per_entity_elapsed > _PER_ENTITY_TIMEOUT_SEC:
+            _LOGGER.debug(
+                "rollup: %s hit per-entity cap after %d chunks",
+                entity_id,
+                chunks_processed,
+            )
+            break
+
+        chunk_start = datetime.fromtimestamp(cursor_ts, tz=UTC)
+        chunk_end = min(
+            chunk_start + timedelta(days=_CHUNK_DAYS),
+            datetime.fromtimestamp(end_ts, tz=UTC),
+        )
+
+        try:
+            states = await asyncio.wait_for(
+                _query_states_chunk(hass, entity_id, chunk_start, chunk_end),
+                timeout=_PER_CHUNK_TIMEOUT_SEC,
+            )
+        except TimeoutError:
+            _LOGGER.warning(
+                "rollup: %s chunk %s..%s timed out; cursor not advanced",
+                entity_id,
+                chunk_start.date(),
+                chunk_end.date(),
+            )
+            break  # leave cursor; next batch retries
+
+        if states is None:
+            # Failure or row-cap exceeded. Don't advance — but if
+            # row-cap, retrying gets the same result, so increment
+            # the cursor by one day to skip past the worst day and
+            # try again next call. Conservative: advance by exactly
+            # one day so we make forward progress on chatty entities
+            # without losing context.
+            cursor_ts = (chunk_start + timedelta(days=1)).timestamp()
+            await store.set_rollup_progress(
+                entity_id,
+                cursor_ts,
+                window_days,
+                now.timestamp(),
+            )
+            chunks_processed += 1
+            await asyncio.sleep(0)
+            continue
+
+        rows_seen += len(states)
+        if states:
+            deltas = _state_to_bucket_deltas(states)
+            rows = [
+                (dim, bucket, delta)
+                for dim, buckets in deltas.items()
+                for bucket, delta in buckets.items()
+            ]
+            await store.merge_rollups(
+                entity_id,
+                rows,
+                window_days=window_days,
+                computed_at_ts=now.timestamp(),
+            )
+
+        cursor_ts = chunk_end.timestamp()
+        await store.set_rollup_progress(
+            entity_id,
+            cursor_ts,
+            window_days,
+            now.timestamp(),
+        )
+        chunks_processed += 1
+        await asyncio.sleep(0)
+
+    return {
+        "advanced": chunks_processed > 0,
+        "chunks": chunks_processed,
+        "rows_seen": rows_seen,
+        "cursor_ts": cursor_ts,
+    }
 
 
 def _state_timestamp(st: Any) -> datetime | None:
@@ -340,6 +615,14 @@ def _state_timestamp(st: Any) -> datetime | None:
 #     (used for "never fires on weekends")
 _MIN_TOTAL_FOR_ROLLUP_OBS = 20
 _SKEW_RATIO = 0.60
+
+# Per-dimension minimum window-day thresholds. Below these the
+# observation would be a false positive — "weekday-only" can't be
+# inferred from 7 days of data; "1st-3rd of each month" needs
+# multiple months. Each guard runs FIRST, before any data math.
+_MIN_WINDOW_FOR_DOW = 28   # ≥4 weeks
+_MIN_WINDOW_FOR_DOM = 60   # ≥2 months
+_MIN_WINDOW_FOR_MOY = 365  # ≥1 year (already enforced in _moy_observations)
 _DOW_NAMES = (
     "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun",
 )
@@ -352,6 +635,8 @@ _MONTH_NAMES = (
 def observations_from_rollups(
     entity_id: str,
     rollups: dict[str, dict[int, int]],
+    *,
+    window_days: int = ROLLUP_WINDOW_DAYS,
 ) -> list[dict[str, Any]]:
     """Return Observation-dicts derived from one entity's rollup buckets.
 
@@ -360,17 +645,21 @@ def observations_from_rollups(
     """
     out: list[dict[str, Any]] = []
     # Day-of-week patterns
-    out.extend(_dow_observations(entity_id, rollups.get(DIM_DOW) or {}))
+    out.extend(_dow_observations(entity_id, rollups.get(DIM_DOW) or {}, window_days))
     # Day-of-month patterns
-    out.extend(_dom_observations(entity_id, rollups.get(DIM_DOM) or {}))
+    out.extend(_dom_observations(entity_id, rollups.get(DIM_DOM) or {}, window_days))
     # Month-of-year patterns
-    out.extend(_moy_observations(entity_id, rollups.get(DIM_MOY) or {}))
+    out.extend(_moy_observations(entity_id, rollups.get(DIM_MOY) or {}, window_days))
     return out
 
 
 def _dow_observations(
-    entity_id: str, buckets: dict[int, int]
+    entity_id: str, buckets: dict[int, int], window_days: int = ROLLUP_WINDOW_DAYS
 ) -> list[dict[str, Any]]:
+    # Need at least 4 weeks for "weekday-only" claims to be meaningful.
+    # With 1-week data, "never weekends" is a trivial coincidence.
+    if window_days < _MIN_WINDOW_FOR_DOW:
+        return []
     total = sum(buckets.values())
     if total < _MIN_TOTAL_FOR_ROLLUP_OBS:
         return []
@@ -391,7 +680,7 @@ def _dow_observations(
                 "kind": "rollup_weekday_only",
                 "text": (
                     f"Note: {entity_id} only transitions on weekdays "
-                    "in the last 90 days — never Saturdays or Sundays "
+                    f"in the last {window_days} days — never Saturdays or Sundays "
                     f"({total} weekday events). Informational context "
                     "for understanding the home's rhythm; not "
                     "necessarily a reason to add a weekday condition "
@@ -417,7 +706,7 @@ def _dow_observations(
                     "kind": "rollup_dow_dark_days",
                     "text": (
                         f"Note: {entity_id} never transitions on "
-                        f"{day_names} over 90 days ({total} events on "
+                        f"{day_names} over {window_days} days ({total} events on "
                         "other days). Informational only — adding a "
                         "day-of-week condition is usually unnecessary "
                         "when the trigger entity already gates firing."
@@ -436,8 +725,13 @@ def _dow_observations(
 
 
 def _dom_observations(
-    entity_id: str, buckets: dict[int, int]
+    entity_id: str, buckets: dict[int, int], window_days: int = ROLLUP_WINDOW_DAYS
 ) -> list[dict[str, Any]]:
+    # Need ≥2 months for "1st-3rd of each month" claims to hold up.
+    # With < 60 days, the "1st-3rd concentration" is just an artifact
+    # of which calendar days happened to land in the window.
+    if window_days < _MIN_WINDOW_FOR_DOM:
+        return []
     total = sum(buckets.values())
     if total < _MIN_TOTAL_FOR_ROLLUP_OBS:
         return []
@@ -452,9 +746,9 @@ def _dom_observations(
                 "text": (
                     f"{entity_id} concentrates {early_ratio*100:.0f}% of "
                     "its activity on the 1st-3rd of each month "
-                    "(90-day window, {total} transitions). Bill / "
+                    f"({window_days}-day window, {total} transitions). Bill / "
                     "payroll / monthly-reset trigger?"
-                ).replace("{total}", str(total)),
+                ),
                 "confidence": 0.7,
                 "metrics": {
                     "entity_id": entity_id,
@@ -468,15 +762,20 @@ def _dom_observations(
 
 
 def _moy_observations(
-    entity_id: str, buckets: dict[int, int]
+    entity_id: str, buckets: dict[int, int], window_days: int = ROLLUP_WINDOW_DAYS
 ) -> list[dict[str, Any]]:
     total = sum(buckets.values())
     if total < _MIN_TOTAL_FOR_ROLLUP_OBS:
         return []
     out: list[dict[str, Any]] = []
     # Identify months with zero activity. Only meaningful when the
-    # 90-day window actually spans them — for newer installs the
-    # zero is just "no data yet", not "user doesn't use it then".
+    # configured window actually spans them — for newer installs or
+    # short windows the zero is just "no data yet", not "user
+    # doesn't use it then". Seasonal silence detection is only
+    # trustworthy when window_days covers >= one full year.
+    if window_days < 365:
+        # Skip seasonal silence on short windows — too noisy.
+        return out
     active_months = {m for m, c in buckets.items() if c > 0}
     silent_months = [m for m in range(1, 13) if m not in active_months]
     if (
@@ -500,7 +799,7 @@ def _moy_observations(
                     "kind": "rollup_seasonal_silence",
                     "text": (
                         f"{entity_id} had zero transitions {start}-{end} "
-                        f"(90-day window, {total} transitions in other "
+                        f"({window_days}-day window, {total} transitions in other "
                         "months). Likely seasonal — consider a "
                         "month-of-year condition or disabling for "
                         "the dormant period."

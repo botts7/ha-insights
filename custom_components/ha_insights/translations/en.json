@@ -43,7 +43,11 @@
           "allow_user_detectors": "Allow user-supplied detectors (advanced)",
           "enabled_detectors": "Detectors to run",
           "scan_areas": "Limit scans to these areas (empty = all areas)",
-          "scan_interval_hours": "Auto-scan every N hours (0 = manual only)"
+          "scan_interval_hours": "Auto-scan every N hours (0 = manual only)",
+          "audit_rollup_window_days": "Audit rollup window (days)",
+          "audit_analysis_depth": "Audit LLM verbosity",
+          "audit_monthly_budget_usd": "Audit monthly cloud-LLM budget (USD)",
+          "audit_auto_rollup_enabled": "Auto-refresh audit rollups every 6h (recorder reads)"
         },
         "data_description": {
           "llm_mode": "Off: pattern detection only. Local: data stays on your network. Cloud: pseudonymized data sent off-network.",
@@ -57,7 +61,11 @@
           "allow_user_detectors": "Off by default. When on, *.py files placed under your HA config dir at ha_insights_detectors/ load as community detectors. Each file is AST-scanned and rejected if it imports network/filesystem/subprocess modules or uses eval/exec/__import__, but the sandbox is best-effort — only enable for files you trust. See the writing-a-detector docs.",
           "enabled_detectors": "Pick which detectors run on every scan. Default = all. Disabling a detector skips its work entirely; enabling one explicitly overrides the auto-skip safety net (e.g. to force lagged_correlation on a large-event-buffer install).",
           "scan_areas": "Multi-pick HA areas. Empty = all areas (default). When set, detectors only see events from entities in the selected areas. Useful for limiting scope on large installs (e.g. living areas only).",
-          "scan_interval_hours": "0 = manual only (default; click Run Scan Now in the panel). 1+ = run all enabled detectors every N hours. The timer is registered after HA finishes startup so it never fires during boot."
+          "scan_interval_hours": "0 = manual only (default; click Run Scan Now in the panel). 1+ = run all enabled detectors every N hours. The timer is registered after HA finishes startup so it never fires during boot.",
+          "audit_rollup_window_days": "How many days of HA recorder history to roll up into seasonal / day-of-week buckets for the automation-audit detector. Range 7-180. Default 90 detects quarter-scale patterns. Going beyond your recorder's actual retention is wasted work. Upper bound stays 180 until v1.2 chunked backfill ships — going higher today can spike memory on big installs.",
+          "audit_analysis_depth": "Controls how much guidance the audit LLM prompt includes. 'concise' (~150 tokens) is right for most cases. 'indepth' (~600 tokens) adds reasoning principles for stricter refinements — costs more, slower. Stage-two refinements always force concise.",
+          "audit_monthly_budget_usd": "Caps cloud-LLM spend for the audit subsystem each month. Local agents (Ollama/Wyoming) bypass entirely. 0 = always allow. Resets on the 1st of each month.",
+          "audit_auto_rollup_enabled": "Default OFF. When ON, runs one chunked incremental rollup batch every 6 hours plus a delayed kick 5 minutes after HA boots, keeping seasonal/day-of-week buckets fresh without manual clicks. Bounded by per-chunk timeout (15s), per-entity wall clock (60s), per-batch budget (120s), batch size (25 entities), row cap (5000/chunk), and a single-flight lock so it can't pile up. Uses the recorder's own executor pool, so it cooperates cleanly with HA's history/statistics features instead of fighting for connections. Leave OFF if you prefer zero background recorder I/O — manual ‘📅 Run audit rollup’ still works."
         }
       },
       "cloud_consent": {

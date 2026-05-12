@@ -92,6 +92,33 @@ def get_active_mode(entry: ConfigEntry) -> str:
     )
 
 
+def get_audit_rollup_window_days(entry: ConfigEntry) -> int:
+    """How many days of HA recorder history to materialize into the
+    audit_rollups cache. Drives seasonal / day-of-week / month-of-year
+    observation accuracy.
+
+    Default 90 — enough to detect quarter-scale patterns without
+    requiring the user to extend HA recorder beyond its default
+    10-day retention. Bump to 365+ when the user has a year of
+    recorder data and wants real seasonal detection
+    (e.g. "heater only fires Nov-Mar").
+
+    Range 7..180. The hard upper bound is intentionally tight while
+    we don't yet have chunked backfill (v1.2). `get_significant_states`
+    returns the whole window in one allocation, and `asyncio.wait_for`
+    only cancels the awaiter, not the executor thread — so an over-
+    sized query can still spike memory and OOM a Pi-class install
+    even though the per-entity timeout fires. Lift to 730 in v1.2
+    once we page the recorder week-by-week.
+    """
+    raw = entry.options.get("audit_rollup_window_days", 90)
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return 90
+    return max(7, min(180, value))
+
+
 def get_audit_analysis_depth(entry: ConfigEntry) -> str:
     """Verbosity of the audit_suggest / refine LLM prompts.
 
@@ -104,6 +131,21 @@ def get_audit_analysis_depth(entry: ConfigEntry) -> str:
     """
     raw = entry.options.get("audit_analysis_depth", "concise")
     return raw if raw in ("concise", "indepth") else "concise"
+
+
+def get_audit_auto_rollup_enabled(entry: ConfigEntry) -> bool:
+    """Whether the periodic auto-rollup scheduler is enabled.
+
+    Default OFF. Auto-rollup runs the chunked incremental backfill
+    every 6 hours so seasonal/day-of-week buckets stay fresh without
+    the user needing to click 📅 Run audit rollup. Bounded by all
+    the v1.2 safety rails (per-chunk timeout, per-entity wall clock,
+    per-batch budget, single-flight lock, row-cap), but it's still
+    background recorder I/O — opt-in respects users who prefer zero
+    background load.
+    """
+    raw = entry.options.get("audit_auto_rollup_enabled", False)
+    return bool(raw)
 
 
 def get_audit_monthly_budget_usd(entry: ConfigEntry) -> float:
@@ -530,6 +572,11 @@ class HaInsightsOptionsFlow(OptionsFlow):
         current_enabled_detectors = get_enabled_detectors(self.config_entry)
         current_scan_areas = sorted(get_scan_areas(self.config_entry))
         current_scan_interval = get_scan_interval_hours(self.config_entry)
+        # v1.1 audit options. All three default-safe when unset.
+        current_rollup_window = get_audit_rollup_window_days(self.config_entry)
+        current_audit_depth = get_audit_analysis_depth(self.config_entry)
+        current_audit_budget = get_audit_monthly_budget_usd(self.config_entry)
+        current_auto_rollup = get_audit_auto_rollup_enabled(self.config_entry)
         # When the user has never customized, present "all checked" so they
         # can clearly see what's on; the underlying CONF_ENABLED_DETECTORS
         # remains None (== all) until they explicitly drop a checkbox.
@@ -601,6 +648,28 @@ class HaInsightsOptionsFlow(OptionsFlow):
             self._scan_interval_hours = int(
                 user_input.get(CONF_SCAN_INTERVAL_HOURS, current_scan_interval)
             )
+            # v1.1 audit options — stored as plain string keys (no CONF_*
+            # constant) since getters look them up by literal name.
+            self._audit_rollup_window_days = int(
+                user_input.get(
+                    "audit_rollup_window_days", current_rollup_window
+                )
+            )
+            self._audit_analysis_depth = str(
+                user_input.get(
+                    "audit_analysis_depth", current_audit_depth
+                )
+            )
+            self._audit_monthly_budget_usd = float(
+                user_input.get(
+                    "audit_monthly_budget_usd", current_audit_budget
+                )
+            )
+            self._audit_auto_rollup_enabled = bool(
+                user_input.get(
+                    "audit_auto_rollup_enabled", current_auto_rollup
+                )
+            )
             if self._mode is LlmMode.CLOUD and current_mode != LlmMode.CLOUD.value:
                 # Only require fresh consent if switching INTO cloud
                 return await self.async_step_cloud_consent()
@@ -619,6 +688,10 @@ class HaInsightsOptionsFlow(OptionsFlow):
                     CONF_ENABLED_DETECTORS: self._enabled_detectors,
                     CONF_SCAN_AREAS: self._scan_areas,
                     CONF_SCAN_INTERVAL_HOURS: self._scan_interval_hours,
+                    "audit_rollup_window_days": self._audit_rollup_window_days,
+                    "audit_analysis_depth": self._audit_analysis_depth,
+                    "audit_monthly_budget_usd": self._audit_monthly_budget_usd,
+                    "audit_auto_rollup_enabled": self._audit_auto_rollup_enabled,
                 },
             )
 
@@ -695,6 +768,42 @@ class HaInsightsOptionsFlow(OptionsFlow):
                         max=SCAN_INTERVAL_HOURS_RANGE[1],
                     ),
                 ),
+                # v1.1 audit: how many days of recorder history to roll
+                # up into seasonal / day-of-week buckets. Clamped 7..180
+                # to keep get_significant_states allocations bounded
+                # until v1.2 chunked backfill ships. 90 = default —
+                # detects quarter-scale patterns; 180 catches half-year
+                # rhythms; <30 mostly disables seasonal observations.
+                vol.Optional(
+                    "audit_rollup_window_days",
+                    default=current_rollup_window,
+                ): vol.All(
+                    vol.Coerce(int), vol.Range(min=7, max=180)
+                ),
+                # Verbosity of the audit_suggest / refine LLM prompts.
+                # "concise" ≈ 150 tokens of principles; "indepth" ≈ 600.
+                # Stage-two refines force concise regardless to control
+                # latency.
+                vol.Optional(
+                    "audit_analysis_depth",
+                    default=current_audit_depth,
+                ): vol.In(["concise", "indepth"]),
+                # Monthly cloud-LLM spend cap for the audit subsystem.
+                # Local agents bypass entirely. 0 = always allow.
+                vol.Optional(
+                    "audit_monthly_budget_usd",
+                    default=current_audit_budget,
+                ): vol.All(
+                    vol.Coerce(float), vol.Range(min=0.0, max=100.0)
+                ),
+                # v1.2: opt-in periodic rollup auto-scheduler.
+                # Default OFF so installs that don't want background
+                # recorder reads get exactly that. When enabled,
+                # bounded by all the v1.2 safety rails.
+                vol.Optional(
+                    "audit_auto_rollup_enabled",
+                    default=current_auto_rollup,
+                ): bool,
             }
         )
         return self.async_show_form(step_id="init", data_schema=schema)

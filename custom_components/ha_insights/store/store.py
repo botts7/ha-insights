@@ -644,12 +644,16 @@ class InsightStore:
     ) -> None:
         """Replace all rollup rows for `entity_id` with `rows`.
 
+        v1.1 semantics: replace-all. Used when the window changes
+        or when callers want a clean refresh. v1.2 introduces
+        `merge_rollups` for the incremental-add path; this method
+        stays as the "wipe and replace" primitive.
+
         rows: list of (dimension, bucket, transitions) tuples.
 
-        We DELETE-then-INSERT in one transaction so a partial failure
+        DELETE-then-INSERT in one transaction so a partial failure
         leaves the entity's rollup either fully old or fully new —
-        never half-migrated. Saves us a per-row UPSERT that older
-        sqlite versions don't support uniformly.
+        never half-migrated.
         """
         await self._c.execute(
             "DELETE FROM audit_rollups WHERE entity_id = ?", (entity_id,)
@@ -668,6 +672,137 @@ class InsightStore:
                 ],
             )
         await self._c.commit()
+
+    async def merge_rollups(
+        self,
+        entity_id: str,
+        rows: list[tuple[str, int, int]],
+        window_days: int,
+        computed_at_ts: float,
+    ) -> None:
+        """Additively merge `rows` into existing rollup buckets.
+
+        Used by the v1.2 incremental rollup. Each row's `transitions`
+        is ADDED to the existing bucket count (or inserted if missing).
+        Old buckets that don't appear in `rows` are left untouched —
+        this is the key behavior that lets historical data survive
+        recorder purges.
+
+        rows: list of (dimension, bucket, delta_count) tuples — deltas,
+        not totals.
+        """
+        if not rows:
+            return
+        for dim, bucket, delta in rows:
+            await self._c.execute(
+                """
+                INSERT INTO audit_rollups (
+                    entity_id, dimension, bucket, transitions,
+                    window_days, computed_at
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(entity_id, dimension, bucket) DO UPDATE SET
+                    transitions = transitions + EXCLUDED.transitions,
+                    window_days = EXCLUDED.window_days,
+                    computed_at = EXCLUDED.computed_at
+                """,
+                (entity_id, dim, bucket, delta, window_days, computed_at_ts),
+            )
+        await self._c.commit()
+
+    async def clear_rollups_for_entity(self, entity_id: str) -> int:
+        """Delete every rollup bucket for one entity. Called by the
+        incremental engine when starting a fresh backfill (no
+        progress row) so v1.1 totals don't double-count against the
+        v1.2 incremental merge."""
+        cur = await self._c.execute(
+            "DELETE FROM audit_rollups WHERE entity_id = ?", (entity_id,)
+        )
+        await self._c.commit()
+        return cur.rowcount
+
+    async def get_rollup_progress(
+        self, entity_id: str
+    ) -> tuple[float, int] | None:
+        """Return (last_complete_day_ts, window_days) for an entity, or
+        None if no incremental progress has been recorded yet.
+
+        Used by audit/rollup.py to decide whether the next rollup
+        batch should backfill from scratch (None) or resume from the
+        last cursor.
+        """
+        async with self._c.execute(
+            "SELECT last_complete_day_ts, window_days "
+            "FROM audit_rollup_progress WHERE entity_id = ?",
+            (entity_id,),
+        ) as cur:
+            row = await cur.fetchone()
+            if row is None:
+                return None
+            return (float(row["last_complete_day_ts"]), int(row["window_days"]))
+
+    async def set_rollup_progress(
+        self,
+        entity_id: str,
+        last_complete_day_ts: float,
+        window_days: int,
+        computed_at_ts: float,
+    ) -> None:
+        """Advance the rollup cursor for an entity."""
+        await self._c.execute(
+            """
+            INSERT INTO audit_rollup_progress (
+                entity_id, last_complete_day_ts, computed_at, window_days
+            ) VALUES (?, ?, ?, ?)
+            ON CONFLICT(entity_id) DO UPDATE SET
+                last_complete_day_ts = EXCLUDED.last_complete_day_ts,
+                computed_at = EXCLUDED.computed_at,
+                window_days = EXCLUDED.window_days
+            """,
+            (entity_id, last_complete_day_ts, computed_at_ts, window_days),
+        )
+        await self._c.commit()
+
+    async def list_entities_needing_rollup(
+        self,
+        all_entity_ids: list[str],
+        end_of_today_ts: float,
+    ) -> list[str]:
+        """Return entity_ids whose incremental rollup is not yet
+        caught up to the start of today.
+
+        An entity needs rollup if:
+          - it has no progress row (never rolled up), OR
+          - its `last_complete_day_ts < end_of_today_ts`
+
+        v1.2: this is the canonical batch picker for the incremental
+        path. Replaces the old TTL-based `list_stale_rollup_entities`
+        for the run loop, which over-fetched and re-did fresh work
+        every TTL period.
+        """
+        if not all_entity_ids:
+            return []
+        # Pull cursors in one query (caller may have hundreds of
+        # entities; per-row SELECTs would be wasteful).
+        cursors: dict[str, float] = {}
+        async with self._c.execute(
+            "SELECT entity_id, last_complete_day_ts FROM audit_rollup_progress"
+        ) as cur:
+            async for row in cur:
+                cursors[row["entity_id"]] = float(row["last_complete_day_ts"])
+        needing: list[str] = []
+        for eid in all_entity_ids:
+            cursor = cursors.get(eid)
+            if cursor is None or cursor < end_of_today_ts:
+                needing.append(eid)
+        return needing
+
+    async def clear_rollup_progress(self) -> int:
+        """Wipe every entity's incremental cursor. Called when the
+        user changes `audit_rollup_window_days` so the next batch
+        starts fresh against the new window."""
+        cur = await self._c.execute("DELETE FROM audit_rollup_progress")
+        await self._c.commit()
+        return cur.rowcount
 
     async def get_rollups_for_entity(
         self, entity_id: str
@@ -732,6 +867,22 @@ class InsightStore:
         cur = await self._c.execute(
             f"DELETE FROM audit_rollups WHERE entity_id NOT IN ({placeholders})",
             keep_entity_ids,
+        )
+        await self._c.commit()
+        return cur.rowcount
+
+    async def prune_rollups_with_wrong_window(self, window_days: int) -> int:
+        """Drop rollup rows materialized against a different window.
+
+        Called when the user changes `audit_rollup_window_days` in
+        OptionsFlow — the existing rows were computed for the old
+        window and would silently lie about the new one. Cleanest
+        fix is to invalidate them; the next rollup batch refills.
+        Returns count deleted.
+        """
+        cur = await self._c.execute(
+            "DELETE FROM audit_rollups WHERE window_days != ?",
+            (int(window_days),),
         )
         await self._c.commit()
         return cur.rowcount

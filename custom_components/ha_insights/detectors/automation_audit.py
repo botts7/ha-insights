@@ -101,6 +101,40 @@ class AutomationAuditDetector(Detector):
         # installs degrade gracefully — short-term observations only).
         rollup_by_entity = await self._load_rollups(ctx, audit_targets)
 
+        # Resolve the EFFECTIVE rollup window:
+        #   configured (OptionsFlow) clamped to actual recorder
+        #   retention. Observations need this number to avoid false
+        #   positives like "1st-3rd of each month" claimed from a
+        #   10-day data sample.
+        try:
+            from ..audit.rollup import _resolve_window_days
+
+            configured_window_days = _resolve_window_days(ctx.hass)
+        except Exception:  # pragma: no cover — fall back to default
+            from ..audit.rollup import ROLLUP_WINDOW_DAYS
+
+            configured_window_days = ROLLUP_WINDOW_DAYS
+
+        # Probe recorder.keep_days — public attr, no I/O. The
+        # observation pipeline uses min(configured, retention) so
+        # we never claim multi-month patterns from a 10-day sample.
+        try:
+            from homeassistant.components.recorder import get_instance
+
+            rec = get_instance(ctx.hass)
+            recorder_keep_days = getattr(rec, "keep_days", None) or getattr(
+                rec, "_keep_days", None
+            )
+        except Exception:  # noqa: BLE001
+            recorder_keep_days = None
+
+        if recorder_keep_days is not None:
+            rollup_window_days = min(
+                configured_window_days, int(recorder_keep_days)
+            )
+        else:
+            rollup_window_days = configured_window_days
+
         # Snapshot HA's live state machine so the silent-entity
         # check has a source of truth that's independent of our
         # scan_areas / blocked_entities filtered buffer. Cheap dict
@@ -125,6 +159,7 @@ class AutomationAuditDetector(Detector):
                     auto.get("id") or auto.get("alias") or ""
                 ),
                 rollup_by_entity=rollup_by_entity,
+                rollup_window_days=rollup_window_days,
                 live_states=live_states,
                 now=now,
             )
