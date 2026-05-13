@@ -295,6 +295,53 @@ def _():
     assert "context_user_id=ctx_user" in init_src
 
 
+@t("RoutineDetector: invariants present")
+def _():
+    src = open(
+        "custom_components/ha_insights/detectors/routine.py",
+        encoding="utf-8",
+    ).read()
+    assert "_MIN_ROUTINE_SIZE = 3" in src
+    assert "_MIN_ROUTINE_DAYS = 5" in src
+    assert "_ROUTINE_PRESENCE_RATIO = 0.80" in src
+    # Reuses ManualHabit's service map (no duplication)
+    assert "from .manual_habit import _DOMAIN_SERVICE_MAP" in src
+    # Friendly label per time of day
+    assert "_routine_label" in src
+
+
+@t("PresenceInferenceDetector: invariants present")
+def _():
+    src = open(
+        "custom_components/ha_insights/detectors/presence_inference.py",
+        encoding="utf-8",
+    ).read()
+    assert "_AREA_DOMINANCE_RATIO = 0.70" in src
+    assert "_MIN_DAYS_FOR_INSIGHT = 5" in src
+    # Skips polling-driven noisy domains
+    assert "sensor" in src
+    assert "climate" in src
+    # Coalesces adjacent windows into ranges
+    assert "_coalesce_ranges" in src
+    # Looks up area names from registry
+    assert "area_registry" in src
+
+
+@t("sun_relative helper: detect_sun_relative_trigger present")
+def _():
+    src = open(
+        "custom_components/ha_insights/detectors/sun_relative.py",
+        encoding="utf-8",
+    ).read()
+    assert "def detect_sun_relative_trigger" in src
+    # Bar is 60% of clock stddev — keeps the bar high
+    assert "_TIGHTER_FIT_RATIO = 0.6" in src
+    # Within ±2h of sun event for the correlation to be real
+    assert "_MAX_OFFSET_MINUTES = 120" in src
+    # Builds a ready-to-drop HA trigger dict
+    assert "def build_sun_trigger" in src
+
+
 # ---- Run + report ----
 
 passed = sum(1 for _, s, _ in results if s == "PASS")
