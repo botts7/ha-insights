@@ -14,6 +14,7 @@ expected.
 """
 from __future__ import annotations
 
+import logging
 from collections import defaultdict
 from datetime import UTC, datetime, timedelta
 
@@ -21,6 +22,8 @@ from homeassistant.util import dt as dt_util
 
 from ..insight import Insight, InsightKind
 from .base import Detector, DetectorContext, register_detector
+
+_LOGGER = logging.getLogger(__name__)
 
 # Domain whitelist mirrors OrphanDeviceDetector — high-cardinality status
 # entities (sun/scene/automation) skew the math and aren't useful spikes
@@ -59,6 +62,10 @@ class FrequencyAnomalyDetector(Detector):
     name = "frequency_anomaly"
     kind = InsightKind.ANOMALY
     requires_recorder = False
+    # Per-entity runaway detection — merging two anomalies into a
+    # "light.* (cohort)" card masks which entity is actually flapping.
+    # Each spike is its own root cause to investigate.
+    cohort_dedup = False
 
     LOOKBACK_DAYS = 14
     # An entity needs to have changed state at least this many times today for
@@ -135,6 +142,45 @@ class FrequencyAnomalyDetector(Detector):
             if ratio < self.RATIO_THRESHOLD:
                 continue
             candidates.append((ratio, entity_id, today_count, baseline_per_day))
+
+        # v1.4: group fan-out filter. When a group entity (e.g.
+        # `light.living_room` containing `light.lamp_a` + `light.lamp_b`)
+        # fires N times, every member ALSO fires N times — but it's
+        # the SAME physical event, not N independent runaway automations.
+        # Without this filter, a single high-frequency group toggle
+        # creates one spurious card per member.
+        #
+        # Algorithm: build a set of candidate entity_ids. For each
+        # candidate, check whether ANY of its parent containers is
+        # also a candidate. If so, the member's events are likely
+        # fan-out — drop it and keep only the parent.
+        if ctx.container_to_members:
+            candidate_eids = {c[1] for c in candidates}
+            # Reverse the container_to_members map: entity → parents
+            parent_of: dict[str, set[str]] = defaultdict(set)
+            for parent_eid, members in ctx.container_to_members.items():
+                for member in members:
+                    parent_of[member].add(parent_eid)
+            filtered: list[tuple[float, str, int, float]] = []
+            dropped_for_fanout = 0
+            for cand in candidates:
+                _ratio, eid, _today, _baseline = cand
+                parents = parent_of.get(eid, set())
+                # Drop if ANY parent container is also flagged — that
+                # parent gets the user's attention; the member is
+                # noise. Keep the entity if its parents aren't in
+                # the candidate set (genuine independent spike).
+                if parents & candidate_eids:
+                    dropped_for_fanout += 1
+                    continue
+                filtered.append(cand)
+            if dropped_for_fanout:
+                _LOGGER.debug(
+                    "frequency_anomaly: filtered %d candidates that "
+                    "are group members of other candidates (fan-out)",
+                    dropped_for_fanout,
+                )
+            candidates = filtered
 
         # Same-device dedup: per device, keep only the highest-ratio entity.
         # Entities without a device_id (template sensors, helpers) keep all.

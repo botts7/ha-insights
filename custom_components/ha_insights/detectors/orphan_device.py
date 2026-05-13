@@ -77,6 +77,16 @@ class OrphanDeviceDetector(Detector):
         for ev in events:
             per_entity[ev.entity_id].append(ev)
 
+        # v1.4: track the latest timestamp per entity for the group-
+        # membership false-positive filter below. An entity that's
+        # gone silent BUT whose parent group is firing recently is
+        # probably just a slaved member (template light, ESPHome
+        # group, Hue group) that doesn't propagate state to members
+        # individually. Flagging it as "battery dead" is wrong.
+        latest_by_entity: dict[str, datetime] = {
+            eid: evs[-1].timestamp for eid, evs in per_entity.items()
+        }
+
         insights: list[Insight] = []
         for entity_id, entity_events in per_entity.items():
             domain = entity_id.split(".", 1)[0] if "." in entity_id else ""
@@ -89,11 +99,41 @@ class OrphanDeviceDetector(Detector):
             latest = entity_events[-1].timestamp
             if latest >= stale_threshold:
                 continue  # still reporting recently
+            # Group-membership false-positive filter: if this entity
+            # is a member of a container that DID fire recently, the
+            # entity is just slaved to a group whose state-change
+            # propagation skips the members. Not a real orphan.
+            if self._has_active_parent(
+                entity_id, latest_by_entity, ctx, stale_threshold
+            ):
+                continue
             silence_days = max(1, round((now - latest).total_seconds() / 86400))
             insight = self._build_insight(entity_id, latest, silence_days)
             if insight is not None:
                 insights.append(insight)
         return insights
+
+    def _has_active_parent(
+        self,
+        entity_id: str,
+        latest_by_entity: dict[str, datetime],
+        ctx: DetectorContext,
+        stale_threshold: datetime,
+    ) -> bool:
+        """True iff `entity_id` is a member of a container whose
+        latest state-change is more recent than `stale_threshold`.
+        Such entities are probably slaved members of an active group
+        (template light, ESPHome group, Hue group) that doesn't
+        propagate state to members individually."""
+        if not ctx.container_to_members:
+            return False
+        for parent_eid, members in ctx.container_to_members.items():
+            if entity_id not in members:
+                continue
+            parent_latest = latest_by_entity.get(parent_eid)
+            if parent_latest is not None and parent_latest >= stale_threshold:
+                return True
+        return False
 
     def _build_insight(
         self,

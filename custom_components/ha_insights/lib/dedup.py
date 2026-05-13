@@ -52,6 +52,22 @@ def normalize_title_for_dedup(
     return out
 
 
+# v1.4: detectors whose insights should NOT be merged into a
+# cohort at display time. Mirrors the `cohort_dedup = False` flag on
+# the Detector base class — kept as a duplicate hardcoded set here
+# because this module runs server-side from a context that doesn't
+# always have the detector registry imported.
+#
+# Why each detector opts out:
+#   frequency_anomaly: two entities running away at 200×/day are
+#     usually two INDEPENDENT runaway automations, not one shared
+#     cause. Merging into "light.* (cohort)" hides which entity is
+#     flapping. The user needs to investigate each entity separately.
+_NO_COHORT_DEDUP_DETECTORS = frozenset({
+    "frequency_anomaly",
+})
+
+
 def display_time_dedup(
     enriched: list[dict[str, Any]],
     device_id_by_entity: Mapping[str, str | None],
@@ -71,7 +87,15 @@ def display_time_dedup(
     buckets: dict[tuple[str, str, str, str], list[dict[str, Any]]] = (
         defaultdict(list)
     )
+    # Set aside insights from detectors that opt out of cohort merging.
+    # They bypass the bucket-and-collapse loop entirely so they're
+    # rendered as individual cards.
+    skipped_no_dedup: list[dict[str, Any]] = []
     for d in enriched:
+        if (d.get("detector") or "").lower() in _NO_COHORT_DEDUP_DETECTORS:
+            d.pop("_eids_for_dedup", None)
+            skipped_no_dedup.append(d)
+            continue
         eids = d.get("_eids_for_dedup") or []
         # Lowercase the signature components so insights persisted by
         # earlier code versions (which may have used different case
@@ -87,7 +111,7 @@ def display_time_dedup(
         )
         buckets[sig].append(d)
 
-    result: list[dict[str, Any]] = []
+    result: list[dict[str, Any]] = list(skipped_no_dedup)
     for bucket in buckets.values():
         if len(bucket) < 2:
             for d in bucket:

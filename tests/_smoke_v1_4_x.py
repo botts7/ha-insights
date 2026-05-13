@@ -1027,6 +1027,53 @@ def _():
     assert 'self._notify("refreshed" if existed else "added", insight)' in src
 
 
+@t("cohort dedup: frequency_anomaly opts out (per-entity, not shared cause)")
+def _():
+    """Two lights both firing 200×/day are TWO INDEPENDENT runaway
+    automations, not one shared cause to merge into 'light.* (cohort)'.
+    Each gets its own card so the user can investigate separately."""
+    src_detector = _read(
+        "custom_components/ha_insights/detectors/frequency_anomaly.py"
+    )
+    assert "cohort_dedup = False" in src_detector
+
+    # Display-time dedup also skips
+    src_dedup = _read("custom_components/ha_insights/lib/dedup.py")
+    assert "_NO_COHORT_DEDUP_DETECTORS" in src_dedup
+    assert '"frequency_anomaly"' in src_dedup
+    assert "skipped_no_dedup" in src_dedup
+
+    # Scan-time dedup helper also gates on the class flag
+    src_runner = _read("custom_components/ha_insights/detectors/__init__.py")
+    assert 'getattr(\n            detector_cls, "cohort_dedup", True\n        )' in src_runner or (
+        'getattr(' in src_runner and '"cohort_dedup", True' in src_runner
+    )
+
+
+@t("group fan-out: frequency_anomaly drops members when parent also spikes")
+def _():
+    src = _read(
+        "custom_components/ha_insights/detectors/frequency_anomaly.py"
+    )
+    assert "group fan-out filter" in src
+    # Build the parent_of reverse map
+    assert "parent_of: dict[str, set[str]] = defaultdict(set)" in src
+    # Drop member if its parent is also a candidate
+    assert "if parents & candidate_eids:" in src
+
+
+@t("orphan_device: silent member of active group is NOT flagged")
+def _():
+    src = _read(
+        "custom_components/ha_insights/detectors/orphan_device.py"
+    )
+    assert "_has_active_parent" in src
+    # Skips when parent fired recently (within stale_threshold window)
+    assert "parent_latest >= stale_threshold" in src
+    # Filter only kicks in when container map is populated
+    assert "if not ctx.container_to_members:" in src
+
+
 @t("explain prompt: routes to kind-specific template")
 def _():
     """Explain used to ask 'why automate this?' regardless of kind,

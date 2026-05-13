@@ -186,6 +186,23 @@ class Detector(ABC):
     # CONF_ENABLED_DETECTORS forces the detector to run regardless of this
     # threshold (the threshold is a *default safety net*, not a hard cap).
     max_buffer_for_full_scan: ClassVar[int | None] = None
+    # v1.4: opt out of the cohort dedup helper. Default True (current
+    # behaviour). Set False for detectors where the dedup heuristic
+    # masks the signal rather than reducing noise — frequency_anomaly
+    # is the canonical case (two lights running away at 200×/day are
+    # TWO INDEPENDENT runaway automations, not one shared cause to
+    # merge into "light.* (cohort)"). The user needs to see each
+    # entity individually to investigate.
+    #
+    # Detectors where the merge DOES make sense (shared root cause):
+    #   - orphan_device (NVR offline → 34 silent cameras)
+    #   - long_tail     (no auto-off → 12 lights left on)
+    #   - schedule      (one routine → N entities firing together)
+    #
+    # Detectors where the merge MASKS the signal (per-entity):
+    #   - frequency_anomaly (each runaway is its own problem)
+    #   - …add more as we discover them
+    cohort_dedup: ClassVar[bool] = True
 
     @abstractmethod
     async def scan(self, ctx: DetectorContext) -> list[Insight]:

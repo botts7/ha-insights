@@ -699,6 +699,20 @@ def _dedup_grouped_insights(
         if len(group) < 2:
             result.extend(group)
             continue
+        # v1.4: detectors can opt out of cohort merging by setting
+        # `cohort_dedup = False` on the class. frequency_anomaly is
+        # the canonical case — merging two runaway automations into
+        # "light.* (cohort)" hides which entity is flapping. The
+        # detector name is the same across every insight in the
+        # group (fingerprint signature includes "kind" via the
+        # original full fingerprint), so checking just one is fine.
+        first_detector_name = getattr(group[0], "detector", "")
+        detector_cls = DETECTORS.get(first_detector_name)
+        if detector_cls is not None and not getattr(
+            detector_cls, "cohort_dedup", True
+        ):
+            result.extend(group)
+            continue
         eids = [
             g.fingerprint["entity_id"]
             for g in group
