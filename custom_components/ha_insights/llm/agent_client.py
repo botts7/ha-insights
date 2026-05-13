@@ -22,18 +22,65 @@ if TYPE_CHECKING:
     from ..insight import Insight
 
 
-_USER_PROMPT_TMPL = (
-    "I'd like you to explain a Home Assistant routine I've been following.\n\n"
+# v1.4 — three explain-style prompts, one per insight kind. The
+# user's question is different for each:
+#   - automation_proposal: "is this worth automating + any gotchas?"
+#   - anomaly / improvement: "is this real, how do I confirm, how do
+#     I fix it?"
+#   - pattern_observation: "what does this mean for me + what should
+#     I think about?"
+# Picked by build_explain_prompt() based on insight.kind. Hypothesize
+# stays a separate endpoint for "deep cause analysis" — different
+# verb in the UI for the user who wants more.
+
+# AUTOMATION_PROPOSAL — the original prompt. "Why bother automating?"
+_USER_PROMPT_AUTOMATION = (
+    "I'd like you to explain a Home Assistant routine I've been "
+    "following.\n\n"
     "{title}\n\n"
     "This automation would:\n"
     "{payload_summary}\n\n"
-    "In one or two short paragraphs, explain why this routine might be worth "
-    "automating and any caveats. Plain prose, no code, under 150 words."
+    "In one or two short paragraphs, explain why this routine might be "
+    "worth automating and any caveats. Plain prose, no code, under 150 "
+    "words."
 )
 
-# v0.9 phase 6: alternative prompt for ANOMALY-kind insights. The user
-# wants likely causes, not "should I automate this?". Numbered list keeps
-# the response scannable in a small toast / panel section.
+# ANOMALY / AUTOMATION_IMPROVEMENT — diagnostic mode. User wants to
+# know if the alert is real before acting. Three explicit sections so
+# the answer is scannable on a busy panel.
+_USER_PROMPT_DIAGNOSTIC = (
+    "Home Assistant flagged this and I need help deciding what to do:"
+    "\n\n{title}\n\nDetails:\n{payload_summary}\n\n"
+    "Answer these three questions in plain prose, one short paragraph "
+    "each, under 200 words total:\n"
+    "1. Is this likely a real problem, a false positive, or "
+    "ambiguous? Lean on the numbers / pattern above.\n"
+    "2. How can I quickly confirm? Suggest 1-2 specific HA actions or "
+    "Developer-Tools checks I can run in under a minute.\n"
+    "3. If it IS real, what's the fix? Specific next steps — replace "
+    "battery, edit automation X, etc. Skip generic 'check connections' "
+    "advice."
+)
+
+# PATTERN_OBSERVATION — interpretation mode. Setup quality, presence
+# inference, weather correlation: not automatable, just informational.
+_USER_PROMPT_OBSERVATION = (
+    "Home Assistant noticed this pattern in my home and I'd like help "
+    "understanding it:\n\n{title}\n\nDetails:\n{payload_summary}\n\n"
+    "In two short paragraphs (under 150 words total):\n"
+    "1. What does this observation mean for my daily life or my HA "
+    "setup? Translate the numbers into human terms.\n"
+    "2. What would I do with this information? Suggest one concrete "
+    "next action (automation idea, dashboard change, behavioural "
+    "tweak — whatever fits) OR say 'just FYI, no action needed'."
+)
+
+# Default fallback when kind isn't recognised — same prompt as old
+# v1.3 behaviour so anything we haven't categorised still works.
+_USER_PROMPT_TMPL = _USER_PROMPT_AUTOMATION
+
+# Hypothesize endpoint — kept as the deep-dive companion to Explain.
+# Users who want CAUSES rather than fixes click this instead.
 _USER_PROMPT_HYPOTHESIZE_TMPL = (
     "I'm looking at an unusual pattern from my Home Assistant instance "
     "and want help diagnosing it:\n\n"
@@ -130,6 +177,12 @@ def build_explain_prompt(
 ) -> str:
     """Build a single self-contained user prompt for HA's Conversation API.
 
+    v1.4: now KIND-AWARE. Routes to one of three templates based on
+    `insight.kind` so the user gets the right question answered:
+      - AUTOMATION_PROPOSAL → "is this worth automating?" (legacy)
+      - ANOMALY / AUTOMATION_IMPROVEMENT → "is this real + how to fix"
+      - PATTERN_OBSERVATION → "what does this mean + so what?"
+
     HA's `conversation.async_converse` takes one `text` argument — there's no
     separate system-prompt slot. Each Conversation integration (Ollama,
     Anthropic, etc.) configures its own system prompt at the integration
@@ -140,7 +193,18 @@ def build_explain_prompt(
     signatures but no longer used.
     """
     payload_summary = _summarize_payload(redacted_payload)
-    return _USER_PROMPT_TMPL.format(
+    kind_value = getattr(insight.kind, "value", str(insight.kind))
+    # Diagnostic prompt for things that look like problems
+    if kind_value in ("anomaly", "automation_improvement"):
+        template = _USER_PROMPT_DIAGNOSTIC
+    # Observational prompt for setup quality / presence / weather
+    # correlation — patterns that aren't directly applyable
+    elif kind_value == "pattern_observation":
+        template = _USER_PROMPT_OBSERVATION
+    # Default to the original "explain the automation" prompt
+    else:
+        template = _USER_PROMPT_AUTOMATION
+    return template.format(
         title=insight.title,
         payload_summary=payload_summary,
     )

@@ -1027,6 +1027,28 @@ def _():
     assert 'self._notify("refreshed" if existed else "added", insight)' in src
 
 
+@t("explain prompt: routes to kind-specific template")
+def _():
+    """Explain used to ask 'why automate this?' regardless of kind,
+    which was wrong for anomalies + observations. Now routes by
+    insight.kind so the user gets the right question answered."""
+    src = _read("custom_components/ha_insights/llm/agent_client.py")
+    # Three template constants exist
+    assert "_USER_PROMPT_AUTOMATION" in src
+    assert "_USER_PROMPT_DIAGNOSTIC" in src
+    assert "_USER_PROMPT_OBSERVATION" in src
+    # Diagnostic prompt has the three explicit sections
+    assert "Is this likely a real problem" in src
+    assert "How can I quickly confirm" in src
+    assert "If it IS real, what's the fix" in src
+    # Build function dispatches on kind
+    assert 'kind_value in ("anomaly", "automation_improvement")' in src
+    assert 'kind_value == "pattern_observation"' in src
+    # Skip-generic-advice guard so the LLM doesn't reply with
+    # "check connections, restart router"
+    assert "Skip generic" in src
+
+
 @t("dismiss-persistence: notification listener still only fires on 'added'")
 def _():
     """If this assertion fails, dismissed insights will re-buzz the
