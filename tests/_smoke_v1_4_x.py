@@ -1074,6 +1074,167 @@ def _():
     assert 'getattr(ev, "from_bootstrap", False)' in src
 
 
+@t("batch correlator: groups events by context.id within a 1s window")
+def _():
+    """Validate the v1.5 batch correlator against a synthesized
+    group toggle: 5 lights all fire state_changed within 250ms
+    sharing the same context.id. iter_batches should yield one
+    batch of 5 events."""
+    fixture = _load(
+        "ctx_id_fixture", "tests/_ha_semantics/context_id_batch.py"
+    )
+    buffer_mod = _load(
+        "state_event_buffer_ctx",
+        "custom_components/ha_insights/observers/state_event_buffer.py",
+    )
+    correlator = _load(
+        "batch_correlator",
+        "custom_components/ha_insights/lib/batch_correlator.py",
+    )
+    from datetime import UTC, datetime
+
+    buf = buffer_mod.StateEventBuffer()
+    ctx_id, added = fixture.synth_group_toggle(
+        buf,
+        at=datetime(2026, 5, 13, 12, 0, tzinfo=UTC),
+        member_entities=[
+            "light.living_a",
+            "light.living_b",
+            "light.living_c",
+            "light.living_d",
+            "light.living_e",
+        ],
+    )
+    assert len(added) == 5
+    batches = list(correlator.iter_batches(buf._events))
+    assert len(batches) == 1, f"expected 1 batch, got {len(batches)}"
+    found_ctx, batch_events = batches[0]
+    assert found_ctx == ctx_id
+    assert len(batch_events) == 5
+
+
+@t("batch correlator: separates batches when events are minutes apart")
+def _():
+    """Same context.id but minutes apart is NOT a batch — that's
+    a long-running script. Verify the window check splits them."""
+    fixture = _load(
+        "ctx_id_split", "tests/_ha_semantics/context_id_batch.py"
+    )
+    buffer_mod = _load(
+        "state_event_buffer_split",
+        "custom_components/ha_insights/observers/state_event_buffer.py",
+    )
+    correlator = _load(
+        "batch_correlator_split",
+        "custom_components/ha_insights/lib/batch_correlator.py",
+    )
+    from datetime import UTC, datetime, timedelta
+
+    buf = buffer_mod.StateEventBuffer()
+    base = datetime(2026, 5, 13, 12, 0, tzinfo=UTC)
+    # Group call A at t=0
+    fixture.synth_group_toggle(
+        buf, at=base, member_entities=["light.a", "light.b"],
+        context_id="ctx-shared",
+    )
+    # Same context_id at t+10min — same script, separate run
+    fixture.synth_group_toggle(
+        buf, at=base + timedelta(minutes=10),
+        member_entities=["light.c", "light.d"],
+        context_id="ctx-shared",
+    )
+    batches = list(correlator.iter_batches(buf._events))
+    # Should split into TWO batches, not collapse to one
+    assert len(batches) == 2, f"expected 2 split batches, got {len(batches)}"
+    for _ctx, events in batches:
+        assert len(events) == 2
+
+
+@t("batch correlator: batched_entity_set returns all member pairs")
+def _():
+    """The set used by cooccurrence to drop co-effect pairs."""
+    fixture = _load(
+        "ctx_id_pairs", "tests/_ha_semantics/context_id_batch.py"
+    )
+    buffer_mod = _load(
+        "state_event_buffer_pairs",
+        "custom_components/ha_insights/observers/state_event_buffer.py",
+    )
+    correlator = _load(
+        "batch_correlator_pairs",
+        "custom_components/ha_insights/lib/batch_correlator.py",
+    )
+    from datetime import UTC, datetime
+
+    buf = buffer_mod.StateEventBuffer()
+    fixture.synth_group_toggle(
+        buf,
+        at=datetime(2026, 5, 13, 12, 0, tzinfo=UTC),
+        member_entities=["light.a", "light.b", "light.c"],
+    )
+    pairs = correlator.batched_entity_set(buf._events)
+    # 3 entities → 3 undirected pairs → 6 directed pairs
+    assert len(pairs) == 6
+    assert ("light.a", "light.b") in pairs
+    assert ("light.b", "light.a") in pairs
+    assert ("light.a", "light.c") in pairs
+    assert ("light.c", "light.b") in pairs
+
+
+@t("cooccurrence: drops pairs sharing context.id (co-effect filter)")
+def _():
+    """Source-level guard that cooccurrence skips leader-follower
+    pairs sharing the same context.id. Without this, a scene that
+    fires light.a then light.b in 50ms looks like 'light.b follows
+    light.a' on every scene activation — false-positive flood."""
+    src = _read(
+        "custom_components/ha_insights/detectors/cooccurrence.py"
+    )
+    assert "context.id batch filter" in src
+    assert 'leader_ctx = getattr(leader, "context_id", None)' in src
+    assert "leader_ctx == follower_ctx" in src
+
+
+@t("batch correlator: skips events with no context_id")
+def _():
+    """System events / recorder-backfilled events have context_id=None.
+    They must not be bucketed into any batch."""
+    correlator = _load(
+        "batch_correlator_nullctx",
+        "custom_components/ha_insights/lib/batch_correlator.py",
+    )
+    buffer_mod = _load(
+        "state_event_buffer_nullctx",
+        "custom_components/ha_insights/observers/state_event_buffer.py",
+    )
+    from datetime import UTC, datetime
+
+    StateEvent = buffer_mod.StateEvent
+    events = [
+        StateEvent(
+            timestamp=datetime(2026, 5, 13, 12, 0, tzinfo=UTC),
+            entity_id="light.a",
+            domain="light",
+            area_id=None,
+            old_state="off",
+            new_state="on",
+            context_id=None,
+        ),
+        StateEvent(
+            timestamp=datetime(2026, 5, 13, 12, 0, tzinfo=UTC),
+            entity_id="light.b",
+            domain="light",
+            area_id=None,
+            old_state="off",
+            new_state="on",
+            context_id=None,
+        ),
+    ]
+    by_ctx = correlator.group_by_context_id(events)
+    assert by_ctx == {}, "context_id=None events should not be bucketed"
+    assert list(correlator.iter_batches(events)) == []
+
+
 @t("bootstrap fixture: 100-entity boot burst is fully filtered by default")
 def _():
     """Validate the v1.4.9 filter against the kind of burst we'd see

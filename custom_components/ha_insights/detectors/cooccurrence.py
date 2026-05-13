@@ -145,6 +145,24 @@ class CooccurrenceDetector(Detector):
                 # "same root event, not real causation."
                 if _pair_is_related(leader.entity_id, follower.entity_id):
                     continue
+                # v1.5: context.id batch filter. If leader + follower
+                # share a non-null context.id, they're co-effects of
+                # one logical operation (group toggle / scene / script
+                # — see docs/HA_EVENT_SEMANTICS.md Gotchas 1-3). The
+                # "follow within seconds" pattern is structural, not
+                # behavioural. Filter complements the structural
+                # _pair_is_related check above — that catches static
+                # parent/child relationships; this catches dynamic
+                # batch operations whose targets might not share any
+                # registry link (e.g. an ad-hoc script with diverse
+                # targets).
+                leader_ctx = getattr(leader, "context_id", None)
+                follower_ctx = getattr(follower, "context_id", None)
+                if (
+                    leader_ctx is not None
+                    and leader_ctx == follower_ctx
+                ):
+                    continue
                 delta = (follower.timestamp - leader.timestamp).total_seconds()
                 if delta <= 0:
                     continue
