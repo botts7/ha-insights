@@ -1027,6 +1027,53 @@ def _():
     assert 'self._notify("refreshed" if existed else "added", insight)' in src
 
 
+@t("bootstrap filter: StateEvent has from_bootstrap + context_id fields")
+def _():
+    """Regression for the bootstrap fan-out false-positive class
+    (HA_EVENT_SEMANTICS.md Gotcha 5 + Gotchas 1-3). Every entity
+    fires state_changed on boot with old_state=None — without this
+    flag we false-positive every restart."""
+    src = _read(
+        "custom_components/ha_insights/observers/state_event_buffer.py"
+    )
+    assert "from_bootstrap: bool = False" in src
+    assert "context_id: str | None = None" in src
+    # Live buffer query filters out bootstrap events by default
+    assert "include_bootstrap: bool = False" in src
+    assert "if not include_bootstrap and ev.from_bootstrap:" in src
+
+
+@t("bootstrap filter: integration listens for EVENT_HOMEASSISTANT_STARTED")
+def _():
+    src = _read("custom_components/ha_insights/__init__.py")
+    assert "EVENT_HOMEASSISTANT_STARTED" in src
+    # Marks the bootstrap window
+    assert "_bootstrap_until_ts" in src
+    # 5-second window matches HA's own state-trigger guard rationale
+    assert "_BOOTSTRAP_WINDOW_SEC = 5" in src
+    # Two-part check (window AND old_state=None) — mirrors HA core
+    assert "if old_state is None:" in src
+    assert "from_bootstrap = True" in src
+
+
+@t("bootstrap filter: state events capture context_id for batch correlation")
+def _():
+    """context.id is shared across N state_changed events from one
+    group toggle / scene activation / script run (Gotchas 1-3).
+    Capturing it now lets future detectors group batch operations."""
+    src = _read("custom_components/ha_insights/__init__.py")
+    assert "ctx_id = getattr(new_state.context, \"id\", None)" in src
+    assert "context_id=ctx_id" in src
+
+
+@t("bootstrap filter: snapshot view also skips bootstrap by default")
+def _():
+    src = _read("custom_components/ha_insights/detectors/__init__.py")
+    # Same guard in the scan-time snapshot view used by detectors
+    assert "include_bootstrap: bool = False" in src
+    assert 'getattr(ev, "from_bootstrap", False)' in src
+
+
 @t("cohort dedup: frequency_anomaly opts out (per-entity, not shared cause)")
 def _():
     """Two lights both firing 200×/day are TWO INDEPENDENT runaway

@@ -83,6 +83,37 @@ async def _setup_entry_body(
 
     entity_reg = er.async_get(hass)
 
+    # Bootstrap-window tracker. Set when EVENT_HOMEASSISTANT_STARTED
+    # fires; reset to None outside the window. Used by _on_state_changed
+    # to flag events that fired during the boot fan-out (every entity
+    # platform writing its restored state with old_state=None). HA core
+    # makes no distinction; we have to mark them ourselves so detectors
+    # can skip them and avoid the "every restart looks like a routine"
+    # false positive. See docs/HA_EVENT_SEMANTICS.md Gotcha 5.
+    _BOOTSTRAP_WINDOW_SEC = 5
+
+    @callback
+    def _on_homeassistant_started(_event: Event) -> None:
+        # Mark the start of the bootstrap window. The buffer reads
+        # this value at add()-time. If the integration loads AFTER
+        # HA finished starting (a reload mid-session), this never
+        # fires for us and bootstrap_until_ts stays at None — that's
+        # correct, since post-boot state_changed events shouldn't be
+        # flagged from_bootstrap.
+        hass.data.setdefault(DOMAIN, {})["_bootstrap_until_ts"] = (
+            datetime.now(tz=UTC).timestamp() + _BOOTSTRAP_WINDOW_SEC
+        )
+
+    from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
+
+    entry.async_on_unload(
+        hass.bus.async_listen_once(
+            EVENT_HOMEASSISTANT_STARTED, _on_homeassistant_started
+        )
+    )
+    # If we missed the start event (integration set up after boot),
+    # leave the marker unset so nothing gets flagged from_bootstrap.
+
     @callback
     def _on_state_changed(event: Event) -> None:
         new_state: State | None = event.data.get("new_state")
@@ -97,14 +128,37 @@ async def _setup_entry_body(
         # actions and integration polling. ManualHabitDetector uses
         # this to filter manual events vs system events.
         ctx_user = None
+        ctx_id: str | None = None
         try:
-            ctx_user = (
-                new_state.context.user_id
-                if getattr(new_state, "context", None) is not None
-                else None
-            )
+            if getattr(new_state, "context", None) is not None:
+                ctx_user = new_state.context.user_id
+                # context.id is the correlation key for batch
+                # operations — see Gotchas 1-3. Group toggles,
+                # scene activations, and script runs produce N
+                # state_changed events with the SAME context.id.
+                ctx_id = getattr(new_state.context, "id", None)
         except Exception:  # noqa: BLE001
             ctx_user = None
+            ctx_id = None
+
+        # Mark events that fired within the bootstrap window WITH
+        # old_state=None. HA's automation state trigger has this same
+        # guard (homeassistant/helpers/trigger.py). Two-part check
+        # because:
+        #   - old_state=None alone can be a genuine "entity just
+        #     appeared mid-session" (rare but possible)
+        #   - bootstrap-window alone catches reloads firing into the
+        #     buffer but doesn't include manual mid-session adds
+        # The conjunction is what HA itself uses.
+        from_bootstrap = False
+        if old_state is None:
+            bs_until = hass.data.get(DOMAIN, {}).get(
+                "_bootstrap_until_ts"
+            )
+            if bs_until is not None:
+                event_ts = (new_state.last_changed or datetime.now(tz=UTC)).timestamp()
+                if event_ts <= bs_until:
+                    from_bootstrap = True
 
         buffer_.add(
             StateEvent(
@@ -115,6 +169,8 @@ async def _setup_entry_body(
                 old_state=old_state.state if old_state else None,
                 new_state=new_state.state,
                 context_user_id=ctx_user,
+                from_bootstrap=from_bootstrap,
+                context_id=ctx_id,
             )
         )
 

@@ -87,8 +87,22 @@ class _FrozenBufferView:
         entity_id: str | None = None,
         since: datetime | None = None,
         until: datetime | None = None,
+        include_bootstrap: bool = False,
     ) -> Iterator[StateEvent]:
-        """Mirror StateEventBuffer.query semantics over the snapshot."""
+        """Mirror StateEventBuffer.query semantics over the snapshot.
+
+        `include_bootstrap=False` (default) skips events that fired
+        during HA's boot fan-out (every entity platform writing its
+        restored state in the first ~5 seconds with old_state=None).
+        Without this, every restart looks like a correlated burst —
+        cooccurrence flags every "B follows A within 1s" pair,
+        frequency_anomaly + streak detect a "midnight startup
+        routine", etc. See docs/HA_EVENT_SEMANTICS.md Gotcha 5.
+
+        Detectors that genuinely want to OBSERVE bootstrap events
+        (a future "boot health" detector, e.g.) can opt back in
+        with include_bootstrap=True.
+        """
         import time as _time
 
         for i, ev in enumerate(self._events):
@@ -103,6 +117,8 @@ class _FrozenBufferView:
             if since is not None and ev.timestamp < since:
                 continue
             if until is not None and ev.timestamp >= until:
+                continue
+            if not include_bootstrap and getattr(ev, "from_bootstrap", False):
                 continue
             yield ev
 

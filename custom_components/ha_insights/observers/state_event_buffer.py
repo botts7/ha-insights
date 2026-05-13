@@ -26,6 +26,26 @@ class StateEvent:
     is a manual action; an untagged one is automation/system. The field
     is optional so backfilled events (from recorder, where the original
     context isn't fully reconstructible) can be stored with None.
+
+    `from_bootstrap` flags state_changed events that fired during the
+    HA boot fan-out (every entity platform writing its restored state
+    within ~5s of EVENT_HOMEASSISTANT_STARTED with old_state=None).
+    Detectors filter these by default — without it, every restart
+    looks like a correlated burst and false-positives schedule /
+    cooccurrence / frequency_anomaly. See docs/HA_EVENT_SEMANTICS.md
+    Gotcha 5 for the full rationale.
+
+    `context_id` is the correlation key for batch operations: a
+    group toggle, scene activation, or script run produces N
+    state_changed events that all share the SAME context_id.
+    Detectors that want to detect "one logical user intent vs N
+    independent events" group by this. See Gotchas 1-3.
+
+    Upstream-PR candidate: HA core doesn't expose a stable
+    "from_bootstrap" marker today. If this proves valuable across
+    integrations, the StateEventBuffer pattern could be proposed
+    upstream as `homeassistant.helpers.event.async_track_state_change_filtered`
+    with a built-in bootstrap skip.
     """
 
     timestamp: datetime
@@ -35,6 +55,8 @@ class StateEvent:
     old_state: str | None
     new_state: str | None
     context_user_id: str | None = None
+    from_bootstrap: bool = False
+    context_id: str | None = None
 
 
 class StateEventBuffer:
@@ -112,14 +134,24 @@ class StateEventBuffer:
         entity_id: str | None = None,
         since: datetime | None = None,
         until: datetime | None = None,
+        include_bootstrap: bool = False,
     ) -> Iterator[StateEvent]:
-        """Yield events matching the filter (left-inclusive, right-exclusive on time)."""
+        """Yield events matching the filter (left-inclusive, right-exclusive on time).
+
+        `include_bootstrap=False` skips state_changed events that fired
+        during HA's startup fan-out. See docs/HA_EVENT_SEMANTICS.md
+        Gotcha 5 — every entity platform writes its restored state on
+        boot with old_state=None, creating a correlated burst that
+        false-positives most pattern detectors.
+        """
         for ev in self._events:
             if entity_id is not None and ev.entity_id != entity_id:
                 continue
             if since is not None and ev.timestamp < since:
                 continue
             if until is not None and ev.timestamp >= until:
+                continue
+            if not include_bootstrap and ev.from_bootstrap:
                 continue
             yield ev
 
