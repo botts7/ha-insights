@@ -1181,6 +1181,61 @@ def _():
     assert ("light.c", "light.b") in pairs
 
 
+@t("unavailable filter: frequency_anomaly skips X ↔ unavailable transitions")
+def _():
+    """Without this filter, a flaky WiFi node firing
+    on↔unavailable↔on 30 times/hr looks like a 30× ratio runaway
+    automation. Source-level guard the count loop skips them."""
+    src = _read(
+        "custom_components/ha_insights/detectors/frequency_anomaly.py"
+    )
+    assert "Gotcha 6" in src
+    assert 'ev.old_state == "unavailable" or ev.new_state == "unavailable"' in src
+
+
+@t("unavailable filter: orphan_device skips entities whose latest event was an availability flip")
+def _():
+    """An entity actively reporting 'unavailable' is NOT silent —
+    it's broken/flapping. Different diagnostic class from orphan_device.
+    Tested by checking the LAST event in the entity's stream."""
+    src = _read(
+        "custom_components/ha_insights/detectors/orphan_device.py"
+    )
+    assert "Gotcha 6" in src
+    assert "latest_event = entity_events[-1]" in src
+    assert 'latest_event.new_state == "unavailable"' in src
+    assert 'latest_event.old_state == "unavailable"' in src
+
+
+@t("unavailable fixture: synth_unavailable_flap produces expected transitions")
+def _():
+    """The fixture must round-trip the on↔unavailable pattern so
+    detector tests using it produce realistic streams."""
+    fixture = _load(
+        "unavailable_fixture", "tests/_ha_semantics/unavailable.py"
+    )
+    buffer_mod = _load(
+        "state_event_buffer_unavail",
+        "custom_components/ha_insights/observers/state_event_buffer.py",
+    )
+    from datetime import UTC, datetime
+
+    buf = buffer_mod.StateEventBuffer()
+    events = fixture.synth_unavailable_flap(
+        buf,
+        entity_id="binary_sensor.flaky",
+        start=datetime(2026, 5, 13, 12, 0, tzinfo=UTC),
+        cycles=3,
+    )
+    assert len(events) == 6  # 3 cycles × 2 events
+    # Alternates down-up-down-up
+    assert events[0].new_state == "unavailable"
+    assert events[1].old_state == "unavailable"
+    assert events[1].new_state == "on"
+    # Helper correctly identifies these
+    assert all(fixture.is_availability_transition(e) for e in events)
+
+
 @t("cooccurrence: drops pairs sharing context.id (co-effect filter)")
 def _():
     """Source-level guard that cooccurrence skips leader-follower

@@ -111,6 +111,16 @@ class FrequencyAnomalyDetector(Detector):
         today_counts: dict[str, int] = defaultdict(int)
         baseline_counts: dict[str, int] = defaultdict(int)
         for ev in events:
+            # v1.5: skip `unavailable` ↔ X transitions. HA fires
+            # state_changed on every availability flip; a flaky
+            # WiFi device hits 30+ events/hr without doing
+            # anything. Counting those as state changes inflates
+            # both today_counts and baseline_counts symmetrically
+            # in steady-state, but a SUDDEN flap day (broken AP
+            # this morning) shows as a runaway-automation false
+            # positive. See docs/HA_EVENT_SEMANTICS.md Gotcha 6.
+            if ev.old_state == "unavailable" or ev.new_state == "unavailable":
+                continue
             if ev.timestamp >= today_start_utc:
                 today_counts[ev.entity_id] += 1
             else:

@@ -99,6 +99,22 @@ class OrphanDeviceDetector(Detector):
             latest = entity_events[-1].timestamp
             if latest >= stale_threshold:
                 continue  # still reporting recently
+            # v1.5: skip entities whose latest event was an
+            # availability TRANSITION (X → unavailable). These are
+            # actively flapping, not silently dead — the integration
+            # is still reporting, just reporting "unavailable" right
+            # now. orphan_device is for "no signal at all" cases;
+            # availability flapping is a different diagnostic class
+            # that frequency_anomaly used to catch (now also
+            # filtered) — both leave the entity in the user's lap
+            # via Repairs / Settings, not via Insights. See
+            # docs/HA_EVENT_SEMANTICS.md Gotcha 6.
+            latest_event = entity_events[-1]
+            if (
+                latest_event.new_state == "unavailable"
+                or latest_event.old_state == "unavailable"
+            ):
+                continue
             # Group-membership false-positive filter: if this entity
             # is a member of a container that DID fire recently, the
             # entity is just slaved to a group whose state-change
