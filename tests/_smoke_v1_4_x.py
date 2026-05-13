@@ -1074,6 +1074,77 @@ def _():
     assert 'getattr(ev, "from_bootstrap", False)' in src
 
 
+@t("bootstrap fixture: 100-entity boot burst is fully filtered by default")
+def _():
+    """Validate the v1.4.9 filter against the kind of burst we'd see
+    on a real install reload: ~100 entities all firing state_changed
+    with old_state=None within ~3 seconds of boot. With the filter,
+    default query() should return ZERO events from this stream — no
+    detector should be able to false-positive on it."""
+    fixture = _load(
+        "bootstrap_fixture", "tests/_ha_semantics/bootstrap.py"
+    )
+    buffer_mod = _load(
+        "state_event_buffer_burst",
+        "custom_components/ha_insights/observers/state_event_buffer.py",
+    )
+    from datetime import UTC, datetime
+
+    buf = buffer_mod.StateEventBuffer()
+    entities = [f"light.entity_{i:03d}" for i in range(50)] + [
+        f"binary_sensor.sensor_{i:03d}" for i in range(50)
+    ]
+    fixture.synth_bootstrap_burst(
+        buf,
+        boot_at=datetime(2026, 5, 13, 12, 0, tzinfo=UTC),
+        entities=entities,
+    )
+    # 100 events added, but default query returns NONE
+    assert len(list(buf.query())) == 0, (
+        "bootstrap burst leaked through default query"
+    )
+    # Opt-in returns all
+    assert len(list(buf.query(include_bootstrap=True))) == 100
+
+
+@t("bootstrap fixture: normal events alongside boot burst are preserved")
+def _():
+    """The filter must NOT throw away genuine mid-session events
+    that happen to share the boot timestamp. Tests the boundary."""
+    fixture = _load(
+        "bootstrap_fixture_mixed", "tests/_ha_semantics/bootstrap.py"
+    )
+    buffer_mod = _load(
+        "state_event_buffer_mixed",
+        "custom_components/ha_insights/observers/state_event_buffer.py",
+    )
+    from datetime import UTC, datetime, timedelta
+
+    buf = buffer_mod.StateEventBuffer()
+    boot_at = datetime(2026, 5, 13, 12, 0, tzinfo=UTC)
+    # 10 bootstrap events
+    fixture.synth_bootstrap_burst(
+        buf,
+        boot_at=boot_at,
+        entities=[f"light.boot_{i}" for i in range(10)],
+    )
+    # 5 real events 10 minutes later
+    for i in range(5):
+        fixture.synth_normal_event(
+            buf,
+            timestamp=boot_at + timedelta(minutes=10, seconds=i),
+            entity_id=f"switch.real_{i}",
+        )
+    # Default query: only the 5 real events
+    yielded = list(buf.query())
+    assert len(yielded) == 5, (
+        f"expected 5 real events, got {len(yielded)} (bootstrap leak?)"
+    )
+    for ev in yielded:
+        assert not ev.from_bootstrap
+        assert ev.entity_id.startswith("switch.real_")
+
+
 @t("bootstrap filter (runtime): buffer.query() actually skips bootstrap events")
 def _():
     """Runtime test — construct a buffer with 3 events (1 bootstrap,
