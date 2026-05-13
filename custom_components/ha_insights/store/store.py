@@ -91,7 +91,31 @@ class InsightStore:
 
         for version in sorted(MIGRATIONS.keys()):
             if version > current:
-                await self._c.executescript(MIGRATIONS[version])
+                # Some migrations use ALTER TABLE ADD COLUMN which
+                # SQLite doesn't support `IF NOT EXISTS` on. To stay
+                # safe across re-runs and partial-failure scenarios,
+                # run each statement individually and tolerate the
+                # specific "duplicate column" error — every other
+                # SQL error still propagates.
+                statements = [
+                    s.strip()
+                    for s in MIGRATIONS[version].split(";")
+                    if s.strip()
+                ]
+                for stmt in statements:
+                    try:
+                        await self._c.execute(stmt)
+                    except Exception as err:  # noqa: BLE001
+                        msg = str(err).lower()
+                        if (
+                            "duplicate column" in msg
+                            or "already exists" in msg
+                        ):
+                            # Column / table already present from a
+                            # previous partial run. Continue with the
+                            # rest of the migration.
+                            continue
+                        raise
                 await self._c.execute(
                     "INSERT OR IGNORE INTO schema_version (version) VALUES (?)",
                     (version,),

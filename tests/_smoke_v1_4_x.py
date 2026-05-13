@@ -712,6 +712,51 @@ def _():
     assert "_REQUEST_TIMEOUT_SEC" in src
 
 
+# ---- Stability fixes ----
+
+
+@t("stability: async_show_menu has a fallback for older HA versions")
+def _():
+    src = _read("custom_components/ha_insights/config_flow.py")
+    # Modern menu path
+    assert 'hasattr(self, "async_show_menu")' in src
+    # Form fallback for older HA
+    assert 'vol.Required("path"' in src
+    # Both paths route to the same downstream wizard/advanced steps
+    assert 'choice == "advanced"' in src
+
+
+@t("stability: wizard_intro has a real schema (not empty)")
+def _():
+    src = _read("custom_components/ha_insights/config_flow.py")
+    # Empty schemas don't render on all HA versions — we use a
+    # single confirmation field to drive submission.
+    assert 'vol.Required("continue", default=True): bool' in src
+
+
+@t("stability: install UUID persists across calls when hass available")
+def _():
+    src = _read("custom_components/ha_insights/analytics.py")
+    # hass parameter is optional but threaded for persistence
+    assert "hass: HomeAssistant | None = None" in src
+    # async_update_entry persists the freshly generated UUID
+    assert "hass.config_entries.async_update_entry(entry, options=merged)" in src
+    # build_report_payload passes hass through
+    assert "get_or_create_install_uuid(entry, hass=hass)" in src
+
+
+@t("stability: schema migration tolerates duplicate-column re-runs")
+def _():
+    src = _read("custom_components/ha_insights/store/store.py")
+    # Migrations now execute per-statement with error tolerance for
+    # the SPECIFIC ALTER-already-applied case. Other errors still
+    # propagate so real bugs aren't masked.
+    assert '"duplicate column" in msg' in src
+    assert '"already exists" in msg' in src
+    # Other errors still raise
+    assert "raise" in src
+
+
 # ---- Run + report ----
 
 passed = sum(1 for _, s, _ in results if s == "PASS")

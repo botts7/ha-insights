@@ -61,17 +61,40 @@ _REQUEST_TIMEOUT_SEC = 15.0
 _REPORT_WINDOW_DAYS = 7
 
 
-def get_or_create_install_uuid(entry: "ConfigEntry") -> str:
+def get_or_create_install_uuid(
+    entry: "ConfigEntry", hass: HomeAssistant | None = None
+) -> str:
     """Return the stable per-entry install UUID, creating one if
     missing. Stored in options so it survives restarts but resets
     if the entry is removed + re-added (which is the correct
     behaviour — a brand-new entry is a brand-new install for
     analytics purposes).
+
+    When `hass` is provided AND we generate a fresh UUID, we
+    persist it back to the entry's options so the next call
+    returns the same value. Without `hass` the new UUID is
+    returned but not stored — caller is responsible for that
+    (today: build_report_payload, which doesn't have hass at
+    call-time without threading it through).
     """
     uid = entry.options.get("analytics_install_uuid")
     if isinstance(uid, str) and len(uid) == 36:
         return uid
-    return str(uuid.uuid4())
+    new_uid = str(uuid.uuid4())
+    if hass is not None:
+        # Fire-and-forget persist. async_update_entry is a callback
+        # that mutates the entry in-place + triggers the options
+        # listener. Done before the report POST so the second call
+        # in the same week sees the persisted value.
+        try:
+            merged = dict(entry.options)
+            merged["analytics_install_uuid"] = new_uid
+            hass.config_entries.async_update_entry(entry, options=merged)
+        except Exception:  # noqa: BLE001
+            _LOGGER.debug(
+                "Failed to persist analytics_install_uuid", exc_info=True
+            )
+    return new_uid
 
 
 async def build_report_payload(
@@ -91,7 +114,7 @@ async def build_report_payload(
         get_notify_preset,
     )
 
-    install_uuid = get_or_create_install_uuid(entry)
+    install_uuid = get_or_create_install_uuid(entry, hass=hass)
     cutoff = datetime.now(tz=UTC) - timedelta(days=_REPORT_WINDOW_DAYS)
     try:
         all_in_window = await store.list_insights(

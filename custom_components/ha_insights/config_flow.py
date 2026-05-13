@@ -857,14 +857,45 @@ class HaInsightsOptionsFlow(OptionsFlow):
         every option as one large form (the original surface).
         Existing users keep working — saved settings persist across
         either path.
+
+        Uses HA's `async_show_menu` when available (2023.10+) and
+        falls back to a single-question form for older HA versions.
+        The form-fallback path drives the same downstream steps so
+        the wizard chain works regardless of HA version.
         """
-        return self.async_show_menu(
-            step_id="init",
-            menu_options={
-                "wizard_intro": "Quick setup (recommended)",
-                "advanced": "Advanced settings (all options)",
-            },
+        # If user submitted the fallback form, route them
+        if user_input is not None:
+            choice = user_input.get("path", "wizard_intro")
+            if choice == "advanced":
+                return await self.async_step_advanced()
+            return await self.async_step_wizard_intro()
+
+        # Prefer the modern menu when the HA version supports it
+        if hasattr(self, "async_show_menu"):
+            try:
+                return self.async_show_menu(
+                    step_id="init",
+                    menu_options={
+                        "wizard_intro": "Quick setup (recommended)",
+                        "advanced": "Advanced settings (all options)",
+                    },
+                )
+            except Exception:  # noqa: BLE001 — older versions may have it but error
+                pass
+
+        # Fallback: single-question form. Older HA renders this as a
+        # dropdown; behaviorally equivalent to the menu.
+        schema = vol.Schema(
+            {
+                vol.Required("path", default="wizard_intro"): vol.In(
+                    {
+                        "wizard_intro": "Quick setup (recommended)",
+                        "advanced": "Advanced settings (all options)",
+                    }
+                ),
+            }
         )
+        return self.async_show_form(step_id="init", data_schema=schema)
 
     async def async_step_wizard_intro(
         self, user_input: dict[str, Any] | None = None
@@ -891,13 +922,18 @@ class HaInsightsOptionsFlow(OptionsFlow):
             current_version = integration.version or "1.0"
         except Exception:  # noqa: BLE001
             current_version = "1.0"
-        # Description placeholders aren't formally bound to strings.json
-        # in this minimal wizard — surface via description_placeholders
-        # so the translation file can pick them up later. Keeps the
-        # wizard self-contained today.
+        # The form has a single Required boolean so HA reliably renders
+        # a Submit button. The flag is consumed downstream but doesn't
+        # change behaviour — it's just there to give the form something
+        # to submit. An empty-schema form doesn't render on all HA
+        # versions; this is the safe pattern.
         return self.async_show_form(
             step_id="wizard_intro",
-            data_schema=vol.Schema({}),
+            data_schema=vol.Schema(
+                {
+                    vol.Required("continue", default=True): bool,
+                }
+            ),
             description_placeholders={
                 "is_upgrade": "true" if last_wizard_version else "false",
                 "last_version": last_wizard_version or "(first time)",
