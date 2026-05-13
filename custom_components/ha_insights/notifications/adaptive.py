@@ -75,6 +75,11 @@ def get_adaptive_floor(
     Falls back to `baseline` when no override has been published —
     that's the case on first boot, or before the first tuner run.
     Bounded into the safe band defensively.
+
+    after a restart, hass.data is empty but
+    the learned floor MUST survive. We now check entry.options
+    (the persistent record) as a second fallback, and rehydrate
+    hass.data so subsequent calls within this run hit the fast path.
     """
     try:
         entry_data = hass.data.get(DOMAIN, {}).get(entry_id)
@@ -82,6 +87,21 @@ def get_adaptive_floor(
             override = entry_data.get("adaptive_floor")
             if isinstance(override, (int, float)):
                 return max(_BAND_LOW, min(_BAND_HIGH, float(override)))
+
+            # Cold-path: hass.data hadn't been seeded yet (e.g. first
+            # call after restart, before the daily tick runs). Pull
+            # from the persisted entry.options.
+            entry = hass.config_entries.async_get_entry(entry_id)
+            if entry is not None:
+                persisted = entry.options.get("adaptive_floor")
+                if isinstance(persisted, (int, float)):
+                    bounded = max(
+                        _BAND_LOW, min(_BAND_HIGH, float(persisted))
+                    )
+                    # Seed hass.data so we don't pay the entry lookup
+                    # cost on every push.
+                    entry_data["adaptive_floor"] = bounded
+                    return bounded
     except Exception:  # noqa: BLE001
         pass
     return baseline
@@ -109,7 +129,18 @@ async def tune_adaptive_floor(
         _LOGGER.debug("adaptive tuner: store read failed", exc_info=True)
         return None
 
-    in_window = [i for i in recent if i.created_at >= cutoff]
+    # exclude example insights injected via
+    # `home_insights/inject_examples`. Those are first-run demo
+    # content, not real user outcomes — counting their dismissals
+    # would pollute the adaptive tuner's learned floor.
+    from ..examples import EXAMPLE_PAYLOAD_KEY
+
+    in_window = [
+        i
+        for i in recent
+        if i.created_at >= cutoff
+        and not i.payload.get(EXAMPLE_PAYLOAD_KEY)
+    ]
     if len(in_window) < _MIN_SAMPLES:
         return None
 
@@ -165,15 +196,32 @@ async def tune_adaptive_floor(
         }
 
     # Publish to hass.data so the next push reads the new value
-    # immediately. Persistence to options happens via the public
-    # update_entry call below.
+    # immediately, AND persist to entry.options so the learned floor
+    # survives an HA restart. code review #10 — without persistence,
+    # the tuner restarted at the baseline every boot, so weeks of
+    # learned dismiss/apply behaviour evaporated on each upgrade.
+    tune_ts = datetime.now(tz=UTC).isoformat()
     entry_data = hass.data.get(DOMAIN, {}).get(entry.entry_id)
     if isinstance(entry_data, dict):
         entry_data["adaptive_floor"] = new_floor
-        entry_data["adaptive_last_tune_at"] = datetime.now(
-            tz=UTC
-        ).isoformat()
+        entry_data["adaptive_last_tune_at"] = tune_ts
         entry_data["adaptive_last_direction"] = direction
+
+    # async_update_entry triggers the options-updated listener; the
+    # listener has a special-case for "auto-managed" keys (analytics
+    # UUID + adaptive_floor + adaptive_last_*) that skips the
+    # otherwise-mandatory reload. See __init__._on_options_updated.
+    try:
+        merged = dict(entry.options)
+        merged["adaptive_floor"] = float(new_floor)
+        merged["adaptive_last_tune_at"] = tune_ts
+        merged["adaptive_last_direction"] = direction
+        hass.config_entries.async_update_entry(entry, options=merged)
+    except Exception:  # noqa: BLE001
+        _LOGGER.debug(
+            "adaptive tuner: persist to entry.options failed",
+            exc_info=True,
+        )
 
     _LOGGER.info(
         "HA Insights adaptive tuner: %s floor %.3f → %.3f "

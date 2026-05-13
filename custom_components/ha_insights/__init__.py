@@ -384,6 +384,12 @@ async def _setup_entry_body(
         # baseline to compare against — without it, the old code
         # would unconditionally clear rollup progress on every save.
         "_known_rollup_window": get_audit_rollup_window_days(entry),
+        # snapshot the current options so the
+        # update-listener can compute a key-diff. Without this we
+        # can't tell "user clicked Save in OptionsFlow" apart from
+        # "we just async_update_entry'd to persist the analytics
+        # UUID or adaptive floor" — the latter must NOT reload.
+        "_options_snapshot": dict(entry.options),
     }
 
     if not hass.data[DOMAIN].get(_WS_REGISTERED_FLAG):
@@ -575,6 +581,27 @@ async def _setup_entry_body(
     # `audit_rollup_window_days`, prune any rollups computed against
     # a different window so the next batch refills from scratch.
     # Reload the entry so other options take effect.
+    #
+    # "auto-managed" options keys (analytics
+    # install UUID, adaptive floor, adaptive last-tune metadata) are
+    # written via async_update_entry from background tasks INSIDE
+    # the integration — they must not cause a full reload. A reload
+    # tears down the buffer + store + listeners and respawns them,
+    # which mid-tuner-run could lose in-flight scans + thrash the
+    # SQLite handle. We compute a key-diff against the previous
+    # snapshot; if ONLY auto-managed keys changed, we skip the
+    # reload. This keeps the existing "reload to apply" semantics
+    # for every user-visible option toggle while letting internal
+    # persistence be cheap.
+    _AUTO_MANAGED_OPTION_KEYS = frozenset(
+        {
+            "analytics_install_uuid",
+            "adaptive_floor",
+            "adaptive_last_tune_at",
+            "adaptive_last_direction",
+        }
+    )
+
     async def _on_options_updated(
         hass_: HomeAssistant, entry_: ConfigEntry
     ) -> None:
@@ -585,11 +612,46 @@ async def _setup_entry_body(
         # Only clear progress when the window ACTUALLY changed
         # (the cursor's bucket layout depends on window_days; any
         # other option change is window-orthogonal).
+        entry_data = hass_.data.get(DOMAIN, {}).get(entry_.entry_id) or {}
+        old_options = entry_data.get("_options_snapshot") or {}
+        new_options = dict(entry_.options)
+
+        # Compute changed keys. Includes additions, removals, and
+        # value differences. dict.items() symmetric-diff catches all
+        # three.
+        changed_keys = {
+            k
+            for k in set(old_options) | set(new_options)
+            if old_options.get(k) != new_options.get(k)
+        }
+        # Refresh snapshot first so the next fire compares against
+        # the now-current state (important when this fire is a
+        # no-op skip — without this, the next fire would diff
+        # against ancient state and falsely re-reload).
+        if isinstance(entry_data, dict):
+            entry_data["_options_snapshot"] = new_options
+
+        # Skip reload when the change-set is purely auto-managed.
+        # Empty changed_keys also lands here (no-op listener fire —
+        # HA sometimes fires the listener with no actual diff after
+        # an immediate-re-save).
+        if changed_keys and changed_keys.issubset(_AUTO_MANAGED_OPTION_KEYS):
+            _LOGGER.debug(
+                "options-updated: skipping reload, only auto-managed "
+                "keys changed: %s",
+                sorted(changed_keys),
+            )
+            return
+        if not changed_keys:
+            _LOGGER.debug(
+                "options-updated: no diff against snapshot, skipping reload"
+            )
+            return
+
         try:
             from .config_flow import get_audit_rollup_window_days
 
             new_window = get_audit_rollup_window_days(entry_)
-            entry_data = hass_.data.get(DOMAIN, {}).get(entry_.entry_id) or {}
             current_store = entry_data.get("store")
             old_window = entry_data.get("_known_rollup_window")
             if (

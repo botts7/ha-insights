@@ -124,7 +124,18 @@ async def build_report_payload(
         )
     except Exception:  # noqa: BLE001
         all_in_window = []
-    in_window = [i for i in all_in_window if i.created_at >= cutoff]
+    # exclude example insights from the
+    # community dataset. They're first-run demo content, not real
+    # user outcomes — including them would pollute fleet-wide
+    # apply / dismiss rate estimates.
+    from .examples import EXAMPLE_PAYLOAD_KEY
+
+    in_window = [
+        i
+        for i in all_in_window
+        if i.created_at >= cutoff
+        and not i.payload.get(EXAMPLE_PAYLOAD_KEY)
+    ]
 
     # Per-detector counts: total fired + applied + dismissed.
     by_detector_fired: Counter[str] = Counter()
@@ -231,16 +242,28 @@ async def send_report(
     payload = await build_report_payload(hass, entry, store)
     url = endpoint or DEFAULT_ANALYTICS_ENDPOINT
     try:
+        # reuse HA's shared aiohttp session
+        # instead of spinning up a fresh ClientSession per send.
+        # The previous code created (and tore down) a full TCP /
+        # TLS connection pool every Monday — fine for a once-weekly
+        # call but wasteful, and ClientSession leaks if the
+        # async-with body raises before close().
+        # `async_get_clientsession(hass)` returns HA's shared
+        # session (created once, reused everywhere), which is
+        # exactly the right primitive for one-off HTTP calls.
         import aiohttp
+        from homeassistant.helpers.aiohttp_client import (
+            async_get_clientsession,
+        )
 
         timeout = aiohttp.ClientTimeout(total=_REQUEST_TIMEOUT_SEC)
-        async with aiohttp.ClientSession(timeout=timeout) as session:
-            async with session.post(url, json=payload) as resp:
-                if resp.status >= 400:
-                    _LOGGER.debug(
-                        "Analytics POST to %s returned %d", url, resp.status
-                    )
-                    return None
+        session = async_get_clientsession(hass)
+        async with session.post(url, json=payload, timeout=timeout) as resp:
+            if resp.status >= 400:
+                _LOGGER.debug(
+                    "Analytics POST to %s returned %d", url, resp.status
+                )
+                return None
     except Exception:  # noqa: BLE001
         _LOGGER.debug("Analytics POST failed (best-effort)", exc_info=True)
         return None

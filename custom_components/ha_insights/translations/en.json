@@ -27,20 +27,130 @@
     }
   },
   "options": {
+    "abort": {
+      "no_users_to_override": "No HA users found — add a Person + create their HA user first."
+    },
     "step": {
       "init": {
         "title": "HA Insights settings",
-        "description": "Tune privacy mode, notifications, the daily digest, and your preferred LLM agent. Switching INTO Cloud LLM mode requires re-confirming the data-flow consent.",
+        "description": "Pick a path: the Quick setup wizard walks you through the handful of decisions that matter; Per-user notification overrides tunes mobile pushes per household member; Advanced settings exposes every option on one screen.",
+        "menu_options": {
+          "wizard_intro": "Quick setup (recommended)",
+          "user_overrides_pick": "Per-user notification overrides",
+          "advanced": "Advanced settings (all options)"
+        },
+        "data": {
+          "path": "What would you like to do?"
+        },
+        "data_description": {
+          "path": "Quick setup walks the typical decisions in 4 screens. Advanced shows every option at once. Per-user overrides tunes mobile pushes for individual household members."
+        }
+      },
+      "wizard_intro": {
+        "title": "Quick setup",
+        "description": "We'll walk you through the choices that actually matter — notification chattiness, which phones get pushes, and whether to enable experimental detectors. Should take about 30 seconds.\n\nLast configured at version: {last_version}\nCurrent version: {current_version}",
+        "data": {
+          "continue": "Continue"
+        },
+        "data_description": {
+          "continue": "Tap Submit to start the wizard."
+        }
+      },
+      "wizard_preset": {
+        "title": "How chatty should notifications be?",
+        "description": "Each preset bundles a confidence floor, daily cap, and quiet hours. You can fine-tune later in Advanced settings.\n\n• Quiet — only critical insights, never during sleep\n• Balanced — meaningful insights during waking hours (recommended)\n• Chatty — low bar for power users who like seeing every pattern\n• Adaptive — starts Balanced and auto-tunes against your dismiss/apply behaviour\n• Manual — skip the preset and configure each knob directly in Advanced",
+        "data": {
+          "notify_preset": "Notification mode"
+        },
+        "data_description": {
+          "notify_preset": "The preset becomes the default — per-user overrides can still customise it for specific household members."
+        }
+      },
+      "wizard_mobile": {
+        "title": "Which phones get pushes?",
+        "description": "Optional — leave empty for panel-only notifications.\n\nExample: {example}",
+        "data": {
+          "notify_mobile_targets": "Mobile notify services"
+        },
+        "data_description": {
+          "notify_mobile_targets": "Multi-select against the notify.mobile_app_* services HA discovered from your installed HA Companion apps. You can also paste service names HA hasn't surfaced yet."
+        }
+      },
+      "wizard_experimental": {
+        "title": "Enable experimental detectors?",
+        "description": "Off by default. Experimental detectors run additional pattern detection (phone-charge reminders, weather correlations) that have a wider noise/signal trade-off than the stable set. Recommended for users who want to help refine new detectors and don't mind the occasional false positive.",
+        "data": {
+          "allow_experimental_detectors": "Enable experimental detectors"
+        },
+        "data_description": {
+          "allow_experimental_detectors": "You can toggle this off any time without losing existing insights."
+        }
+      },
+      "wizard_done": {
+        "title": "Setup complete",
+        "description": "Your settings are saved. Open the HA Insights sidebar panel to see your home-state observations and any insights detected so far. Re-run this wizard any time from Settings → Devices & Services → HA Insights → Configure.",
+        "data": {
+          "finish": "Finish"
+        },
+        "data_description": {
+          "finish": "Tap Submit to save and return."
+        }
+      },
+      "user_overrides_pick": {
+        "title": "Per-user notification overrides — pick a user",
+        "description": "Choose which household member's notification preferences you want to override. Each user inherits the global preset unless an override exists.",
+        "data": {
+          "target_user_id": "Target user"
+        },
+        "data_description": {
+          "target_user_id": "Each row shows the user's name, their phone count, and whether an override is already in place."
+        }
+      },
+      "user_overrides_edit": {
+        "title": "Override for {user_name}",
+        "description": "Customise notifications for this user. Current state: {has_override} override exists. Tick \"Clear override\" to reset back to the global preset.",
+        "data": {
+          "preset": "Preset",
+          "confidence_floor": "Confidence floor (0.0 – 1.0)",
+          "daily_cap": "Daily cap (0 = unlimited)",
+          "quiet_hours_start": "Quiet hours start (0 – 23, local)",
+          "quiet_hours_end": "Quiet hours end (0 – 23, local)",
+          "min_attribution_confidence": "Min attribution confidence (0.0 – 1.0)",
+          "clear_override": "Clear override (revert to global preset)"
+        },
+        "data_description": {
+          "preset": "Choose a preset for this user, or Custom to use the values below.",
+          "confidence_floor": "Minimum insight confidence required to push to this user's phone.",
+          "daily_cap": "Maximum mobile pushes per local day for this user. 0 = unlimited.",
+          "quiet_hours_start": "Hour to start deferring non-urgent pushes to the next digest.",
+          "quiet_hours_end": "Hour to resume pushing — defines the end of the sleep window.",
+          "min_attribution_confidence": "Minimum target_user_id confidence required to push to this user. Below this we send to persistent_notification only.",
+          "clear_override": "When ticked, removes this user's override entirely on save. Other form fields are ignored."
+        }
+      },
+      "advanced": {
+        "title": "Advanced settings",
+        "description": "Every option in one form. Use the Quick setup wizard instead if you'd rather walk through the handful of decisions that matter most.",
         "data": {
           "llm_mode": "LLM mode",
           "lookback_days": "Recorder backfill lookback (days)",
           "notify_on_insight": "Notify on high-confidence insight",
           "notify_threshold": "Notification confidence threshold (0.0 - 1.0)",
+          "notify_mobile_targets": "Mobile notify services",
+          "notify_preset": "Notification mode",
+          "notify_mobile_threshold": "Mobile push confidence floor (custom)",
+          "notify_mobile_daily_cap": "Max mobile pushes per day (custom)",
+          "notify_quiet_hours_start": "Quiet hours start (0 - 23, custom)",
+          "notify_quiet_hours_end": "Quiet hours end (0 - 23, custom)",
+          "notify_min_attribution_confidence": "Min attribution confidence to push (custom)",
           "digest_enabled": "Send a daily digest notification",
           "digest_hour": "Digest hour (0 - 23, local time)",
           "preferred_agent_id": "Preferred LLM agent (auto-pick if blank)",
           "refine_cost_threshold_usd": "Refine cost confirm threshold (USD)",
           "allow_user_detectors": "Allow user-supplied detectors (advanced)",
+          "allow_experimental_detectors": "Enable experimental detectors",
+          "analytics_enabled": "Opt-in to community analytics",
+          "analytics_endpoint": "Analytics endpoint (blank = project default)",
           "enabled_detectors": "Detectors to run",
           "scan_areas": "Limit scans to these areas (empty = all areas)",
           "scan_interval_hours": "Auto-scan every N hours (0 = manual only)",
@@ -65,7 +175,17 @@
           "audit_rollup_window_days": "How many days of HA recorder history to roll up into seasonal / day-of-week buckets for the automation-audit detector. Range 7-180. Default 90 detects quarter-scale patterns. Going beyond your recorder's actual retention is wasted work. Upper bound stays 180 until v1.2 chunked backfill ships — going higher today can spike memory on big installs.",
           "audit_analysis_depth": "Controls how much guidance the audit LLM prompt includes. 'concise' (~150 tokens) is right for most cases. 'indepth' (~600 tokens) adds reasoning principles for stricter refinements — costs more, slower. Stage-two refinements always force concise.",
           "audit_monthly_budget_usd": "Caps cloud-LLM spend for the audit subsystem each month. Local agents (Ollama/Wyoming) bypass entirely. 0 = always allow. Resets on the 1st of each month.",
-          "audit_auto_rollup_enabled": "Default OFF. When ON, runs one chunked incremental rollup batch every 6 hours plus a delayed kick 5 minutes after HA boots, keeping seasonal/day-of-week buckets fresh without manual clicks. Bounded by per-chunk timeout (15s), per-entity wall clock (60s), per-batch budget (120s), batch size (25 entities), row cap (5000/chunk), and a single-flight lock so it can't pile up. Uses the recorder's own executor pool, so it cooperates cleanly with HA's history/statistics features instead of fighting for connections. Leave OFF if you prefer zero background recorder I/O — manual ‘📅 Run audit rollup’ still works."
+          "audit_auto_rollup_enabled": "Default OFF. When ON, runs one chunked incremental rollup batch every 6 hours plus a delayed kick 5 minutes after HA boots, keeping seasonal/day-of-week buckets fresh without manual clicks. Bounded by per-chunk timeout (15s), per-entity wall clock (60s), per-batch budget (120s), batch size (25 entities), row cap (5000/chunk), and a single-flight lock so it can't pile up. Uses the recorder's own executor pool, so it cooperates cleanly with HA's history/statistics features instead of fighting for connections. Leave OFF if you prefer zero background recorder I/O — manual ‘📅 Run audit rollup’ still works.",
+          "notify_mobile_targets": "Multi-select against the notify.mobile_app_* services HA discovered from your installed HA Companion apps. Empty = panel-only notifications. You can also paste service names HA hasn't surfaced yet.",
+          "notify_preset": "Picks the chattiness profile. Basic — Balanced is recommended. Adaptive auto-learns your dismiss/apply tolerance over time. Advanced honors the custom knobs below.",
+          "notify_mobile_threshold": "Honored only when the preset is Advanced. Minimum insight confidence for mobile pushes. Default 0.9 keeps the bar high — a buzzing phone is a much more expensive interruption than a panel toast.",
+          "notify_mobile_daily_cap": "Honored only when the preset is Advanced. Maximum mobile pushes per local day before overflow falls through to the daily digest. 0 = unlimited.",
+          "notify_quiet_hours_start": "Honored only when the preset is Advanced. Hour to start deferring non-urgent pushes to the next digest. Default 22 = 10 PM.",
+          "notify_quiet_hours_end": "Honored only when the preset is Advanced. Hour to resume pushing — defines the end of the sleep window. Default 7 = 7 AM.",
+          "notify_min_attribution_confidence": "Honored only when the preset is Advanced. Below this, target-specific mobile pushes are downgraded to persistent_notification (avoids buzzing the wrong person on a weak manual-map match).",
+          "allow_experimental_detectors": "Off by default. Experimental detectors (PhoneChargeReminder, WeatherCorrelation) have a wider noise/signal trade-off than the stable set. Enable to help refine new detectors; insights from them are tagged with a 🧪 badge.",
+          "analytics_enabled": "Off by default. Sends anonymous weekly aggregate counts (detector fire/apply/dismiss per maturity tier, install UUID, integration version, HA major.minor) to the project. Never PII, never payloads. Use the WS preview endpoint to inspect the exact bytes before enabling.",
+          "analytics_endpoint": "Blank = use the project's default URL. Set to your own receiver URL to self-host the analytics endpoint."
         }
       },
       "cloud_consent": {

@@ -1973,6 +1973,89 @@ def _():
     assert "raise" in src
 
 
+@t("code review #16: analytics POST reuses HA's shared aiohttp session")
+def _():
+    src = _read("custom_components/ha_insights/analytics.py")
+    # Must import HA's shared-session helper rather than spinning a
+    # fresh ClientSession per call.
+    assert "async_get_clientsession" in src
+    # Should NOT create a new ClientSession per send.
+    assert "aiohttp.ClientSession(" not in src
+
+
+@t("code review #10: adaptive tuner persists learned floor to entry.options")
+def _():
+    src = _read("custom_components/ha_insights/notifications/adaptive.py")
+    # Persistence: tune_adaptive_floor writes the new floor through
+    # async_update_entry so it survives restart.
+    assert "async_update_entry" in src
+    assert '"adaptive_floor"' in src
+    assert '"adaptive_last_tune_at"' in src
+    # Restore: get_adaptive_floor falls back to entry.options when
+    # hass.data hasn't been seeded yet (cold path after restart).
+    assert "entry.options.get(\"adaptive_floor\")" in src
+
+
+@t("code review #12: options listener skips reload for auto-managed keys")
+def _():
+    src = _read("custom_components/ha_insights/__init__.py")
+    # The reload-suppression set must include every auto-managed key.
+    assert "_AUTO_MANAGED_OPTION_KEYS" in src
+    assert '"analytics_install_uuid"' in src
+    assert '"adaptive_floor"' in src
+    assert '"adaptive_last_tune_at"' in src
+    assert '"adaptive_last_direction"' in src
+    # Snapshot must be seeded at setup time so the first listener
+    # fire has something to diff against.
+    assert '"_options_snapshot"' in src
+    # Diff logic + skip-reload path
+    assert "changed_keys.issubset(_AUTO_MANAGED_OPTION_KEYS)" in src
+
+
+@t("code review #11: translations cover every new wizard + advanced step")
+def _():
+    import json
+
+    data = json.load(
+        open(
+            "custom_components/ha_insights/translations/en.json",
+            encoding="utf-8",
+        )
+    )
+    steps = data["options"]["step"]
+    for step_id in (
+        "init",
+        "wizard_intro",
+        "wizard_preset",
+        "wizard_mobile",
+        "wizard_experimental",
+        "wizard_done",
+        "user_overrides_pick",
+        "user_overrides_edit",
+        "advanced",
+        "cloud_consent",
+    ):
+        assert step_id in steps, f"missing step: {step_id}"
+        assert "title" in steps[step_id], f"missing title for {step_id}"
+        assert "description" in steps[step_id], f"missing desc for {step_id}"
+    # Advanced step must include the v1.4/v1.5 anti-spam knobs that
+    # were previously absent from translations.
+    adv = steps["advanced"]["data"]
+    for k in (
+        "notify_preset",
+        "notify_mobile_targets",
+        "notify_mobile_threshold",
+        "notify_mobile_daily_cap",
+        "notify_quiet_hours_start",
+        "notify_quiet_hours_end",
+        "notify_min_attribution_confidence",
+        "allow_experimental_detectors",
+        "analytics_enabled",
+        "analytics_endpoint",
+    ):
+        assert k in adv, f"advanced step missing data label: {k}"
+
+
 # ---- Run + report ----
 
 passed = sum(1 for _, s, _ in results if s == "PASS")
