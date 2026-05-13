@@ -990,6 +990,9 @@ class HaInsightsOptionsFlow(OptionsFlow):
         )
         self._analytics_enabled: bool = DEFAULT_ANALYTICS_ENABLED
         self._analytics_endpoint: str = DEFAULT_ANALYTICS_ENDPOINT_PLACEHOLDER
+        # Per-user override flow state: which user is being edited
+        self._editing_user_id: str | None = None
+        self._editing_user_name: str | None = None
         self._enabled_detectors: list[str] | None = None
         self._scan_areas: list[str] = []
         self._scan_interval_hours: int = DEFAULT_SCAN_INTERVAL_HOURS
@@ -1015,6 +1018,8 @@ class HaInsightsOptionsFlow(OptionsFlow):
             choice = user_input.get("path", "wizard_intro")
             if choice == "advanced":
                 return await self.async_step_advanced()
+            if choice == "user_overrides_pick":
+                return await self.async_step_user_overrides_pick()
             return await self.async_step_wizard_intro()
 
         # Prefer the modern menu when the HA version supports it
@@ -1024,6 +1029,7 @@ class HaInsightsOptionsFlow(OptionsFlow):
                     step_id="init",
                     menu_options={
                         "wizard_intro": "Quick setup (recommended)",
+                        "user_overrides_pick": "Per-user notification overrides",
                         "advanced": "Advanced settings (all options)",
                     },
                 )
@@ -1037,12 +1043,210 @@ class HaInsightsOptionsFlow(OptionsFlow):
                 vol.Required("path", default="wizard_intro"): vol.In(
                     {
                         "wizard_intro": "Quick setup (recommended)",
+                        "user_overrides_pick": "Per-user notification overrides",
                         "advanced": "Advanced settings (all options)",
                     }
                 ),
             }
         )
         return self.async_show_form(step_id="init", data_schema=schema)
+
+    async def async_step_user_overrides_pick(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """First per-user override step — pick which user to edit.
+
+        Shows every HA human user as a dropdown. Each label includes
+        their mobile_app device count so the admin can see who's
+        actually routable. After selecting a user, the next step
+        loads that user's current override (or the global policy
+        as the default) into an editable form.
+
+        OptionsFlow access is already admin-gated by HA's Settings
+        permission model, so we don't need a second admin check here.
+        """
+        # Build the user-id → friendly-label map at form-render time
+        try:
+            users = await self.hass.auth.async_get_users()
+        except Exception:  # noqa: BLE001
+            users = []
+        mobile_app_count: dict[str, int] = {}
+        try:
+            for cfg in self.hass.config_entries.async_entries("mobile_app"):
+                uid = cfg.data.get("user_id")
+                if isinstance(uid, str) and uid:
+                    mobile_app_count[uid] = mobile_app_count.get(uid, 0) + 1
+        except Exception:  # noqa: BLE001
+            pass
+        overrides = get_notify_user_overrides(self.config_entry)
+        user_choices: dict[str, str] = {}
+        for u in users:
+            if getattr(u, "system_generated", False):
+                continue
+            uid = u.id
+            label_parts = [u.name or f"<user {uid[:8]}>"]
+            if u.is_admin:
+                label_parts.append("(admin)")
+            phones = mobile_app_count.get(uid, 0)
+            if phones:
+                label_parts.append(f"📱 {phones}")
+            else:
+                label_parts.append("(no phone)")
+            if uid in overrides:
+                label_parts.append("• has override")
+            user_choices[uid] = " ".join(label_parts)
+
+        if not user_choices:
+            return self.async_abort(reason="no_users_to_override")
+
+        if user_input is not None:
+            self._editing_user_id = str(user_input["target_user_id"])
+            self._editing_user_name = user_choices.get(
+                self._editing_user_id, self._editing_user_id
+            )
+            return await self.async_step_user_overrides_edit()
+
+        # Pre-select the first user with an override (if any), else
+        # the first user with a phone, else the first user.
+        default_uid = (
+            next((uid for uid in user_choices if uid in overrides), None)
+            or next(
+                (uid for uid in user_choices if mobile_app_count.get(uid)),
+                None,
+            )
+            or next(iter(user_choices))
+        )
+        schema = vol.Schema(
+            {
+                vol.Required(
+                    "target_user_id", default=default_uid
+                ): vol.In(user_choices),
+            }
+        )
+        return self.async_show_form(
+            step_id="user_overrides_pick",
+            data_schema=schema,
+        )
+
+    async def async_step_user_overrides_edit(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Edit one user's policy override.
+
+        Pre-populates fields from the user's current override (or
+        the global policy as the baseline). A single "clear override"
+        checkbox at the bottom resets to global on submit — the
+        cleanest UX for HA's one-button-per-form model.
+
+        Save semantics: form values become the user's full override.
+        Partial overrides (only some keys) are achievable via the
+        WS API but the form treats every value as authoritative.
+        """
+        if self._editing_user_id is None:
+            return await self.async_step_user_overrides_pick()
+
+        overrides = get_notify_user_overrides(self.config_entry)
+        existing = overrides.get(self._editing_user_id, {})
+        # Form defaults: existing override values first, then global
+        # policy fallbacks for any unset keys.
+        global_policy = get_mobile_notify_policy(self.config_entry)
+        cur_preset = existing.get("preset") or global_policy.get(
+            "preset", DEFAULT_NOTIFY_PRESET
+        )
+        cur_floor = float(
+            existing.get("confidence_floor")
+            or global_policy.get("confidence_floor", 0.9)
+        )
+        cur_cap = int(
+            existing.get("daily_cap")
+            if "daily_cap" in existing
+            else global_policy.get("daily_cap", 3)
+        )
+        cur_quiet_start = int(
+            existing.get("quiet_hours_start")
+            if "quiet_hours_start" in existing
+            else global_policy.get("quiet_hours_start", 22)
+        )
+        cur_quiet_end = int(
+            existing.get("quiet_hours_end")
+            if "quiet_hours_end" in existing
+            else global_policy.get("quiet_hours_end", 7)
+        )
+        cur_min_attr = float(
+            existing.get("min_attribution_confidence")
+            or global_policy.get("min_attribution_confidence", 0.85)
+        )
+
+        if user_input is not None:
+            target_user_id = self._editing_user_id
+            current = dict(overrides)
+            if user_input.get("clear_override"):
+                current.pop(target_user_id, None)
+            else:
+                current[target_user_id] = {
+                    "preset": str(user_input.get("preset", cur_preset)),
+                    "confidence_floor": float(
+                        user_input.get("confidence_floor", cur_floor)
+                    ),
+                    "daily_cap": int(
+                        user_input.get("daily_cap", cur_cap)
+                    ),
+                    "quiet_hours_start": int(
+                        user_input.get("quiet_hours_start", cur_quiet_start)
+                    ),
+                    "quiet_hours_end": int(
+                        user_input.get("quiet_hours_end", cur_quiet_end)
+                    ),
+                    "min_attribution_confidence": float(
+                        user_input.get(
+                            "min_attribution_confidence", cur_min_attr
+                        )
+                    ),
+                }
+            merged_options = dict(self.config_entry.options)
+            merged_options[CONF_NOTIFY_USER_OVERRIDES] = current
+            # Reset the editing-context flags so a second pass starts clean
+            self._editing_user_id = None
+            self._editing_user_name = None
+            return self.async_create_entry(title="", data=merged_options)
+
+        schema = vol.Schema(
+            {
+                vol.Required("preset", default=cur_preset): vol.In(
+                    {
+                        NOTIFY_PRESET_MINIMAL: "Quiet",
+                        NOTIFY_PRESET_BALANCED: "Balanced",
+                        NOTIFY_PRESET_CHATTY: "Chatty",
+                        NOTIFY_PRESET_ADAPTIVE: "Adaptive",
+                        NOTIFY_PRESET_CUSTOM: "Custom (use values below)",
+                    }
+                ),
+                vol.Required(
+                    "confidence_floor", default=cur_floor
+                ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=1.0)),
+                vol.Required("daily_cap", default=cur_cap): vol.All(
+                    vol.Coerce(int), vol.Range(min=0, max=100)
+                ),
+                vol.Required(
+                    "quiet_hours_start", default=cur_quiet_start
+                ): vol.All(vol.Coerce(int), vol.Range(min=0, max=23)),
+                vol.Required(
+                    "quiet_hours_end", default=cur_quiet_end
+                ): vol.All(vol.Coerce(int), vol.Range(min=0, max=23)),
+                vol.Required(
+                    "min_attribution_confidence", default=cur_min_attr
+                ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=1.0)),
+                vol.Optional("clear_override", default=False): bool,
+            }
+        )
+        return self.async_show_form(
+            step_id="user_overrides_edit",
+            data_schema=schema,
+            description_placeholders={
+                "user_name": self._editing_user_name or "user",
+                "has_override": "yes" if existing else "no",
+            },
+        )
 
     async def async_step_wizard_intro(
         self, user_input: dict[str, Any] | None = None

@@ -854,6 +854,69 @@ def _():
     assert "system_generated" in src
 
 
+@t("per-user UI: menu includes 'Per-user notification overrides' entry")
+def _():
+    src = _read("custom_components/ha_insights/config_flow.py")
+    assert '"user_overrides_pick": "Per-user notification overrides"' in src
+
+
+@t("per-user UI: two-step flow (pick user → edit override)")
+def _():
+    src = _read("custom_components/ha_insights/config_flow.py")
+    assert "async def async_step_user_overrides_pick(" in src
+    assert "async def async_step_user_overrides_edit(" in src
+    # Pick step chains forward
+    assert "return await self.async_step_user_overrides_edit()" in src
+
+
+@t("per-user UI: edit form pre-populates from existing override + global policy")
+def _():
+    src = _read("custom_components/ha_insights/config_flow.py")
+    # Reads the user's existing override + the global policy
+    assert "existing = overrides.get(self._editing_user_id, {})" in src
+    assert "global_policy = get_mobile_notify_policy(self.config_entry)" in src
+    # Form has all five policy knobs + clear checkbox
+    for field in (
+        '"preset"',
+        '"confidence_floor"',
+        '"daily_cap"',
+        '"quiet_hours_start"',
+        '"quiet_hours_end"',
+        '"min_attribution_confidence"',
+        '"clear_override"',
+    ):
+        assert field in src, f"missing {field} in edit form"
+
+
+@t("per-user UI: pick step surfaces phone count + override status in label")
+def _():
+    src = _read("custom_components/ha_insights/config_flow.py")
+    # Phone count shown as 📱 N or "(no phone)"
+    assert '"📱 ' in src
+    assert '"(no phone)"' in src
+    # Existing override marked in label
+    assert '"• has override"' in src
+    # Aborts cleanly when no human users (test/CI safety)
+    assert 'self.async_abort(reason="no_users_to_override")' in src
+
+
+@t("per-user UI: aware of OptionsFlow being admin-gated by HA already")
+def _():
+    src = _read("custom_components/ha_insights/config_flow.py")
+    # We don't double-gate — the docstring documents why. Match
+    # against the joined-line form to tolerate Python comment line
+    # wrapping (the literal in source may wrap at any point).
+    joined = " ".join(src.split())
+    assert "admin-gated by HA's Settings permission model" in joined
+
+
+@t("per-user UI: clearing override pops the user from the map")
+def _():
+    src = _read("custom_components/ha_insights/config_flow.py")
+    assert 'user_input.get("clear_override")' in src
+    assert "current.pop(target_user_id, None)" in src
+
+
 @t("stability: schema migration tolerates duplicate-column re-runs")
 def _():
     src = _read("custom_components/ha_insights/store/store.py")
