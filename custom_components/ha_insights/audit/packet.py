@@ -40,10 +40,19 @@ if TYPE_CHECKING:
 OBS_LONG_ON_DURATION = "long_on_duration"
 OBS_TRIGGER_TIME_DRIFT = "trigger_time_drift"
 OBS_ENTITY_SILENT = "entity_silent"
+OBS_ENTITY_STALE_STATE = "entity_stale_state"
 OBS_REDUNDANT_TARGET = "redundant_target"
 OBS_HAS_RECENT_INSIGHTS = "has_recent_insights"
 OBS_NEVER_FIRED = "never_fired_in_buffer"
 OBS_INSUFFICIENT_DATA = "insufficient_data"
+
+# When an entity reports a non-broken state but `last_changed` is older
+# than this, flag as "stale state" — integrations sometimes cache the
+# last-known state on disconnect instead of flipping to `unavailable`,
+# masking real outages. 14 days is conservative enough that static
+# binary sensors (a door closed for two weeks) won't false-positive
+# constantly; tune via a config flow knob later if needed.
+_STALE_STATE_DAYS = 14
 
 
 @dataclass(frozen=True)
@@ -107,6 +116,7 @@ def build_audit_packet(
     rollup_by_entity: dict[str, dict[str, dict[int, int]]] | None = None,
     rollup_window_days: int | None = None,
     live_states: dict[str, str] | None = None,
+    live_state_last_changed: dict[str, datetime] | None = None,
     now: datetime | None = None,
 ) -> AuditPacket:
     """Build an AuditPacket for one automation. Pure function.
@@ -179,6 +189,7 @@ def build_audit_packet(
                 entities=target_entities | trigger_entities,
                 buffer=buffer,
                 live_states=live_states or {},
+                live_state_last_changed=live_state_last_changed,
                 now=now,
             )
         )
@@ -495,6 +506,7 @@ def _observe_silent_entities(
     entities: set[str],
     buffer: "StateEventBuffer",
     live_states: dict[str, str],
+    live_state_last_changed: dict[str, datetime] | None = None,
     now: datetime,
 ) -> list[Observation]:
     """An entity is "silent" only when HA itself thinks it's dead.
@@ -565,6 +577,38 @@ def _observe_silent_entities(
                     },
                 )
             )
+            continue
+        # Stale-state heuristic. Catches the "device offline but
+        # integration caches the last known state" case — climate
+        # integrations are notorious for keeping the last `off` or
+        # `heat` value when the underlying device drops, so HA's
+        # state machine looks healthy while the user knows the
+        # device is dead.
+        if live_state_last_changed is not None:
+            last_change = live_state_last_changed.get(eid)
+            if last_change is not None:
+                days_since = (now - last_change).total_seconds() / 86400
+                if days_since >= _STALE_STATE_DAYS:
+                    out.append(
+                        Observation(
+                            kind=OBS_ENTITY_STALE_STATE,
+                            text=(
+                                f"{eid} reports `{state}` but its state "
+                                f"hasn't changed in {int(days_since)} days. "
+                                "Some integrations cache the last-known "
+                                "state when the underlying device drops "
+                                "offline — if this entity should be "
+                                "active, the cached value is masking a "
+                                "connectivity issue."
+                            ),
+                            confidence=0.6,
+                            metrics={
+                                "entity_id": eid,
+                                "stale_days": int(days_since),
+                                "reported_state": state,
+                            },
+                        )
+                    )
     return out
 
 

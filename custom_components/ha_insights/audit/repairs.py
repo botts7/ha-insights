@@ -64,6 +64,7 @@ _MIN_REPAIRS_CONFIDENCE = 0.7
 _REPAIRS_ELIGIBLE_KINDS: frozenset[str] = frozenset(
     {
         "entity_silent",        # entity is unavailable / missing
+        "entity_stale_state",   # state cached on disconnect (v1.2.1+)
         "trace_dormant",        # automation hasn't fired in 30d+
         "trace_action_errors",  # actions throwing exceptions
         "redundant_target",     # mechanical fix available

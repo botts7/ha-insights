@@ -142,6 +142,15 @@ class AutomationAuditDetector(Detector):
         live_states: dict[str, str] = {
             s.entity_id: s.state for s in ctx.hass.states.async_all()
         }
+        # Capture last_changed so the silent-entity check can also flag
+        # cached-stale states (state value LOOKS healthy but hasn't
+        # changed in many days — common for climate integrations that
+        # don't surface unavailable on disconnect).
+        live_state_last_changed: dict[str, datetime] = {
+            s.entity_id: s.last_changed
+            for s in ctx.hass.states.async_all()
+            if s.last_changed is not None
+        }
 
         # Build packets + emit insights. Pure / fast per automation.
         now = datetime.now(tz=UTC)
@@ -161,6 +170,7 @@ class AutomationAuditDetector(Detector):
                 rollup_by_entity=rollup_by_entity,
                 rollup_window_days=rollup_window_days,
                 live_states=live_states,
+                live_state_last_changed=live_state_last_changed,
                 now=now,
             )
             if not packet.observations:
