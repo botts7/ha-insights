@@ -70,6 +70,9 @@ SUPPORTED_METHODS = (
     "inject_examples",
     "clear_examples",
     "analytics_preview",
+    "list_ha_users",
+    "get_user_overrides",
+    "set_user_override",
 )
 
 
@@ -106,6 +109,9 @@ def async_register(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_inject_examples)
     websocket_api.async_register_command(hass, ws_clear_examples)
     websocket_api.async_register_command(hass, ws_analytics_preview)
+    websocket_api.async_register_command(hass, ws_list_ha_users)
+    websocket_api.async_register_command(hass, ws_get_user_overrides)
+    websocket_api.async_register_command(hass, ws_set_user_override)
 
 
 def _get_store(
@@ -3432,3 +3438,169 @@ async def ws_analytics_preview(
     except Exception as err:  # noqa: BLE001
         _LOGGER.exception("analytics_preview failed")
         connection.send_error(msg["id"], "preview_failed", str(err))
+
+
+# -- Per-user policy overrides (admin only) --
+
+
+def _require_admin(hass: HomeAssistant, connection, msg: dict) -> bool:
+    """Gate the per-user-override endpoints behind admin status.
+    Returns True if the caller is admin, False if rejected (and an
+    error frame has been sent on the connection)."""
+    user = connection.user
+    if user is None or not getattr(user, "is_admin", False):
+        connection.send_error(
+            msg["id"], "admin_required",
+            "Setting per-user notification overrides is admin-only.",
+        )
+        return False
+    return True
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "home_insights/list_ha_users",
+    }
+)
+@websocket_api.async_response
+async def ws_list_ha_users(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Return the household's HA users with their mobile_app status.
+    Admin-only. Used by the per-user-overrides admin panel so the
+    admin can pick a user to override.
+    """
+    if not _require_admin(hass, connection, msg):
+        return
+    try:
+        users = await hass.auth.async_get_users()
+    except Exception as err:  # noqa: BLE001
+        _LOGGER.exception("list_ha_users failed")
+        connection.send_error(msg["id"], "list_failed", str(err))
+        return
+    # Build user_id → mobile_app device count to surface which users
+    # actually have a registered phone (and so are routable).
+    mobile_app_users: dict[str, int] = {}
+    try:
+        for cfg in hass.config_entries.async_entries("mobile_app"):
+            uid = cfg.data.get("user_id")
+            if isinstance(uid, str) and uid:
+                mobile_app_users[uid] = mobile_app_users.get(uid, 0) + 1
+    except Exception:  # noqa: BLE001
+        pass
+    out = [
+        {
+            "user_id": u.id,
+            "name": u.name,
+            "is_admin": u.is_admin,
+            "system_generated": getattr(u, "system_generated", False),
+            "mobile_app_device_count": mobile_app_users.get(u.id, 0),
+        }
+        for u in users
+        # Filter out system-generated users (Supervisor, refresh
+        # tokens, etc) — they aren't real humans.
+        if not getattr(u, "system_generated", False)
+    ]
+    connection.send_result(msg["id"], {"users": out})
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "home_insights/get_user_overrides",
+    }
+)
+@websocket_api.async_response
+async def ws_get_user_overrides(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Return the current per-user policy overrides. Admin-only."""
+    if not _require_admin(hass, connection, msg):
+        return
+    entries = hass.config_entries.async_entries(DOMAIN)
+    if not entries:
+        connection.send_error(msg["id"], "no_entry", "No HA Insights entry")
+        return
+    from .config_flow import (
+        get_mobile_notify_policy,
+        get_notify_user_overrides,
+    )
+
+    connection.send_result(
+        msg["id"],
+        {
+            "global_policy": get_mobile_notify_policy(entries[0]),
+            "overrides": get_notify_user_overrides(entries[0]),
+        },
+    )
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "home_insights/set_user_override",
+        vol.Required("user_id"): str,
+        # null/missing keys mean "clear this override". An empty dict
+        # also means "no override for this user" — same as missing.
+        vol.Optional("override"): vol.Any(dict, None),
+    }
+)
+@websocket_api.async_response
+async def ws_set_user_override(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Set or clear a per-user policy override. Admin-only.
+
+    Body shape:
+      { user_id: "uuid",
+        override: {confidence_floor: 0.85, daily_cap: 2, ...} | null }
+
+    Pass `null` (or omit the field) to clear the override for that
+    user. Only the known policy keys are kept; anything else is
+    discarded silently.
+    """
+    if not _require_admin(hass, connection, msg):
+        return
+    entries = hass.config_entries.async_entries(DOMAIN)
+    if not entries:
+        connection.send_error(msg["id"], "no_entry", "No HA Insights entry")
+        return
+    entry = entries[0]
+    target_user_id = msg["user_id"]
+    raw_override = msg.get("override")
+
+    KNOWN_KEYS = {
+        "confidence_floor",
+        "daily_cap",
+        "quiet_hours_start",
+        "quiet_hours_end",
+        "min_attribution_confidence",
+        "preset",
+    }
+
+    from .config_flow import (
+        CONF_NOTIFY_USER_OVERRIDES,
+        get_notify_user_overrides,
+    )
+
+    current = dict(get_notify_user_overrides(entry))
+    if not raw_override:
+        current.pop(target_user_id, None)
+    else:
+        cleaned = {
+            k: v for k, v in raw_override.items() if k in KNOWN_KEYS
+        }
+        if cleaned:
+            current[target_user_id] = cleaned
+        else:
+            # Empty after filtering — treat as a clear
+            current.pop(target_user_id, None)
+
+    merged_options = dict(entry.options)
+    merged_options[CONF_NOTIFY_USER_OVERRIDES] = current
+    hass.config_entries.async_update_entry(entry, options=merged_options)
+    connection.send_result(msg["id"], {"overrides": current})

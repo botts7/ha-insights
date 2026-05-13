@@ -172,6 +172,14 @@ CONF_ANALYTICS_ENABLED = "analytics_enabled"
 DEFAULT_ANALYTICS_ENABLED = False
 CONF_ANALYTICS_ENDPOINT = "analytics_endpoint"
 DEFAULT_ANALYTICS_ENDPOINT_PLACEHOLDER = ""  # "" = use module default
+# v1.4: per-user policy overrides. Stored as a dict keyed by HA
+# user_id, each value a partial-policy dict (any subset of:
+# confidence_floor, daily_cap, quiet_hours_start, quiet_hours_end,
+# min_attribution_confidence, preset). Resolved at notification
+# time: user-specific value wins; missing keys fall back to the
+# global policy. Lets the admin say "Dad gets balanced mode but
+# quiet after 21:00, Mum gets adaptive".
+CONF_NOTIFY_USER_OVERRIDES = "notify_user_overrides"
 DEFAULT_LOOKBACK_DAYS = 14
 LOOKBACK_DAYS_RANGE = (0, 30)  # 0 disables backfill entirely
 DEFAULT_NOTIFY_ON_INSIGHT = True
@@ -453,6 +461,73 @@ def get_allow_user_detectors(entry: ConfigEntry) -> bool:
     return bool(raw)
 
 
+def get_notify_user_overrides(
+    entry: ConfigEntry,
+) -> dict[str, dict[str, Any]]:
+    """Resolve the per-user policy override map.
+
+    Returns {user_id: partial_policy_dict, ...}. Each partial policy
+    can contain any subset of the four anti-spam knobs + preset.
+    Missing keys fall back to the global policy at resolution time.
+
+    Bad shapes (non-dict, non-string keys) are filtered defensively
+    so a malformed options blob can't crash the notifier.
+    """
+    raw = entry.options.get(
+        CONF_NOTIFY_USER_OVERRIDES,
+        entry.data.get(CONF_NOTIFY_USER_OVERRIDES, {}),
+    )
+    if not isinstance(raw, dict):
+        return {}
+    out: dict[str, dict[str, Any]] = {}
+    for uid, override in raw.items():
+        if not isinstance(uid, str) or not isinstance(override, dict):
+            continue
+        out[uid] = override
+    return out
+
+
+def resolve_effective_policy(
+    entry: ConfigEntry,
+    target_user_id: str | None,
+) -> dict[str, Any]:
+    """Compose the effective mobile-push policy for a given user.
+
+    Starts from the global policy (preset-derived or custom) and
+    overlays the per-user override when one exists for
+    `target_user_id`. Unattributed insights (None user_id) use the
+    global policy as-is.
+
+    Single chokepoint — the notifier calls this instead of
+    `get_mobile_notify_policy` directly, so per-user logic only
+    lives in one place.
+    """
+    global_policy = get_mobile_notify_policy(entry)
+    if not target_user_id:
+        return global_policy
+    overrides = get_notify_user_overrides(entry)
+    user_override = overrides.get(target_user_id)
+    if not user_override:
+        return global_policy
+    # Shallow merge — user-override keys win, global fills the rest.
+    # Defensive: only accept known keys so a malformed override
+    # can't inject arbitrary fields.
+    KNOWN_KEYS = {
+        "confidence_floor",
+        "daily_cap",
+        "quiet_hours_start",
+        "quiet_hours_end",
+        "min_attribution_confidence",
+        "preset",
+        "adaptive",
+    }
+    merged = dict(global_policy)
+    for k, v in user_override.items():
+        if k in KNOWN_KEYS:
+            merged[k] = v
+    return merged
+
+
 def get_analytics_settings(
     entry: ConfigEntry,
 ) -> tuple[bool, str]:
@@ -648,6 +723,78 @@ def _detector_multiselect(hass: Any, current: list[str] | None) -> Any:
         )
     except Exception:  # pragma: no cover — defensive fallback
         return list
+
+
+def _notify_mobile_targets_selector(
+    hass: Any, current: list[str] | None
+) -> Any:
+    """Schema field for "which mobile_app notify services to push to" —
+    multi-select dropdown populated from registered notify.* services.
+
+    Lists `notify.mobile_app_*` services first (the canonical case),
+    then any other notify.* service the user might want to route to
+    (Telegram, Discord, Pushover, etc). custom_value=True so users
+    can still type a service name HA hasn't surfaced yet (e.g. when
+    they're setting things up before the mobile_app device finishes
+    registering).
+
+    Falls back to plain str if the helper API isn't available —
+    keeps the field functional even on older HA versions.
+    """
+    try:
+        from homeassistant.helpers import selector
+
+        # Discover currently-registered notify services. HA exposes
+        # them via `hass.services.async_services()` keyed by domain.
+        mobile_app_services: list[str] = []
+        other_services: list[str] = []
+        try:
+            registered = hass.services.async_services().get("notify", {})
+            for name in sorted(registered.keys()):
+                qualified = f"notify.{name}"
+                if name.startswith("mobile_app_"):
+                    mobile_app_services.append(qualified)
+                else:
+                    other_services.append(qualified)
+        except Exception:  # noqa: BLE001
+            pass
+
+        # Always include any value the user already saved, even if
+        # the service isn't currently registered (e.g. mobile_app
+        # not loaded yet). Otherwise HA strips the value as invalid.
+        already_saved = set(current or [])
+        all_options: list[str] = []
+        for svc in mobile_app_services:
+            if svc not in all_options:
+                all_options.append(svc)
+        for svc in other_services:
+            if svc not in all_options:
+                all_options.append(svc)
+        for svc in sorted(already_saved):
+            if svc not in all_options:
+                all_options.append(svc)
+
+        options = [
+            selector.SelectOptionDict(
+                value=svc,
+                label=(
+                    f"📱 {svc}"
+                    if svc.startswith("notify.mobile_app_")
+                    else svc
+                ),
+            )
+            for svc in all_options
+        ]
+        return selector.SelectSelector(
+            selector.SelectSelectorConfig(
+                options=options,
+                mode=selector.SelectSelectorMode.DROPDOWN,
+                multiple=True,
+                custom_value=True,
+            )
+        )
+    except Exception:  # pragma: no cover — defensive fallback
+        return str
 
 
 def _area_multiselect(hass: Any) -> Any:
@@ -973,23 +1120,29 @@ class HaInsightsOptionsFlow(OptionsFlow):
     async def async_step_wizard_mobile(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Mobile push targets — comma-separated notify.mobile_app_*.
-        Optional — empty = panel-only notifications."""
-        current = ", ".join(
-            get_notify_mobile_targets(self.config_entry)
-        )
+        """Mobile push targets — multi-select picker populated from
+        registered `notify.mobile_app_*` services. Optional — empty
+        list = panel-only notifications. Custom values still allowed
+        for services HA hasn't surfaced yet."""
+        current_list = get_notify_mobile_targets(self.config_entry)
         if user_input is not None:
-            self._notify_mobile_targets = str(
-                user_input.get(CONF_NOTIFY_MOBILE_TARGETS, current)
-            )
+            raw = user_input.get(CONF_NOTIFY_MOBILE_TARGETS, current_list)
+            if isinstance(raw, (list, tuple, set, frozenset)):
+                self._notify_mobile_targets = ", ".join(
+                    str(t).strip() for t in raw if str(t).strip()
+                )
+            else:
+                self._notify_mobile_targets = str(raw)
             return await self.async_step_wizard_experimental()
         return self.async_show_form(
             step_id="wizard_mobile",
             data_schema=vol.Schema(
                 {
                     vol.Optional(
-                        CONF_NOTIFY_MOBILE_TARGETS, default=current
-                    ): str,
+                        CONF_NOTIFY_MOBILE_TARGETS, default=current_list
+                    ): _notify_mobile_targets_selector(
+                        self.hass, current_list
+                    ),
                 }
             ),
             description_placeholders={
@@ -1117,12 +1270,20 @@ class HaInsightsOptionsFlow(OptionsFlow):
             self._notify_threshold = float(
                 user_input.get(CONF_NOTIFY_THRESHOLD, current_notify_threshold)
             )
-            self._notify_mobile_targets = str(
-                user_input.get(
-                    CONF_NOTIFY_MOBILE_TARGETS,
-                    current_notify_mobile_targets,
-                )
+            # The selector hands back a list of strings; the older
+            # text-field path handed back a comma-separated string.
+            # Normalize to the comma-separated string the storage
+            # layer + getter expect so both UI shapes round-trip.
+            raw_targets = user_input.get(
+                CONF_NOTIFY_MOBILE_TARGETS,
+                current_notify_mobile_targets,
             )
+            if isinstance(raw_targets, (list, tuple, set, frozenset)):
+                self._notify_mobile_targets = ", ".join(
+                    str(t).strip() for t in raw_targets if str(t).strip()
+                )
+            else:
+                self._notify_mobile_targets = str(raw_targets)
             self._notify_mobile_threshold = float(
                 user_input.get(
                     CONF_NOTIFY_MOBILE_THRESHOLD,
@@ -1304,8 +1465,13 @@ class HaInsightsOptionsFlow(OptionsFlow):
                 # user's phone, not just the panel.
                 vol.Optional(
                     CONF_NOTIFY_MOBILE_TARGETS,
-                    default=current_notify_mobile_targets,
-                ): str,
+                    # Show as a real list so the selector renders
+                    # pre-selected chips for already-saved values.
+                    default=get_notify_mobile_targets(self.config_entry),
+                ): _notify_mobile_targets_selector(
+                    self.hass,
+                    get_notify_mobile_targets(self.config_entry),
+                ),
                 # Notification mode picker. One dropdown collapses the
                 # three Basic chattiness levels + Adaptive + Advanced
                 # so new users have a one-click setup. The four

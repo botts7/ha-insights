@@ -206,6 +206,7 @@ async def _setup_entry_body(
                 notify_mobile_targets,
                 policy=notify_mobile_policy,
                 entry_id=notify_entry_id,
+                entry=entry,
             ),
             name=f"{DOMAIN}_notify_{insight_obj.id}",
         )
@@ -612,6 +613,7 @@ async def _notify_insight(
     *,
     policy: dict | None = None,
     entry_id: str = "default",
+    entry: ConfigEntry | None = None,
 ) -> None:
     """Fire notifications announcing a new high-confidence insight.
 
@@ -655,6 +657,7 @@ async def _notify_insight(
             notify_services=mobile_targets,
             policy=policy,
             entry_id=entry_id,
+            entry=entry,
         )
 
 

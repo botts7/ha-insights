@@ -121,6 +121,7 @@ async def fire_mobile_notifications(
     notify_services: list[str],
     policy: dict[str, Any] | None = None,
     entry_id: str = "default",
+    entry: Any | None = None,
 ) -> None:
     """Send `insight` to each notify.* service, gated by the policy.
 
@@ -135,6 +136,24 @@ async def fire_mobile_notifications(
     diagnose silent insights.
     """
     from .user_routing import resolve_notify_targets
+
+    # Per-user policy override: if the insight is attributed to a
+    # specific user AND we have the entry handle, recompute the
+    # effective policy with that user's overlay. Older callers
+    # that don't pass `entry` keep the global policy.
+    target_user_id_for_policy = getattr(insight, "target_user_id", None)
+    if entry is not None and target_user_id_for_policy is not None:
+        try:
+            from ..config_flow import resolve_effective_policy
+
+            policy = resolve_effective_policy(
+                entry, target_user_id_for_policy
+            )
+        except Exception:  # noqa: BLE001
+            _LOGGER.debug(
+                "Per-user policy resolution failed, falling back to global",
+                exc_info=True,
+            )
 
     pol = policy or {}
     floor = float(pol.get("confidence_floor", 0.0))

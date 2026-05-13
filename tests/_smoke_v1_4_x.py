@@ -778,6 +778,82 @@ def _():
     )
 
 
+@t("mobile targets: SelectSelector built from registered notify.* services")
+def _():
+    src = _read("custom_components/ha_insights/config_flow.py")
+    assert "def _notify_mobile_targets_selector(" in src
+    # Auto-prefers mobile_app_* services, includes others for power users
+    assert 'name.startswith("mobile_app_")' in src
+    # Always preserves already-saved values so they survive
+    # mobile_app being unloaded during configuration
+    assert "already_saved" in src
+    # custom_value=True so users can type a service HA hasn't surfaced
+    assert "custom_value=True" in src
+
+
+@t("mobile targets: form accepts list (from selector) AND string (legacy)")
+def _():
+    src = _read("custom_components/ha_insights/config_flow.py")
+    # The save path normalizes list → comma-separated string so the
+    # storage format is stable across the selector vs legacy text input.
+    assert "isinstance(raw_targets, (list, tuple, set, frozenset))" in src
+    assert '", ".join(' in src
+
+
+@t("per-user: get_notify_user_overrides + resolve_effective_policy defined")
+def _():
+    src = _read("custom_components/ha_insights/config_flow.py")
+    assert "def get_notify_user_overrides(" in src
+    assert "def resolve_effective_policy(" in src
+    # Only known keys can be injected (no arbitrary fields)
+    assert "KNOWN_KEYS = {" in src
+    # Unattributed insights pass through unchanged
+    assert "if not target_user_id:" in src
+    assert "return global_policy" in src
+
+
+@t("per-user: mobile.py recomputes effective policy when entry + user known")
+def _():
+    src = _read("custom_components/ha_insights/notifications/mobile.py")
+    assert "resolve_effective_policy" in src
+    # Falls back to global policy on resolver failure
+    assert "falling back to global" in src
+
+
+@t("per-user: ws endpoints registered + in SUPPORTED_METHODS")
+def _():
+    src = _read("custom_components/ha_insights/ws_api.py")
+    for name in (
+        "ws_list_ha_users",
+        "ws_get_user_overrides",
+        "ws_set_user_override",
+    ):
+        assert name in src, f"missing {name}"
+    for method in (
+        '"list_ha_users"',
+        '"get_user_overrides"',
+        '"set_user_override"',
+    ):
+        assert method in src, f"missing {method} in SUPPORTED_METHODS"
+
+
+@t("per-user: write/list endpoints are admin-gated")
+def _():
+    src = _read("custom_components/ha_insights/ws_api.py")
+    assert "def _require_admin(" in src
+    assert '"admin_required"' in src
+    # The gate is actually called from each of the three endpoints
+    assert src.count("_require_admin(hass, connection, msg)") >= 3
+
+
+@t("per-user: list_ha_users surfaces mobile_app device count per user")
+def _():
+    src = _read("custom_components/ha_insights/ws_api.py")
+    assert "mobile_app_device_count" in src
+    # System-generated users (Supervisor etc) are filtered out
+    assert "system_generated" in src
+
+
 @t("stability: schema migration tolerates duplicate-column re-runs")
 def _():
     src = _read("custom_components/ha_insights/store/store.py")
