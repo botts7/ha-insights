@@ -250,30 +250,34 @@ def _():
     assert count >= 3, f"only {count} dispatches found"
 
 
-@t("ManualHabit: builds correct automation YAML for light.turn_off")
+@t("ManualHabit: detector invariants present")
 def _():
-    # Pure-logic test of the YAML builder. Bypass the detector base
-    # class (needs HA) and call _build_automation_yaml directly via
-    # method-resolution-order trickery.
     src = open(
         "custom_components/ha_insights/detectors/manual_habit.py",
         encoding="utf-8",
     ).read()
-    # Validate the file has the key invariants we expect, without
-    # spinning up the detector framework on Windows.
+    # 5+ days bar
     assert "_MIN_MANUAL_DAYS = 5" in src
-    assert "_TIME_STDDEV_MAX_MIN" in src
-    # Domain → service map covers the obvious binary domains
+    # Tolerance for manual time variance — relaxed because humans
+    # don't act at the same minute every day
+    assert "_TIME_STDDEV_MAX_MIN = 45.0" in src
+    # Cross-reference bucket widened so habit at 07:42 collides
+    # with existing automation at 07:15 (same "morning" hour)
+    assert "_TIME_BUCKET_MINUTES = 60" in src
+    # Weekday-only condition supported in builder
+    assert "_WEEKDAYS_ONLY" in src
+    # Domain → service map covers binary domains
     for needle in (
         '"light"', '"switch"', '"fan"',
         'light.turn_on', 'switch.turn_off', 'fan.turn_off',
     ):
         assert needle in src, f"missing service mapping: {needle}"
-    # Cross-reference with existing automations to avoid duplicate
-    # suggestions is wired
+    # Cross-reference with existing automations to avoid duplicates
     assert "_signatures_of_existing_automations" in src
     # context_user_id is the manual/automation discriminator
     assert "context_user_id" in src
+    # Title surfaces variance so the user knows the tolerance
+    assert "± " in src or "±{" in src
 
 
 @t("StateEvent: context_user_id field is preserved as optional")

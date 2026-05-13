@@ -43,10 +43,23 @@ if TYPE_CHECKING:
 
 # Tighter bar than StreakDetector since this detector proposes a write.
 _MIN_MANUAL_DAYS = 5
-_TIME_STDDEV_MAX_MIN = 20.0
+# Tolerance for time-of-day clustering. Real humans don't perform manual
+# actions at exactly the same minute every day — 45 min covers most
+# "around 7:30am" cases (07:00–08:00 with occasional outliers).
+_TIME_STDDEV_MAX_MIN = 45.0
 _LOOKBACK_DAYS = 14
+# Coarse time bucket used for cross-referencing against the user's
+# existing automations. 60 minutes means an existing trigger at 07:15
+# and a proposed average of 07:42 will collide → we suppress. Avoids
+# proposing an "automate it at 07:42" suggestion when the user already
+# has "fire at 07:15".
+_TIME_BUCKET_MINUTES = 60
 # A "manual" event is one where HA's context.user_id is non-None.
 # Automation actions and integration polling have user_id = None.
+
+# Weekdays mapping for the condition builder
+_WEEKDAY_NAMES = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
+_WEEKDAYS_ONLY = frozenset(("mon", "tue", "wed", "thu", "fri"))
 
 # Domain → (state-value → service) mapping. Drives the auto-generated
 # automation action. Conservative: only domains where the binary
@@ -181,21 +194,45 @@ class ManualHabitDetector(Detector):
         if (entity_id, new_state, bucket) in already_handled:
             return None
 
+        # Are all manual days weekdays? Add a weekday condition in the
+        # suggested YAML if so — captures the "I do this every workday"
+        # pattern correctly.
+        observed_weekdays: set[str] = {
+            _WEEKDAY_NAMES[d.weekday()] for d in longest_run
+        }
+        weekdays_only = observed_weekdays <= _WEEKDAYS_ONLY
+
+        # Round-to-nearest-5 for the trigger so the YAML reads cleanly.
+        trigger_minute = round(avg_min_within / 5) * 5
+        if trigger_minute == 60:
+            trigger_hour = (avg_hour + 1) % 24
+            trigger_minute = 0
+        else:
+            trigger_hour = avg_hour
+        trigger_time = f"{trigger_hour:02d}:{trigger_minute:02d}"
+
         # Build the apply-able automation YAML.
         automation = self._build_automation_yaml(
-            entity_id, new_state, avg_time_str, len(longest_run), per_day
+            entity_id=entity_id,
+            target_state=new_state,
+            trigger_time=trigger_time,
+            avg_time_str=avg_time_str,
+            stddev_min=stddev,
+            days_count=len(longest_run),
+            weekdays_only=weekdays_only,
         )
 
         confidence = round(
             min(1.0, len(longest_run) / 7.0)
-            * max(0.0, 1.0 - stddev / 30.0),
+            # Use a flatter tolerance — at stddev=45 we still want > 0
+            * max(0.0, 1.0 - stddev / 60.0),
             3,
         )
 
         title = (
             f"You manually set {entity_id} → {new_state} "
-            f"{len(longest_run)} days in a row at ~{avg_time_str[:5]}. "
-            "Automate it?"
+            f"{len(longest_run)} days in a row at ~{avg_time_str[:5]} "
+            f"(±{int(round(stddev))} min). Automate it?"
         )
 
         fingerprint: dict[str, Any] = {
@@ -235,29 +272,61 @@ class ManualHabitDetector(Detector):
 
     def _build_automation_yaml(
         self,
+        *,
         entity_id: str,
         target_state: str,
-        avg_time: str,
+        trigger_time: str,
+        avg_time_str: str,
+        stddev_min: float,
         days_count: int,
-        per_day: dict[date, datetime],
+        weekdays_only: bool,
     ) -> dict[str, Any]:
+        """Build a complete automation YAML for a detected manual habit.
+
+        The trigger is a single `at:` time rounded to the nearest 5 min,
+        because HA's time platform takes a single timestamp — humans
+        rarely automate around the exact same minute, and the observed
+        ±N min variance is surfaced in the description so the user
+        can decide whether to widen the trigger themselves (e.g., add
+        a sun-based / state-based / time_pattern alternative).
+        """
         domain = entity_id.split(".", 1)[0]
         service = _DOMAIN_SERVICE_MAP[domain][target_state]
-        # Truncate avg_time to HH:MM so HA's `time:` platform accepts it.
-        hhmm = avg_time[:5]
         alias = (
-            f"HA Insights: {entity_id} → {target_state} @ {hhmm}"
+            f"HA Insights: {entity_id} → {target_state} @ {trigger_time}"
+            + (" (weekdays)" if weekdays_only else "")
         )
+        variance_note = (
+            f"Observed variance was ±{int(round(stddev_min))} min around "
+            f"{avg_time_str[:5]} — your manual actions weren't always at "
+            f"exactly {trigger_time}. The trigger is set to {trigger_time} "
+            "(rounded). If you'd prefer a wider window, replace the time "
+            "trigger with a `time_pattern:` or a state-based trigger (e.g., "
+            "sun, presence, or another sensor that fires within the "
+            "window you actually want)."
+        )
+        description = (
+            f"Auto-suggested by HA Insights. You manually set "
+            f"{entity_id} → {target_state} on {days_count} consecutive "
+            f"days "
+            + ("(all weekdays) " if weekdays_only else "")
+            + f"around {avg_time_str[:5]}.\n\n"
+            + variance_note
+            + "\n\nFeel free to edit, disable, or delete."
+        )
+        conditions: list[dict[str, Any]] = []
+        if weekdays_only:
+            conditions.append(
+                {
+                    "condition": "time",
+                    "weekday": ["mon", "tue", "wed", "thu", "fri"],
+                }
+            )
         return {
             "alias": alias,
-            "description": (
-                f"Auto-suggested by HA Insights: you manually set "
-                f"{entity_id} → {target_state} on {days_count} consecutive "
-                f"days at ~{hhmm}. This automation fires at that time. "
-                "Edit / disable / delete freely."
-            ),
-            "trigger": [{"platform": "time", "at": hhmm}],
-            "condition": [],
+            "description": description,
+            "trigger": [{"platform": "time", "at": trigger_time}],
+            "condition": conditions,
             "action": [
                 {
                     "service": service,
@@ -340,9 +409,17 @@ class ManualHabitDetector(Detector):
 
     @staticmethod
     def _time_bucket(hour: int, minute: int) -> int:
-        """Coarse bucket: 30-minute granularity. So `17:35` and `17:52`
-        share a bucket → consider it the same time-of-day."""
-        return hour * 2 + (1 if minute >= 30 else 0)
+        """Coarse bucket for cross-referencing against existing automations.
+
+        At `_TIME_BUCKET_MINUTES = 60`, this returns the hour itself —
+        so an existing automation triggered at 07:15 and a proposed
+        habit at 07:42 share bucket 7 and we suppress the duplicate.
+        Humans don't trigger automations at identical minutes; a
+        coarse hourly bucket matches the way users actually think
+        about their schedules ("morning", "after work").
+        """
+        total_minutes = hour * 60 + minute
+        return total_minutes // _TIME_BUCKET_MINUTES
 
     def _bucket_from_str(self, hhmm: str) -> int | None:
         try:
