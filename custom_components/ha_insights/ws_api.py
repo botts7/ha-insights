@@ -525,9 +525,31 @@ async def ws_list(
         "petkit": "PetKit app",
     }
 
+    # v1.4: lookup table for detector maturity. The Detector class
+    # exposes a class-level `maturity` attr (Maturity enum: stable /
+    # beta / experimental). Card uses this to render BETA /
+    # EXPERIMENTAL badges, so we surface it on every insight.
+    try:
+        from .detectors import DETECTORS
+
+        detector_maturity_by_name: dict[str, str] = {}
+        for det_name, det_cls in DETECTORS.items():
+            m = getattr(det_cls, "maturity", None)
+            if m is not None:
+                detector_maturity_by_name[det_name] = (
+                    m.value if hasattr(m, "value") else str(m)
+                )
+    except Exception:  # noqa: BLE001
+        detector_maturity_by_name = {}
+
     enriched: list[dict[str, Any]] = []
     for ins in insights:
         d = ins.to_dict()
+        # Enrich with detector maturity so the card can render the
+        # 🟡 BETA / 🧪 EXPERIMENTAL pill alongside confidence/integration.
+        # Lookup is cheap (dict get) and matches the per-insight loop
+        # the rest of the enrichment already runs.
+        d["maturity"] = detector_maturity_by_name.get(ins.detector, "stable")
         # Pull primary entity_id from fingerprint. Different detectors use
         # different keys (entity_id, leader_entity_id, follower_entity_id).
         eid = (
