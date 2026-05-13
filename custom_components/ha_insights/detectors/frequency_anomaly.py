@@ -62,6 +62,14 @@ class FrequencyAnomalyDetector(Detector):
     name = "frequency_anomaly"
     kind = InsightKind.ANOMALY
     requires_recorder = False
+    # v1.5: BETA until field-tested. The HA-semantics audit landed
+    # 4 filters that should eliminate the broadest false-positive
+    # classes (unavailable flap, group fan-out, recorder/live
+    # asymmetry, bootstrap fan-out), but they're not proven on
+    # diverse real installs yet. Promote to STABLE once 2-3 weeks
+    # of community feedback report no surprise false-positive
+    # modes we haven't filtered. See docs/HA_EVENT_SEMANTICS.md.
+    maturity = Maturity.BETA
     # Per-entity runaway detection — merging two anomalies into a
     # "light.* (cohort)" card masks which entity is actually flapping.
     # Each spike is its own root cause to investigate.

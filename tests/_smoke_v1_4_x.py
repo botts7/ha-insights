@@ -1181,6 +1181,33 @@ def _():
     assert ("light.c", "light.b") in pairs
 
 
+@t("maturity demotion: 4 risky detectors are now Maturity.BETA pre-HACS")
+def _():
+    """Until field-tested across 3-5 real installs, the detectors
+    with known false-positive surface area should be flagged BETA
+    so users see honest expectations + can dismiss/feedback."""
+    for fname in (
+        "frequency_anomaly.py",
+        "cooccurrence.py",
+        "automation_audit.py",
+    ):
+        src = _read(f"custom_components/ha_insights/detectors/{fname}")
+        assert "maturity = Maturity.BETA" in src, (
+            f"{fname} should set maturity = Maturity.BETA pre-HACS"
+        )
+    # LaggedCorrelation inherits BETA from Cooccurrence — verify the
+    # inheritance is in place by NOT overriding it
+    src_lagged = _read(
+        "custom_components/ha_insights/detectors/lagged_correlation.py"
+    )
+    # Must NOT explicitly set its own maturity (would override)
+    assert "maturity = " not in src_lagged
+    # Must still extend Cooccurrence so it picks up BETA via MRO
+    assert (
+        "class LaggedCorrelationDetector(CooccurrenceDetector):" in src_lagged
+    )
+
+
 @t("recorder vs live: StateEvent gains source field (live | recorder)")
 def _():
     src = _read(

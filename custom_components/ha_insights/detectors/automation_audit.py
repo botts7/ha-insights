@@ -30,7 +30,7 @@ from ..audit.traces import (
     fetch_trace_aggregates,
 )
 from ..insight import Insight, InsightKind
-from .base import Detector, DetectorContext, register_detector
+from .base import Detector, DetectorContext, Maturity, register_detector
 
 if TYPE_CHECKING:
     pass
@@ -61,6 +61,14 @@ class AutomationAuditDetector(Detector):
     name = "automation_audit"
     kind = InsightKind.AUTOMATION_IMPROVEMENT
     requires_recorder = False
+    # v1.5: BETA until field-tested. Audit findings can be very
+    # actionable (dead entities, redundant member targets) but
+    # also produce noise (false-positive "stale state" on entities
+    # that are intentionally idle). Promote once we see real-
+    # install apply rates above ~60% on the deterministic finding
+    # types and dismiss rates below ~30% on the LLM-suggested
+    # ones.
+    maturity = Maturity.BETA
 
     async def scan(self, ctx: DetectorContext) -> list[Insight]:
         if not ctx.existing_automations:

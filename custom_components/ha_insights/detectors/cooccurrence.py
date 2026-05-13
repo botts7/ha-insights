@@ -16,7 +16,7 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 from ..insight import Insight, InsightKind
-from .base import Detector, DetectorContext, register_detector
+from .base import Detector, DetectorContext, Maturity, register_detector
 
 if TYPE_CHECKING:
     from ..observers.state_event_buffer import StateEvent
@@ -29,6 +29,14 @@ class CooccurrenceDetector(Detector):
     name = "cooccurrence"
     kind = InsightKind.AUTOMATION_PROPOSAL
     requires_recorder = False
+    # v1.5: BETA until field-tested. The detector has strong
+    # filtering (hierarchy.are_related catches structural pairs,
+    # context.id batch filter catches group/scene/script
+    # fan-out), but real-world installs have edge cases (one-off
+    # scripts, complex automations) we haven't validated against.
+    # LaggedCorrelation inherits this status. Promote when
+    # community feedback confirms no surprise modes.
+    maturity = Maturity.BETA
 
     LOOKBACK_DAYS = 14
     WINDOW_SECONDS = 30
