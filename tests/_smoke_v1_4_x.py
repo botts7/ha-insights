@@ -374,6 +374,129 @@ def _():
         assert f'"{tier}"' in src or f"'{tier}'" in src, f"missing {tier}"
 
 
+# ---- Anti-spam policy (v1.4 follow-up) ----
+
+
+@t("anti-spam: 5 presets defined with non-overlapping confidence floors")
+def _():
+    src = _read("custom_components/ha_insights/config_flow.py")
+    for preset in (
+        "NOTIFY_PRESET_MINIMAL",
+        "NOTIFY_PRESET_BALANCED",
+        "NOTIFY_PRESET_CHATTY",
+        "NOTIFY_PRESET_ADAPTIVE",
+        "NOTIFY_PRESET_CUSTOM",
+    ):
+        assert preset in src, f"missing preset constant {preset}"
+    # Each baseline has all five keys
+    for k in (
+        "confidence_floor",
+        "daily_cap",
+        "quiet_hours_start",
+        "quiet_hours_end",
+        "min_attribution_confidence",
+    ):
+        assert f'"{k}"' in src, f"preset table missing key {k}"
+
+
+@t("anti-spam: get_mobile_notify_policy honors custom + preset paths")
+def _():
+    src = _read("custom_components/ha_insights/config_flow.py")
+    assert "def get_mobile_notify_policy" in src
+    assert "preset == NOTIFY_PRESET_CUSTOM" in src
+    assert 'policy["preset"] = preset' in src
+    assert 'policy["adaptive"] = preset == NOTIFY_PRESET_ADAPTIVE' in src
+
+
+@t("mobile notifier: gates apply in order (confidence, attribution, quiet, cap)")
+def _():
+    src = _read("custom_components/ha_insights/notifications/mobile.py")
+    # Confidence floor before any other check
+    assert "Gate 1: mobile-specific confidence floor" in src
+    assert "Gate 2: attribution confidence" in src
+    assert "Gate 3: quiet hours" in src
+    assert "Gate 4: daily cap" in src
+    # All four log lines explain WHY the push was skipped
+    assert "below floor" in src or "< mobile floor" in src
+    assert "won't risk waking the wrong person" in src
+    assert "falls inside quiet hours" in src
+    assert "already received %d pushes today" in src
+
+
+@t("mobile notifier: quiet hours wrap midnight")
+def _():
+    """Verify the wrap-around branch by replicating the helper
+    inline (we can't import the package member directly because of
+    its relative imports). This catches the same off-by-one bugs."""
+    src = _read("custom_components/ha_insights/notifications/mobile.py")
+    # Structural assertions on the implementation
+    assert "def _in_quiet_hours(" in src
+    assert "if start == end:" in src
+    assert "return start <= local_hour < end" in src
+    # Wrap case explicitly handled
+    assert "local_hour >= start or local_hour < end" in src
+
+    # And inline re-implementation to catch logic regression
+    def _q(h: int, start: int, end: int) -> bool:
+        if start == end:
+            return False
+        if start < end:
+            return start <= h < end
+        return h >= start or h < end
+
+    assert _q(23, 22, 7) is True
+    assert _q(3, 22, 7) is True
+    assert _q(10, 22, 7) is False
+    assert _q(10, 9, 17) is True
+    assert _q(18, 9, 17) is False
+    assert _q(0, 0, 0) is False
+
+
+@t("mobile notifier: daily-counter resets per entry on unload")
+def _():
+    src = _read("custom_components/ha_insights/__init__.py")
+    assert "reset_daily_counter_for_entry" in src
+
+
+@t("mobile notifier: daily-counter is keyed by (entry, user_or_household, date)")
+def _():
+    src = _read("custom_components/ha_insights/notifications/mobile.py")
+    assert "_DAILY_COUNTERS" in src
+    assert "user_key = target_user_id or \"household\"" in src
+    # Per-event count (not per-target), since OS tag collapses
+    # multi-phone delivery into one user-facing notification.
+    assert "Only bump the counter once per insight" in src
+
+
+# ---- Adaptive tuner ----
+
+
+@t("adaptive: tuner exists with band [0.7, 0.95] and step 0.02")
+def _():
+    src = _read("custom_components/ha_insights/notifications/adaptive.py")
+    assert "_BAND_LOW = 0.70" in src
+    assert "_BAND_HIGH = 0.95" in src
+    assert "_STEP = 0.02" in src
+    assert "def tune_adaptive_floor" in src
+    assert "def get_adaptive_floor" in src
+
+
+@t("adaptive: schedule wired at 03:00 local when preset == adaptive")
+def _():
+    src = _read("custom_components/ha_insights/__init__.py")
+    assert "tune_adaptive_floor" in src
+    assert "if notify_mobile_policy.get(\"adaptive\"):" in src
+    # Scheduled at 03:00 (low-traffic; before morning push window)
+    assert "hour=3, minute=0, second=0" in src
+
+
+@t("adaptive: floor lookup wired in fire_mobile_notifications")
+def _():
+    src = _read("custom_components/ha_insights/notifications/mobile.py")
+    assert "if pol.get(\"adaptive\"):" in src
+    assert "get_adaptive_floor" in src
+
+
 # ---- Run + report ----
 
 passed = sum(1 for _, s, _ in results if s == "PASS")

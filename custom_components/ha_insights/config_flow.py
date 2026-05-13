@@ -54,6 +54,93 @@ CONF_NOTIFY_THRESHOLD = "notify_threshold"
 # panel waiting.
 CONF_NOTIFY_MOBILE_TARGETS = "notify_mobile_targets"
 DEFAULT_NOTIFY_MOBILE_TARGETS = ""
+# Anti-spam knobs for mobile-app pushes. A buzzing phone is a much
+# more expensive interruption than a panel toast, so mobile gets a
+# stricter set of gates ON TOP of the shared notify_threshold:
+#   - notify_mobile_threshold: insight confidence floor, higher than
+#     panel threshold (default 0.9 vs panel's 0.8).
+#   - notify_mobile_daily_cap: max pushes per user per local day.
+#     Overflow falls through to the daily digest.
+#   - notify_quiet_hours_start / _end: local-hour window during which
+#     non-urgent pushes are deferred to the next digest. Default
+#     22:00–07:00 to match typical sleep windows.
+#   - notify_min_attribution_confidence: target_user_id_confidence
+#     floor below which we don't push to a specific phone (avoids
+#     buzzing the wrong person on a weak manual-map match). The
+#     persistent_notification still fires.
+# Three notification "modes" presented to the user:
+#
+#   - Basic — one dropdown with a chattiness sub-choice (Quiet /
+#     Balanced / Chatty). Hides the four anti-spam knobs entirely.
+#     This is the recommended path for nearly every install.
+#   - Adaptive — system auto-tunes the confidence threshold within
+#     a safe band [0.7, 0.95] based on dismiss/apply outcomes over
+#     time. Starts at the Balanced defaults and nudges from there.
+#   - Advanced — exposes the four anti-spam knobs for power users
+#     who want to dial in their own policy.
+#
+# The mode + Basic chattiness collapse into the same five concrete
+# value-sets the policy resolver applies. The surface UI is just
+# more discoverable than five flat preset options.
+CONF_NOTIFY_PRESET = "notify_preset"
+NOTIFY_PRESET_MINIMAL = "minimal"   # surfaced in UI as "Basic — Quiet"
+NOTIFY_PRESET_BALANCED = "balanced" # surfaced in UI as "Basic — Balanced" (default)
+NOTIFY_PRESET_CHATTY = "chatty"     # surfaced in UI as "Basic — Chatty"
+NOTIFY_PRESET_ADAPTIVE = "adaptive" # surfaced in UI as "Adaptive (learns)"
+NOTIFY_PRESET_CUSTOM = "custom"     # surfaced in UI as "Advanced (custom knobs)"
+DEFAULT_NOTIFY_PRESET = NOTIFY_PRESET_BALANCED
+# Each preset maps to a (confidence_floor, daily_cap, quiet_start,
+# quiet_end, min_attribution_confidence) tuple. Tuned for the
+# "would this be annoying?" sweet spot at each end of the
+# annoyance / signal trade-off:
+#   - minimal: only the most important things, never during sleep
+#   - balanced: the default — meaningful stuff during waking hours
+#   - chatty: low bar; for power users who like seeing patterns
+#   - adaptive: starts at balanced, auto-tunes
+#   - custom: honored only when preset == custom
+_NOTIFY_PRESETS: dict[str, dict[str, Any]] = {
+    NOTIFY_PRESET_MINIMAL: {
+        "confidence_floor": 0.95,
+        "daily_cap": 1,
+        "quiet_hours_start": 21,
+        "quiet_hours_end": 8,
+        "min_attribution_confidence": 0.95,
+    },
+    NOTIFY_PRESET_BALANCED: {
+        "confidence_floor": 0.90,
+        "daily_cap": 3,
+        "quiet_hours_start": 22,
+        "quiet_hours_end": 7,
+        "min_attribution_confidence": 0.85,
+    },
+    NOTIFY_PRESET_CHATTY: {
+        "confidence_floor": 0.75,
+        "daily_cap": 10,
+        "quiet_hours_start": 23,
+        "quiet_hours_end": 6,
+        "min_attribution_confidence": 0.70,
+    },
+    NOTIFY_PRESET_ADAPTIVE: {
+        # Adaptive starts at balanced and nudges from there.
+        # Live values held in hass.data and (eventually) persisted
+        # alongside this entry's options.
+        "confidence_floor": 0.90,
+        "daily_cap": 3,
+        "quiet_hours_start": 22,
+        "quiet_hours_end": 7,
+        "min_attribution_confidence": 0.85,
+    },
+}
+CONF_NOTIFY_MOBILE_THRESHOLD = "notify_mobile_threshold"
+DEFAULT_NOTIFY_MOBILE_THRESHOLD = 0.9
+CONF_NOTIFY_MOBILE_DAILY_CAP = "notify_mobile_daily_cap"
+DEFAULT_NOTIFY_MOBILE_DAILY_CAP = 3
+CONF_NOTIFY_QUIET_HOURS_START = "notify_quiet_hours_start"
+CONF_NOTIFY_QUIET_HOURS_END = "notify_quiet_hours_end"
+DEFAULT_NOTIFY_QUIET_HOURS_START = 22
+DEFAULT_NOTIFY_QUIET_HOURS_END = 7
+CONF_NOTIFY_MIN_ATTRIBUTION_CONFIDENCE = "notify_min_attribution_confidence"
+DEFAULT_NOTIFY_MIN_ATTRIBUTION_CONFIDENCE = 0.85
 CONF_DIGEST_ENABLED = "digest_enabled"
 CONF_DIGEST_HOUR = "digest_hour"
 # v0.9 phase 9: per-install LLM agent preference. Empty string / None means
@@ -236,6 +323,104 @@ def get_notify_mobile_targets(entry: ConfigEntry) -> list[str]:
         seen.add(target)
         out.append(target)
     return out
+
+
+def get_notify_preset(entry: ConfigEntry) -> str:
+    """Resolve the notification preset name. Unknown values fall
+    back to the default. Used by both the OptionsFlow form (to
+    decide whether the four individual knobs are visible) and the
+    runtime policy resolver below."""
+    raw = entry.options.get(
+        CONF_NOTIFY_PRESET,
+        entry.data.get(CONF_NOTIFY_PRESET, DEFAULT_NOTIFY_PRESET),
+    )
+    if raw in _NOTIFY_PRESETS or raw == NOTIFY_PRESET_CUSTOM:
+        return raw
+    return DEFAULT_NOTIFY_PRESET
+
+
+def get_mobile_notify_policy(entry: ConfigEntry) -> dict[str, Any]:
+    """Resolve the anti-spam policy for mobile-app pushes.
+
+    Returns a dict the notifier consumes:
+      {
+        "confidence_floor": float,        # 0..1
+        "daily_cap": int,                 # 0 = unlimited
+        "quiet_hours_start": int,         # 0..23 local hour
+        "quiet_hours_end": int,           # 0..23 local hour
+        "min_attribution_confidence": float,  # 0..1
+        "preset": str,                    # which preset is active
+        "adaptive": bool,                 # adaptive auto-tunes
+      }
+
+    Resolution order:
+      - preset == "custom" → read each individual CONF_NOTIFY_* knob
+      - preset == "adaptive" → use the adaptive-mode baseline, with
+        confidence_floor REPLACED by the runtime-adjusted value
+        when one has been published into hass.data (the adaptive
+        tuner module owns that override).
+      - any other preset → use the preset's baseline values
+
+    Quiet hours wrap midnight (start > end means the quiet window
+    crosses midnight, e.g. 22 → 7 is "22:00 today through 07:00
+    tomorrow"). End-equals-start means no quiet hours at all (any
+    time fires).
+    """
+    preset = get_notify_preset(entry)
+
+    def _clamped_float(key: str, default: float, lo: float, hi: float) -> float:
+        raw = entry.options.get(key, entry.data.get(key, default))
+        try:
+            return max(lo, min(hi, float(raw)))
+        except (TypeError, ValueError):
+            return default
+
+    def _clamped_int(key: str, default: int, lo: int, hi: int) -> int:
+        raw = entry.options.get(key, entry.data.get(key, default))
+        try:
+            return max(lo, min(hi, int(raw)))
+        except (TypeError, ValueError):
+            return default
+
+    if preset == NOTIFY_PRESET_CUSTOM:
+        policy = {
+            "confidence_floor": _clamped_float(
+                CONF_NOTIFY_MOBILE_THRESHOLD,
+                DEFAULT_NOTIFY_MOBILE_THRESHOLD,
+                0.0,
+                1.0,
+            ),
+            "daily_cap": _clamped_int(
+                CONF_NOTIFY_MOBILE_DAILY_CAP,
+                DEFAULT_NOTIFY_MOBILE_DAILY_CAP,
+                0,
+                100,
+            ),
+            "quiet_hours_start": _clamped_int(
+                CONF_NOTIFY_QUIET_HOURS_START,
+                DEFAULT_NOTIFY_QUIET_HOURS_START,
+                0,
+                23,
+            ),
+            "quiet_hours_end": _clamped_int(
+                CONF_NOTIFY_QUIET_HOURS_END,
+                DEFAULT_NOTIFY_QUIET_HOURS_END,
+                0,
+                23,
+            ),
+            "min_attribution_confidence": _clamped_float(
+                CONF_NOTIFY_MIN_ATTRIBUTION_CONFIDENCE,
+                DEFAULT_NOTIFY_MIN_ATTRIBUTION_CONFIDENCE,
+                0.0,
+                1.0,
+            ),
+        }
+    else:
+        policy = dict(_NOTIFY_PRESETS.get(preset, _NOTIFY_PRESETS[DEFAULT_NOTIFY_PRESET]))
+
+    policy["preset"] = preset
+    policy["adaptive"] = preset == NOTIFY_PRESET_ADAPTIVE
+    return policy
 
 
 def get_allow_user_detectors(entry: ConfigEntry) -> bool:
@@ -585,6 +770,14 @@ class HaInsightsOptionsFlow(OptionsFlow):
         self._notify_on: bool = DEFAULT_NOTIFY_ON_INSIGHT
         self._notify_threshold: float = DEFAULT_NOTIFY_THRESHOLD
         self._notify_mobile_targets: str = DEFAULT_NOTIFY_MOBILE_TARGETS
+        self._notify_mobile_threshold: float = DEFAULT_NOTIFY_MOBILE_THRESHOLD
+        self._notify_mobile_daily_cap: int = DEFAULT_NOTIFY_MOBILE_DAILY_CAP
+        self._notify_quiet_hours_start: int = DEFAULT_NOTIFY_QUIET_HOURS_START
+        self._notify_quiet_hours_end: int = DEFAULT_NOTIFY_QUIET_HOURS_END
+        self._notify_min_attribution_confidence: float = (
+            DEFAULT_NOTIFY_MIN_ATTRIBUTION_CONFIDENCE
+        )
+        self._notify_preset: str = DEFAULT_NOTIFY_PRESET
         self._digest_enabled: bool = DEFAULT_DIGEST_ENABLED
         self._digest_hour: int = DEFAULT_DIGEST_HOUR
         self._preferred_agent_id: str | None = None
@@ -606,6 +799,8 @@ class HaInsightsOptionsFlow(OptionsFlow):
         current_notify_mobile_targets = ", ".join(
             get_notify_mobile_targets(self.config_entry)
         )
+        current_mobile_policy = get_mobile_notify_policy(self.config_entry)
+        current_notify_preset = get_notify_preset(self.config_entry)
         current_digest_on, current_digest_hour = get_digest_settings(
             self.config_entry
         )
@@ -650,6 +845,39 @@ class HaInsightsOptionsFlow(OptionsFlow):
                     CONF_NOTIFY_MOBILE_TARGETS,
                     current_notify_mobile_targets,
                 )
+            )
+            self._notify_mobile_threshold = float(
+                user_input.get(
+                    CONF_NOTIFY_MOBILE_THRESHOLD,
+                    current_mobile_policy["confidence_floor"],
+                )
+            )
+            self._notify_mobile_daily_cap = int(
+                user_input.get(
+                    CONF_NOTIFY_MOBILE_DAILY_CAP,
+                    current_mobile_policy["daily_cap"],
+                )
+            )
+            self._notify_quiet_hours_start = int(
+                user_input.get(
+                    CONF_NOTIFY_QUIET_HOURS_START,
+                    current_mobile_policy["quiet_hours_start"],
+                )
+            )
+            self._notify_quiet_hours_end = int(
+                user_input.get(
+                    CONF_NOTIFY_QUIET_HOURS_END,
+                    current_mobile_policy["quiet_hours_end"],
+                )
+            )
+            self._notify_min_attribution_confidence = float(
+                user_input.get(
+                    CONF_NOTIFY_MIN_ATTRIBUTION_CONFIDENCE,
+                    current_mobile_policy["min_attribution_confidence"],
+                )
+            )
+            self._notify_preset = str(
+                user_input.get(CONF_NOTIFY_PRESET, current_notify_preset)
             )
             self._digest_enabled = bool(
                 user_input.get(CONF_DIGEST_ENABLED, current_digest_on)
@@ -732,6 +960,14 @@ class HaInsightsOptionsFlow(OptionsFlow):
                     CONF_NOTIFY_ON_INSIGHT: self._notify_on,
                     CONF_NOTIFY_THRESHOLD: self._notify_threshold,
                     CONF_NOTIFY_MOBILE_TARGETS: self._notify_mobile_targets,
+                    CONF_NOTIFY_PRESET: self._notify_preset,
+                    CONF_NOTIFY_MOBILE_THRESHOLD: self._notify_mobile_threshold,
+                    CONF_NOTIFY_MOBILE_DAILY_CAP: self._notify_mobile_daily_cap,
+                    CONF_NOTIFY_QUIET_HOURS_START: self._notify_quiet_hours_start,
+                    CONF_NOTIFY_QUIET_HOURS_END: self._notify_quiet_hours_end,
+                    CONF_NOTIFY_MIN_ATTRIBUTION_CONFIDENCE: (
+                        self._notify_min_attribution_confidence
+                    ),
                     CONF_DIGEST_ENABLED: self._digest_enabled,
                     CONF_DIGEST_HOUR: self._digest_hour,
                     CONF_PREFERRED_AGENT_ID: self._preferred_agent_id or "",
@@ -772,6 +1008,58 @@ class HaInsightsOptionsFlow(OptionsFlow):
                     CONF_NOTIFY_MOBILE_TARGETS,
                     default=current_notify_mobile_targets,
                 ): str,
+                # Notification mode picker. One dropdown collapses the
+                # three Basic chattiness levels + Adaptive + Advanced
+                # so new users have a one-click setup. The four
+                # individual knobs are still here below (Advanced
+                # mode honors them; the others derive from the
+                # preset). Hidden vs visible per-knob is a v1.5
+                # follow-up — for now they always show, but the
+                # field labels explain the precedence.
+                vol.Optional(
+                    CONF_NOTIFY_PRESET, default=current_notify_preset
+                ): vol.In(
+                    {
+                        NOTIFY_PRESET_MINIMAL: "Basic — Quiet (high bar, sleep-aware)",
+                        NOTIFY_PRESET_BALANCED: "Basic — Balanced (recommended)",
+                        NOTIFY_PRESET_CHATTY: "Basic — Chatty (low bar, more notifications)",
+                        NOTIFY_PRESET_ADAPTIVE: "Adaptive (auto-learns your tolerance)",
+                        NOTIFY_PRESET_CUSTOM: "Advanced (use the knobs below)",
+                    }
+                ),
+                # The next four are honored ONLY when mode == Advanced.
+                # Surfaced regardless so they're discoverable; the
+                # description text explains the precedence.
+                vol.Optional(
+                    CONF_NOTIFY_MOBILE_THRESHOLD,
+                    default=current_mobile_policy["confidence_floor"],
+                ): vol.All(
+                    vol.Coerce(float), vol.Range(min=0.0, max=1.0)
+                ),
+                vol.Optional(
+                    CONF_NOTIFY_MOBILE_DAILY_CAP,
+                    default=current_mobile_policy["daily_cap"],
+                ): vol.All(
+                    vol.Coerce(int), vol.Range(min=0, max=100)
+                ),
+                vol.Optional(
+                    CONF_NOTIFY_QUIET_HOURS_START,
+                    default=current_mobile_policy["quiet_hours_start"],
+                ): vol.All(
+                    vol.Coerce(int), vol.Range(min=0, max=23)
+                ),
+                vol.Optional(
+                    CONF_NOTIFY_QUIET_HOURS_END,
+                    default=current_mobile_policy["quiet_hours_end"],
+                ): vol.All(
+                    vol.Coerce(int), vol.Range(min=0, max=23)
+                ),
+                vol.Optional(
+                    CONF_NOTIFY_MIN_ATTRIBUTION_CONFIDENCE,
+                    default=current_mobile_policy["min_attribution_confidence"],
+                ): vol.All(
+                    vol.Coerce(float), vol.Range(min=0.0, max=1.0)
+                ),
                 vol.Optional(
                     CONF_DIGEST_ENABLED, default=current_digest_on
                 ): bool,

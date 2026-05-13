@@ -16,6 +16,7 @@ from .config_flow import (
     get_allow_user_detectors,
     get_digest_settings,
     get_lookback_days,
+    get_mobile_notify_policy,
     get_notify_mobile_targets,
     get_notify_settings,
     get_scan_interval_hours,
@@ -181,6 +182,8 @@ async def _setup_entry_body(
     # watching the panel.
     notify_enabled, notify_threshold = get_notify_settings(entry)
     notify_mobile_targets = get_notify_mobile_targets(entry)
+    notify_mobile_policy = get_mobile_notify_policy(entry)
+    notify_entry_id = entry.entry_id
 
     @callback
     def _on_store_event(event_type: str, insight_obj) -> None:
@@ -196,7 +199,13 @@ async def _setup_entry_body(
         # entry and call into a closed store via _notify_insight's lookups.
         entry.async_create_background_task(
             hass,
-            _notify_insight(hass, insight_obj, notify_mobile_targets),
+            _notify_insight(
+                hass,
+                insight_obj,
+                notify_mobile_targets,
+                policy=notify_mobile_policy,
+                entry_id=notify_entry_id,
+            ),
             name=f"{DOMAIN}_notify_{insight_obj.id}",
         )
 
@@ -210,6 +219,29 @@ async def _setup_entry_body(
         schedule_digest(hass, store, hour=digest_hour) if digest_enabled else None
     )
 
+    # v1.4: Adaptive notification tuner. Schedules a daily nudge at
+    # 03:00 local that reads recent dismiss/apply outcomes and
+    # adjusts the mobile-push confidence floor accordingly. No-op
+    # when the user hasn't picked the "adaptive" preset — keeps
+    # the scheduler cheap.
+    unsub_adaptive = None
+    if notify_mobile_policy.get("adaptive"):
+        from homeassistant.helpers.event import async_track_time_change
+
+        from .notifications.adaptive import tune_adaptive_floor
+
+        @callback
+        def _on_adaptive_tick(_now) -> None:
+            entry.async_create_background_task(
+                hass,
+                tune_adaptive_floor(hass, entry, store),
+                name=f"{DOMAIN}_adaptive_tune",
+            )
+
+        unsub_adaptive = async_track_time_change(
+            hass, _on_adaptive_tick, hour=3, minute=0, second=0
+        )
+
     hass.data[DOMAIN][entry.entry_id] = {
         "store": store,
         "buffer": buffer_,
@@ -217,6 +249,7 @@ async def _setup_entry_body(
         "unsub_registry": unsub_registry,
         "unsub_store": unsub_store,
         "unsub_digest": unsub_digest,
+        "unsub_adaptive": unsub_adaptive,
         "last_backfill": None,
         "backfill_running": False,
     }
@@ -540,13 +573,17 @@ async def _notify_insight(
     hass: HomeAssistant,
     insight,
     mobile_targets: list[str] | None = None,
+    *,
+    policy: dict | None = None,
+    entry_id: str = "default",
 ) -> None:
     """Fire notifications announcing a new high-confidence insight.
 
     persistent_notification always fires (it's the in-HA toast). If the
     user configured one or more mobile-app notify targets, they receive
-    the push too — time-critical insights need to reach the user's
-    phone, not just sit in the panel.
+    the push too — gated by the anti-spam `policy` (confidence floor,
+    attribution-confidence floor, quiet hours, daily cap). See
+    notifications/mobile.py for the gate logic.
 
     notification_id includes the insight id so re-emissions of the same
     insight (e.g. on a re-scan) replace the existing notification rather
@@ -577,7 +614,11 @@ async def _notify_insight(
         from .notifications.mobile import fire_mobile_notifications
 
         await fire_mobile_notifications(
-            hass, insight, notify_services=mobile_targets
+            hass,
+            insight,
+            notify_services=mobile_targets,
+            policy=policy,
+            entry_id=entry_id,
         )
 
 
@@ -1206,6 +1247,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         data["unsub_store"]()
     if data.get("unsub_digest") is not None:
         data["unsub_digest"]()
+    if data.get("unsub_adaptive") is not None:
+        data["unsub_adaptive"]()
     # Phase D scheduler cleanup. Cancelling unregisters the time-interval
     # listener so we don't keep firing scans after unload.
     if data.get("scan_scheduler_cancel") is not None:
@@ -1213,6 +1256,14 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # v1.2 auto-rollup scheduler cleanup. Same pattern.
     if data.get("rollup_scheduler_cancel") is not None:
         data["rollup_scheduler_cancel"]()
+    # v1.4: drop in-memory mobile-push daily counter for this entry
+    # so a reload doesn't inherit the in-flight day's count.
+    try:
+        from .notifications.mobile import reset_daily_counter_for_entry
+
+        reset_daily_counter_for_entry(entry.entry_id)
+    except Exception:  # noqa: BLE001
+        _LOGGER.debug("daily-counter reset on unload skipped", exc_info=True)
     # Cancel any in-flight initial backfill before closing the store —
     # otherwise it'll write to a closed connection on its next flush.
     backfill_task = data.get("backfill_task")
