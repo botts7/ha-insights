@@ -101,7 +101,9 @@ class RoutineDetector(Detector):
 
         insights: list[Insight] = []
         for bucket, day_cells in by_bucket.items():
-            insight = self._evaluate_bucket(bucket, day_cells, already_handled)
+            insight = self._evaluate_bucket(
+                ctx, bucket, day_cells, already_handled
+            )
             if insight is not None:
                 insights.append(insight)
         return insights
@@ -125,6 +127,7 @@ class RoutineDetector(Detector):
 
     def _evaluate_bucket(
         self,
+        ctx: DetectorContext,
         bucket: int,
         day_cells: list[tuple[date, list[tuple[str, str, datetime]]]],
         already_handled: set[tuple[str, str, int]],

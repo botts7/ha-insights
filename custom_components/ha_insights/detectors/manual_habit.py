@@ -108,7 +108,7 @@ class ManualHabitDetector(Detector):
         insights: list[Insight] = []
         for (entity_id, new_state), events in groups.items():
             insight = self._evaluate_group(
-                entity_id, new_state, events, already_handled
+                ctx, entity_id, new_state, events, already_handled
             )
             if insight is not None:
                 insights.append(insight)
@@ -134,6 +134,7 @@ class ManualHabitDetector(Detector):
 
     def _evaluate_group(
         self,
+        ctx: DetectorContext,
         entity_id: str,
         new_state: str,
         events: list["StateEvent"],

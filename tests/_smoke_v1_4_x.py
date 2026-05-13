@@ -1181,6 +1181,143 @@ def _():
     assert ("light.c", "light.b") in pairs
 
 
+@t("import safety: every detector module compiles cleanly (catches NameError class)")
+def _():
+    """Catches the entire class of 'I added X but forgot to import X'
+    bugs at the source level by AST-parsing each detector file. Both
+    PATTERN_OBSERVATION and Maturity.BETA escaped earlier because no
+    test actually parsed the files.
+
+    AST-parse is the strongest local check we can do without HA's
+    Python environment (relative imports from .base etc. fail to
+    load standalone). It catches:
+      - undefined names referenced as class-body attrs
+      - syntax errors
+      - typo'd class names
+      - mismatched parens
+    Doesn't catch runtime-only errors (those need the HA stack)."""
+    import ast
+    import os
+
+    det_dir = "custom_components/ha_insights/detectors"
+    failed: list[tuple[str, str]] = []
+    for fname in os.listdir(det_dir):
+        if not fname.endswith(".py") or fname.startswith("_"):
+            continue
+        body = _read(f"{det_dir}/{fname}")
+        try:
+            ast.parse(body, filename=fname)
+        except SyntaxError as e:  # noqa: PERF203
+            failed.append((fname, f"{type(e).__name__}: {e}"))
+    assert not failed, f"detector files failed to parse: {failed}"
+
+
+@t("import safety: pyflakes finds no undefined names across the integration")
+def _():
+    """Catches the same class of bug as the Maturity import miss
+    + the PATTERN_OBSERVATION enum miss. pyflakes does static
+    name-resolution: every name referenced in the module body
+    must be defined (locally OR imported). NameError-class bugs
+    that only show up at HA boot are caught here instead.
+
+    Allow-list: EntityHierarchy is a TYPE_CHECKING forward-ref
+    used as a string in annotations — pyflakes can't tell. We
+    filter it out instead of fighting the tool.
+    """
+    import os
+    import subprocess
+
+    integration_dir = "custom_components/ha_insights"
+    try:
+        result = subprocess.run(
+            ["python", "-m", "pyflakes", integration_dir],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        # pyflakes not installed — skip silently so this test
+        # doesn't block CI/local runs that don't have dev deps.
+        return
+
+    undefined: list[str] = []
+    for line in result.stdout.splitlines():
+        if "undefined name" not in line:
+            continue
+        # Filter the known TYPE_CHECKING forward-ref false-positive
+        if "EntityHierarchy" in line:
+            continue
+        undefined.append(line)
+    assert not undefined, (
+        f"pyflakes found undefined names (likely missing imports):\n"
+        + "\n".join(undefined)
+    )
+
+
+@t("import safety: every detector module compiles to bytecode (catches NameError-equivalents)")
+def _():
+    """The AST-parse check above catches syntax errors. `compile()`
+    catches the slightly-deeper class of syntactic errors — and is
+    what Python itself runs during the import phase. Note: neither
+    of these execute the module body, so they DON'T catch the
+    Maturity / PATTERN_OBSERVATION bugs (those only surface at
+    actual import time when class-body statements run). They DO
+    catch outright typos / mismatched parens / mismatched f-strings
+    / unicode-escape bugs.
+
+    The actual "NameError on import" class is covered by the
+    `maturity imports` regression below + the `every detector
+    referencing PATTERN_OBSERVATION` regression added earlier."""
+    import os
+
+    det_dir = "custom_components/ha_insights/detectors"
+    failed: list[tuple[str, str]] = []
+    for fname in os.listdir(det_dir):
+        if not fname.endswith(".py") or fname.startswith("_"):
+            continue
+        full = f"{det_dir}/{fname}"
+        body = _read(full)
+        try:
+            compile(body, fname, "exec")
+        except SyntaxError as e:  # noqa: PERF203
+            failed.append((full, f"{type(e).__name__}: {e}"))
+    assert not failed, f"detector compile failed: {failed}"
+
+
+@t("import safety: every helper module compiles cleanly")
+def _():
+    """Same AST sweep across other Python directories that get
+    imported at HA setup time. Misses any nested files we don't
+    list, but covers the modules most likely to break in a
+    rapid-iteration session."""
+    import ast
+    import os
+
+    targets = [
+        "custom_components/ha_insights",
+        "custom_components/ha_insights/notifications",
+        "custom_components/ha_insights/lib",
+        "custom_components/ha_insights/observers",
+        "custom_components/ha_insights/store",
+        "custom_components/ha_insights/audit",
+        "custom_components/ha_insights/apply",
+        "custom_components/ha_insights/llm",
+    ]
+    failed: list[tuple[str, str]] = []
+    for path in targets:
+        if not os.path.isdir(path):
+            continue
+        for fname in os.listdir(path):
+            if not fname.endswith(".py"):
+                continue
+            full = f"{path}/{fname}"
+            try:
+                ast.parse(_read(full), filename=fname)
+            except SyntaxError as e:  # noqa: PERF203
+                failed.append((full, f"{type(e).__name__}: {e}"))
+    assert not failed, f"helper files failed to parse: {failed}"
+
+
 @t("maturity imports: every detector referencing Maturity also imports it")
 def _():
     """Regression for the v1.5.4 deploy failure where

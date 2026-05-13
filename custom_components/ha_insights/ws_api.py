@@ -9,6 +9,7 @@ Stable contract from v0.1 (per docs/ARCHITECTURE.md). Cards consume:
 """
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
@@ -17,6 +18,8 @@ from homeassistant.components import websocket_api
 from homeassistant.core import HomeAssistant, callback
 
 from .const import DOMAIN
+
+_LOGGER = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from .insight import Insight
