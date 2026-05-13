@@ -917,6 +917,22 @@ def _():
     assert "current.pop(target_user_id, None)" in src
 
 
+@t("panel: setup + unload only call async_remove_panel when registered")
+def _():
+    """Regression for the recurring 'Removing unknown panel ha-insights'
+    warning on every reload. async_remove_panel logs that warning
+    if the path isn't currently registered. Both call sites (setup
+    pre-register cleanup AND unload teardown) must probe
+    hass.data['frontend_panels'] before calling remove."""
+    src = _read("custom_components/ha_insights/__init__.py")
+    # Both call sites guard
+    assert src.count('"frontend_panels"') >= 2, (
+        "expected guard at both setup + unload call sites"
+    )
+    # Setup-side guard
+    assert "if _PANEL_URL_PATH in panels:" in src
+
+
 @t("stability: schema migration tolerates duplicate-column re-runs")
 def _():
     src = _read("custom_components/ha_insights/store/store.py")

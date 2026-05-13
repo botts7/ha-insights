@@ -1240,11 +1240,21 @@ async def _async_register_panel(hass: HomeAssistant) -> None:
     cache_bust = await hass.async_add_executor_job(_read_signature)
 
     # Always unregister + re-register so the URL refreshes every time.
-    # `async_remove_panel` is idempotent — no-op if nothing's registered.
+    # Only call `async_remove_panel` when the panel is ACTUALLY
+    # registered — otherwise HA's frontend logs a "Removing unknown
+    # panel ha-insights" warning every reload. The original comment
+    # claimed remove was idempotent; the frontend module disagrees.
+    # `hass.data["frontend_panels"]` is HA's authoritative registry
+    # (see homeassistant/components/frontend/__init__.py); falling
+    # back to a benign no-op if the structure isn't present.
     try:
-        async_remove_panel(hass, _PANEL_URL_PATH)
+        panels = hass.data.get("frontend_panels", {})
+        if _PANEL_URL_PATH in panels:
+            async_remove_panel(hass, _PANEL_URL_PATH)
     except Exception:  # noqa: BLE001 — defensive; never block setup over this
-        _LOGGER.debug("async_remove_panel raised (likely not yet registered)")
+        _LOGGER.debug(
+            "panel pre-remove probe raised", exc_info=True
+        )
 
     async_register_built_in_panel(
         hass,
@@ -1322,7 +1332,13 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if not remaining and hass.data.get(DOMAIN, {}).get(_PANEL_REGISTERED_FLAG):
         from homeassistant.components.frontend import async_remove_panel
 
-        async_remove_panel(hass, _PANEL_URL_PATH)
+        # Belt-and-braces: only call remove if the panel is still
+        # in HA's registry. If a previous crash left our flag set
+        # but HA already cleaned the panel up, calling remove would
+        # log "unknown panel" again.
+        panels = hass.data.get("frontend_panels", {})
+        if _PANEL_URL_PATH in panels:
+            async_remove_panel(hass, _PANEL_URL_PATH)
         hass.data[DOMAIN][_PANEL_REGISTERED_FLAG] = False
         # NOTE: Repairs entries are intentionally NOT cleared on
         # unload. HA's Repairs surface is expected to persist
