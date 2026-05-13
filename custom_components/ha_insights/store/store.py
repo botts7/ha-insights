@@ -110,8 +110,9 @@ class InsightStore:
             INSERT OR REPLACE INTO insights (
                 id, kind, detector, area_id, title, confidence,
                 fingerprint_json, payload_json, payload_format,
-                explanation, conflicts_with_json, created_at, snoozed_until
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                explanation, conflicts_with_json, created_at, snoozed_until,
+                vendor, target_user_id, target_user_id_confidence
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 insight.id,
@@ -127,6 +128,9 @@ class InsightStore:
                 json.dumps(list(insight.conflicts_with)),
                 insight.created_at.timestamp(),
                 snoozed_ts,
+                insight.vendor,
+                insight.target_user_id,
+                insight.target_user_id_confidence,
             ),
         )
         await self._c.commit()
@@ -564,6 +568,19 @@ class InsightStore:
             undo_window_expires_at=(
                 datetime.fromtimestamp(undo_window_ts, tz=UTC)
                 if undo_window_ts
+                else None
+            ),
+            vendor=(
+                row["vendor"] if "vendor" in row.keys() else None
+            ),
+            target_user_id=(
+                row["target_user_id"]
+                if "target_user_id" in row.keys()
+                else None
+            ),
+            target_user_id_confidence=(
+                row["target_user_id_confidence"]
+                if "target_user_id_confidence" in row.keys()
                 else None
             ),
         )

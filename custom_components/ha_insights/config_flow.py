@@ -47,6 +47,13 @@ DEFAULT_SCAN_INTERVAL_HOURS = 0
 SCAN_INTERVAL_HOURS_RANGE = (0, 168)  # 0 = off, up to weekly
 CONF_NOTIFY_ON_INSIGHT = "notify_on_insight"
 CONF_NOTIFY_THRESHOLD = "notify_threshold"
+# Comma-separated list of `notify.*` service names that should receive
+# new high-confidence insight pushes (mobile-app integration). Empty
+# string = disabled, persistent_notification only. Time-critical
+# insights need to reach the user's pocket; users don't sit on the
+# panel waiting.
+CONF_NOTIFY_MOBILE_TARGETS = "notify_mobile_targets"
+DEFAULT_NOTIFY_MOBILE_TARGETS = ""
 CONF_DIGEST_ENABLED = "digest_enabled"
 CONF_DIGEST_HOUR = "digest_hour"
 # v0.9 phase 9: per-install LLM agent preference. Empty string / None means
@@ -195,6 +202,40 @@ def get_notify_settings(entry: ConfigEntry) -> tuple[bool, float]:
         threshold = DEFAULT_NOTIFY_THRESHOLD
     threshold = max(0.0, min(1.0, threshold))
     return bool(enabled_raw), threshold
+
+
+def get_notify_mobile_targets(entry: ConfigEntry) -> list[str]:
+    """Resolve the list of `notify.mobile_app_*` services to push new
+    insights to. Returns an empty list when disabled.
+
+    Stored as a comma- or whitespace-separated string in options so the
+    OptionsFlow stays a simple text field; parsed here into the
+    de-duplicated list the notifier consumes. Bad entries (missing
+    `notify.` prefix) are dropped silently — `mobile.py` also guards
+    so an empty list is a pure no-op.
+    """
+    raw = entry.options.get(
+        CONF_NOTIFY_MOBILE_TARGETS,
+        entry.data.get(
+            CONF_NOTIFY_MOBILE_TARGETS, DEFAULT_NOTIFY_MOBILE_TARGETS
+        ),
+    )
+    if not raw:
+        return []
+    text = str(raw).replace("\n", ",").replace(";", ",")
+    seen: set[str] = set()
+    out: list[str] = []
+    for entry_raw in text.split(","):
+        target = entry_raw.strip()
+        if not target:
+            continue
+        if not target.startswith("notify."):
+            continue
+        if target in seen:
+            continue
+        seen.add(target)
+        out.append(target)
+    return out
 
 
 def get_allow_user_detectors(entry: ConfigEntry) -> bool:
@@ -543,6 +584,7 @@ class HaInsightsOptionsFlow(OptionsFlow):
         self._lookback: int = DEFAULT_LOOKBACK_DAYS
         self._notify_on: bool = DEFAULT_NOTIFY_ON_INSIGHT
         self._notify_threshold: float = DEFAULT_NOTIFY_THRESHOLD
+        self._notify_mobile_targets: str = DEFAULT_NOTIFY_MOBILE_TARGETS
         self._digest_enabled: bool = DEFAULT_DIGEST_ENABLED
         self._digest_hour: int = DEFAULT_DIGEST_HOUR
         self._preferred_agent_id: str | None = None
@@ -560,6 +602,9 @@ class HaInsightsOptionsFlow(OptionsFlow):
         current_lookback = get_lookback_days(self.config_entry)
         current_notify_on, current_notify_threshold = get_notify_settings(
             self.config_entry
+        )
+        current_notify_mobile_targets = ", ".join(
+            get_notify_mobile_targets(self.config_entry)
         )
         current_digest_on, current_digest_hour = get_digest_settings(
             self.config_entry
@@ -599,6 +644,12 @@ class HaInsightsOptionsFlow(OptionsFlow):
             )
             self._notify_threshold = float(
                 user_input.get(CONF_NOTIFY_THRESHOLD, current_notify_threshold)
+            )
+            self._notify_mobile_targets = str(
+                user_input.get(
+                    CONF_NOTIFY_MOBILE_TARGETS,
+                    current_notify_mobile_targets,
+                )
             )
             self._digest_enabled = bool(
                 user_input.get(CONF_DIGEST_ENABLED, current_digest_on)
@@ -680,6 +731,7 @@ class HaInsightsOptionsFlow(OptionsFlow):
                     CONF_LOOKBACK_DAYS: self._lookback,
                     CONF_NOTIFY_ON_INSIGHT: self._notify_on,
                     CONF_NOTIFY_THRESHOLD: self._notify_threshold,
+                    CONF_NOTIFY_MOBILE_TARGETS: self._notify_mobile_targets,
                     CONF_DIGEST_ENABLED: self._digest_enabled,
                     CONF_DIGEST_HOUR: self._digest_hour,
                     CONF_PREFERRED_AGENT_ID: self._preferred_agent_id or "",
@@ -711,6 +763,15 @@ class HaInsightsOptionsFlow(OptionsFlow):
                 vol.Optional(
                     CONF_NOTIFY_THRESHOLD, default=current_notify_threshold
                 ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=1.0)),
+                # Mobile push targets — comma-separated `notify.*` service
+                # names (e.g. "notify.mobile_app_iphone, notify.mobile_app_pixel").
+                # Empty disables mobile push; the persistent_notification
+                # always fires. Time-critical insights need to reach the
+                # user's phone, not just the panel.
+                vol.Optional(
+                    CONF_NOTIFY_MOBILE_TARGETS,
+                    default=current_notify_mobile_targets,
+                ): str,
                 vol.Optional(
                     CONF_DIGEST_ENABLED, default=current_digest_on
                 ): bool,

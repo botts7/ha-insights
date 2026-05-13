@@ -16,6 +16,7 @@ from .config_flow import (
     get_allow_user_detectors,
     get_digest_settings,
     get_lookback_days,
+    get_notify_mobile_targets,
     get_notify_settings,
     get_scan_interval_hours,
 )
@@ -175,7 +176,11 @@ async def _setup_entry_body(
     # Notification listener: fire persistent_notification.create when a
     # high-confidence insight is added to the store. Gated by the
     # notify_on_insight + notify_threshold config options.
+    # Also pushes to user-configured mobile-app notify services so
+    # time-critical insights reach the user's pocket — users don't sit
+    # watching the panel.
     notify_enabled, notify_threshold = get_notify_settings(entry)
+    notify_mobile_targets = get_notify_mobile_targets(entry)
 
     @callback
     def _on_store_event(event_type: str, insight_obj) -> None:
@@ -191,7 +196,7 @@ async def _setup_entry_body(
         # entry and call into a closed store via _notify_insight's lookups.
         entry.async_create_background_task(
             hass,
-            _notify_insight(hass, insight_obj),
+            _notify_insight(hass, insight_obj, notify_mobile_targets),
             name=f"{DOMAIN}_notify_{insight_obj.id}",
         )
 
@@ -436,6 +441,34 @@ async def _setup_entry_body(
 
     entry.async_on_unload(entry.add_update_listener(_on_options_updated))
 
+    # Mobile-app notification action listener. When the user taps
+    # "Dismiss" on a mobile notification, the mobile_app integration
+    # fires `mobile_app_notification_action` with action == our id.
+    # We resolve the tag → insight_id and dismiss it in-store so the
+    # panel and the notification stay coherent.
+    @callback
+    def _on_mobile_action(event: Event) -> None:
+        data = event.data or {}
+        if data.get("action") != "HA_INSIGHTS_DISMISS":
+            return
+        tag = data.get("tag", "")
+        if not isinstance(tag, str) or not tag.startswith("ha_insights_"):
+            return
+        insight_id = tag[len("ha_insights_") :]
+        if not insight_id:
+            return
+        entry.async_create_background_task(
+            hass,
+            store.dismiss_insight(insight_id),
+            name=f"{DOMAIN}_dismiss_from_mobile_{insight_id}",
+        )
+
+    entry.async_on_unload(
+        hass.bus.async_listen(
+            "mobile_app_notification_action", _on_mobile_action
+        )
+    )
+
     # Restore Repairs entries from the persisted insights as soon as
     # the integration loads. Without this, every HA restart would leave
     # the Repairs surface empty until the next scheduled scan ran.
@@ -503,12 +536,21 @@ async def _run_scheduled_scan(hass: HomeAssistant, entry_id: str) -> None:
         _LOGGER.exception("HA Insights scheduled scan failed")
 
 
-async def _notify_insight(hass: HomeAssistant, insight) -> None:
-    """Fire a persistent_notification announcing a new high-confidence insight.
+async def _notify_insight(
+    hass: HomeAssistant,
+    insight,
+    mobile_targets: list[str] | None = None,
+) -> None:
+    """Fire notifications announcing a new high-confidence insight.
+
+    persistent_notification always fires (it's the in-HA toast). If the
+    user configured one or more mobile-app notify targets, they receive
+    the push too — time-critical insights need to reach the user's
+    phone, not just sit in the panel.
 
     notification_id includes the insight id so re-emissions of the same
     insight (e.g. on a re-scan) replace the existing notification rather
-    than stacking.
+    than stacking; mobile notifier uses the same tag for the same reason.
     """
     confidence_pct = round(insight.confidence * 100)
     try:
@@ -528,6 +570,15 @@ async def _notify_insight(hass: HomeAssistant, insight) -> None:
         )
     except Exception:
         _LOGGER.exception("Failed to fire HA Insights notification")
+
+    if mobile_targets:
+        # Local import so circular import between __init__ and the
+        # notifications subpackage isn't a problem at module load.
+        from .notifications.mobile import fire_mobile_notifications
+
+        await fire_mobile_notifications(
+            hass, insight, notify_services=mobile_targets
+        )
 
 
 async def _run_initial_backfill(

@@ -94,6 +94,30 @@ class Detector(ABC):
     name: ClassVar[str]
     kind: ClassVar[InsightKind]
     requires_recorder: ClassVar[bool] = False
+    # Human-readable summary surfaced in the OptionsFlow + WS for users
+    # so they can decide if it's worth enabling. Should answer "what
+    # does this detector actually do for me?" in one sentence.
+    description: ClassVar[str] = ""
+    # Hard dependencies — datapoints / integrations a user MUST have for
+    # this detector to produce anything useful. Surfaced in the panel +
+    # OptionsFlow so users aren't left wondering "why is this empty?".
+    # Each entry is a short human-readable label; semantic forms tracked
+    # via well-known prefixes the panel can render as chips:
+    #
+    #   "integration:mobile_app" — HA core integration name
+    #   "entity:binary_sensor.<phone>_charging" — pattern/literal
+    #   "entity_pattern:sensor.*_battery_level" — wildcard
+    #   "domain:weather" — HA domain
+    #   "feature:recorder" — special HA capability
+    #
+    # Empty = no special dependencies (detector works on whatever's
+    # already in the buffer). Used by SetupQualityDetector to tier
+    # USELESS / LIMITED / GOOD / GREAT per detector, and rendered in
+    # the OptionsFlow detector picker.
+    required_data: ClassVar[tuple[str, ...]] = ()
+    # Optional datapoints that ELEVATE accuracy if present. Same format
+    # as required_data. Surfaced as "GOOD vs GREAT" tier hints.
+    optional_data: ClassVar[tuple[str, ...]] = ()
     domains_default_blocked: ClassVar[frozenset[str]] = frozenset(
         {"camera", "person", "device_tracker", "lock"}
     )

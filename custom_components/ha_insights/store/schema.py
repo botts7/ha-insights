@@ -6,7 +6,7 @@ Never edit a previously-shipped migration.
 """
 from __future__ import annotations
 
-CURRENT_VERSION = 3
+CURRENT_VERSION = 4
 
 MIGRATIONS: dict[int, str] = {
     1: """
@@ -131,5 +131,22 @@ MIGRATIONS: dict[int, str] = {
         ON audit_rollup_progress(computed_at);
 
     INSERT OR REPLACE INTO schema_version (version) VALUES (3);
+    """,
+    # v1.4 — Multi-user + vendor attribution fields. All three nullable
+    # because pre-v1.4 detectors don't set them and the household-level
+    # default must stay safe (=NULL). Existing rows survive unchanged.
+    #
+    # vendor: optional manufacturer tag for the future vendor-plugin
+    #   marketplace ("Schlage", "Tesla", "Aqara", …).
+    # target_user_id: HA user_id when the detector can attribute the
+    #   insight to a specific user (mobile_app device → owner).
+    # target_user_id_confidence: 0.0–1.0 attribution confidence
+    #   (1.0 registry-grade, 0.85 person.*, 0.7 manual map).
+    4: """
+    ALTER TABLE insights ADD COLUMN vendor TEXT;
+    ALTER TABLE insights ADD COLUMN target_user_id TEXT;
+    ALTER TABLE insights ADD COLUMN target_user_id_confidence REAL;
+
+    INSERT OR REPLACE INTO schema_version (version) VALUES (4);
     """,
 }

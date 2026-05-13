@@ -73,6 +73,39 @@ class Insight:
     applied_at: datetime | None = None
     applied_artifact_id: str | None = None
     undo_window_expires_at: datetime | None = None
+    # v1.4: optional vendor tag — None for built-in detectors,
+    # "Schlage" / "Tesla" / "Aqara" / etc for manufacturer-provided
+    # detectors loaded via the future vendor-detectors path. Cards
+    # can group / badge insights by vendor and the directory page can
+    # surface "this is from your Sonos vendor module" affordances.
+    # Free-form string; the manifest validator on vendor module load
+    # will pin it to a known set.
+    vendor: str | None = None
+    # v1.4: which HA user this insight is about, when the detector
+    # can identify them. Set by detectors that derive per-user signals
+    # (phone charge habits, presence inference, alarm wake times,
+    # commute patterns). None = household-level / unattributable.
+    # The mobile notifier routes pushes to ONLY this user's
+    # `notify.mobile_app_*` service when set — otherwise broadcasts
+    # to every configured target. Multi-user HA installs need this so
+    # "your phone is about to die" reaches the phone's actual owner.
+    target_user_id: str | None = None
+    # How confident the detector is that `target_user_id` is the
+    # right owner of this pattern. Independent of the pattern's own
+    # `confidence` field (which measures signal strength). Examples:
+    #   1.0 — registry-grade attribution (HA user_id from mobile_app
+    #         config entry; the phone IS that user's phone)
+    #   0.8 — strong inference (only one human typically active at
+    #         this time of day, single mobile_app installed)
+    #   0.5 — weak inference (pattern overlaps multiple users)
+    #   None — household / unattributable. Always paired with
+    #          target_user_id = None.
+    # The notifier uses this to decide whether to route to the user's
+    # phone exclusively (high confidence) or broadcast as a
+    # household nudge (low confidence). The card surfaces it so the
+    # user can tell "your pattern (95%)" vs "someone in your
+    # household".
+    target_user_id_confidence: float | None = None
 
     def __post_init__(self) -> None:
         if not 0.0 <= self.confidence <= 1.0:
@@ -110,6 +143,9 @@ class Insight:
                 if self.undo_window_expires_at
                 else None
             ),
+            "vendor": self.vendor,
+            "target_user_id": self.target_user_id,
+            "target_user_id_confidence": self.target_user_id_confidence,
         }
 
     @classmethod

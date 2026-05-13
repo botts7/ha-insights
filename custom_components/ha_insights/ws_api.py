@@ -66,6 +66,7 @@ SUPPORTED_METHODS = (
     "get_automation",
     "refine_automation",
     "apply_automation_refinement",
+    "detector_directory",
 )
 
 
@@ -98,6 +99,7 @@ def async_register(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_refine_automation)
     websocket_api.async_register_command(hass, ws_apply_automation_refinement)
     websocket_api.async_register_command(hass, ws_audit_suggest)
+    websocket_api.async_register_command(hass, ws_detector_directory)
 
 
 def _get_store(
@@ -3165,3 +3167,121 @@ async def ws_audit_suggest(
             ),
         },
     )
+
+
+# -- Detector directory --
+
+# Quick lookup so the panel + setup UI can say "this needs a
+# mobile_app integration installed" or "we don't see a
+# sensor.outdoor_temperature in your install — temperature axis
+# disabled". One-line summary per detector with its declared
+# required/optional data + a per-dependency satisfied bit.
+
+
+def _check_dependency_satisfied(
+    hass: HomeAssistant, dep: str
+) -> bool:
+    """Best-effort check for whether a declared dependency is
+    currently satisfied. Always tolerant — returns False on any
+    lookup error rather than raising into the WS layer.
+    """
+    try:
+        if dep.startswith("integration:"):
+            name = dep.split(":", 1)[1]
+            return any(
+                e.domain == name
+                for e in hass.config_entries.async_entries(name)
+            )
+        if dep.startswith("entity:"):
+            eid = dep.split(":", 1)[1]
+            return hass.states.get(eid) is not None
+        if dep.startswith("entity_pattern:"):
+            import fnmatch as _fnmatch
+
+            pat = dep.split(":", 1)[1]
+            return any(
+                _fnmatch.fnmatchcase(s.entity_id, pat)
+                for s in hass.states.async_all()
+            )
+        if dep.startswith("domain:"):
+            domain = dep.split(":", 1)[1]
+            return any(
+                s.entity_id.split(".", 1)[0] == domain
+                for s in hass.states.async_all()
+            )
+        if dep.startswith("feature:"):
+            feature = dep.split(":", 1)[1]
+            if feature == "recorder":
+                return "recorder" in hass.config.components
+        return False
+    except Exception:  # noqa: BLE001
+        return False
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "home_insights/detector_directory",
+    }
+)
+@callback
+def ws_detector_directory(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Return every registered detector with its description,
+    required/optional dependencies, and a per-dependency satisfied
+    flag so users can see at a glance what they need to install or
+    enable for a given detector to produce results.
+
+    Panel uses this to render the OptionsFlow detector picker with
+    tier hints (USELESS / LIMITED / GOOD / GREAT) — see
+    SetupQualityDetector for the longer-form periodic surface.
+    """
+    from .detectors import DETECTORS
+
+    out: list[dict[str, Any]] = []
+    for name in sorted(DETECTORS):
+        cls = DETECTORS[name]
+        required = tuple(getattr(cls, "required_data", ()) or ())
+        optional = tuple(getattr(cls, "optional_data", ()) or ())
+        required_status = [
+            {"dependency": d, "satisfied": _check_dependency_satisfied(hass, d)}
+            for d in required
+        ]
+        optional_status = [
+            {"dependency": d, "satisfied": _check_dependency_satisfied(hass, d)}
+            for d in optional
+        ]
+        # Coarse tier from the required-only satisfaction ratio.
+        # Optional deps bump tier from GOOD → GREAT but don't gate.
+        if not required:
+            tier = "GOOD"  # no hard deps; works on whatever's in the buffer
+        else:
+            satisfied = sum(1 for r in required_status if r["satisfied"])
+            ratio = satisfied / len(required)
+            if ratio == 0:
+                tier = "USELESS"
+            elif ratio < 1.0:
+                tier = "LIMITED"
+            else:
+                tier = "GOOD"
+        if tier == "GOOD" and optional_status:
+            if any(o["satisfied"] for o in optional_status):
+                tier = "GREAT"
+        out.append(
+            {
+                "name": name,
+                "description": getattr(cls, "description", "") or "",
+                "kind": getattr(cls, "kind", None).value
+                if getattr(cls, "kind", None) is not None
+                else None,
+                "requires_recorder": bool(
+                    getattr(cls, "requires_recorder", False)
+                ),
+                "required_data": required_status,
+                "optional_data": optional_status,
+                "tier": tier,
+            }
+        )
+    connection.send_result(msg["id"], {"detectors": out})
