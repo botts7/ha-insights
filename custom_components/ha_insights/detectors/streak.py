@@ -173,7 +173,7 @@ class StreakDetector(Detector):
         title = (
             f"{entity_id} -> {new_state} "
             f"{len(longest_run)} days in a row at ~{avg_time[:5]}. "
-            "Emerging routine?"
+            "Build automation?"
         )
 
         fingerprint = {

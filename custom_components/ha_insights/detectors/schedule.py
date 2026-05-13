@@ -156,7 +156,7 @@ class ScheduleDetector(Detector):
         weekday_label = self._weekday_label(weekday_set)
         title = (
             f"{weekday_label} at ~{time_str}, {entity_id} -> {new_state} "
-            f"({len(minutes)} of {len(events)} days)"
+            f"({len(minutes)} of {len(events)} days). Automate this?"
         )
 
         domain = entity_id.split(".", 1)[0] if "." in entity_id else "homeassistant"

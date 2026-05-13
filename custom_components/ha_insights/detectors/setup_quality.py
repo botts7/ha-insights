@@ -177,6 +177,18 @@ _RECIPES: list[dict[str, Any]] = [
     {
         "name": "Sleep & commute (PhoneActivityDetector)",
         "feature_key": "phone_activity",
+        # One-line action the user can act on without opening the
+        # insight payload. Surfaced in the insight title.
+        "next_step": "install the Home Assistant Companion App on your phone",
+        # Concrete scenarios this feature would unlock at GOOD tier.
+        # The user sees these in the insight explanation so they
+        # know WHY it's worth fixing.
+        "scenarios": [
+            "Detect your typical sleep window from phone charge times",
+            "Flag when you leave home and arrive home most days",
+            "Suggest a charge reminder if you'd run flat before bedtime",
+            "Trigger morning routines when you usually wake (after 7 days of data)",
+        ],
         "tiers": [
             ("USELESS", [_has_mobile_app_gps], "No GPS-source device_tracker found. Install HA Companion App on your phone to unlock sleep + commute insights."),
             ("LIMITED", [_has_mobile_app_gps], "Mobile App GPS tracker detected — commute pattern (depart/return) can fire. For sleep window, also enable the 'Charging' sensor in the app's Manage Sensors screen."),
@@ -187,6 +199,13 @@ _RECIPES: list[dict[str, Any]] = [
     {
         "name": "Room presence inference",
         "feature_key": "presence_inference",
+        "next_step": "assign rooms to your entities in Settings → Areas & Zones",
+        "scenarios": [
+            "Detect 'you're usually in the kitchen at 07:15 on weekdays'",
+            "Flag rooms that haven't been used in the lookback window",
+            "Suggest area-scoped automations (kitchen presence → kitchen lights)",
+            "Power room-by-room energy and activity dashboards",
+        ],
         "tiers": [
             ("USELESS", [_has_area_coverage], "Most entities aren't tagged with an Area. Open Settings → Areas & Zones, assign rooms to lights / sensors / switches. Without area tags the detector can't infer where the user is."),
             ("LIMITED", [_has_area_coverage], "Some areas covered — presence inference will fire but only for tagged rooms. Tag the rest for full-house coverage."),
@@ -197,6 +216,13 @@ _RECIPES: list[dict[str, Any]] = [
     {
         "name": "Manual habits & routines",
         "feature_key": "manual_habit",
+        "next_step": "toggle entities from the dashboard / app for a week so HA records the user context",
+        "scenarios": [
+            "Spot 'you toggle the lounge lamp manually at 18:42 on weeknights'",
+            "Bundle related actions into a multi-entity 'evening routine'",
+            "Suggest automating the manual steps you keep doing yourself",
+            "Distinguish your habits from automation noise in the timeline",
+        ],
         "tiers": [
             ("USELESS", [_has_user_context_events], "No recent manual UI / app interactions detected in the 14-day buffer. Either you automate everything (great problem to have), or HA hasn't seen enough activity yet. Toggle entities from the dashboard / app for a week."),
             ("LIMITED", [_has_user_context_events], "Some manual events present — ManualHabit and Routine detectors will fire on the clearest patterns."),
@@ -207,6 +233,13 @@ _RECIPES: list[dict[str, Any]] = [
     {
         "name": "Goal tracking",
         "feature_key": "goal_tracker",
+        "next_step": 'add goals JSON in Configure → Advanced (e.g. {"bedtime_by": "22:30"})',
+        "scenarios": [
+            "Track 'you make it to bedtime by 22:30 on 4 of 7 nights'",
+            "Score how often you leave for work on time",
+            "Tell you when a goal is trending up (or slipping)",
+            "Trigger a nudge automation when you're at risk of missing a goal",
+        ],
         "tiers": [
             ("USELESS", [_has_goals_configured], "No goals defined. Add JSON to Settings → HA Insights → Configure → goals_json. Example: `{\"bedtime_by\": \"22:30\", \"home_by\": \"18:30\"}`."),
             ("LIMITED", [_has_goals_configured], "Goals configured — adherence tracking will fire."),
@@ -290,7 +323,28 @@ class SetupQualityDetector(Detector):
             "LIMITED": "🟠",
             "GOOD": "🟢",
         }.get(tier, "⚪")
-        title = f"{tier_emoji} {recipe['name']}: {tier}"
+        next_step = recipe.get("next_step", "")
+        scenarios: list[str] = list(recipe.get("scenarios", []))
+        # Title: tier badge + feature name + one-line action so the
+        # user sees what to do at a glance, without expanding the
+        # payload. The action is omitted for GOOD/LIMITED tiers
+        # where nothing's urgent.
+        if tier == "USELESS" and next_step:
+            title = (
+                f"{tier_emoji} {recipe['name']}: USELESS — {next_step}"
+            )
+        else:
+            title = f"{tier_emoji} {recipe['name']}: {tier}"
+        # Explanation: full advice + concrete scenarios this feature
+        # would unlock. Renders under the title without a click so the
+        # user understands WHY this is worth fixing.
+        explanation_parts: list[str] = [advice]
+        if scenarios and tier != "GOOD":
+            explanation_parts.append("")
+            explanation_parts.append("What this unlocks:")
+            for s in scenarios:
+                explanation_parts.append(f"  • {s}")
+        explanation = "\n".join(explanation_parts)
         confidence = {
             "USELESS": 0.95,  # we are sure this needs fixing
             "LIMITED": 0.7,
@@ -306,6 +360,8 @@ class SetupQualityDetector(Detector):
             "tier": tier,
             "details": details,
             "advice": advice,
+            "next_step": next_step,
+            "scenarios_unlocked": scenarios,
         }
         return Insight(
             id=Insight.compute_id(InsightKind.PATTERN_OBSERVATION, fingerprint),
@@ -317,6 +373,7 @@ class SetupQualityDetector(Detector):
             fingerprint=fingerprint,
             payload=payload,
             payload_format="report",
+            explanation=explanation,
             created_at=datetime.now(tz=UTC),
         )
 
