@@ -211,6 +211,23 @@ class ManualHabitDetector(Detector):
             trigger_hour = avg_hour
         trigger_time = f"{trigger_hour:02d}:{trigger_minute:02d}"
 
+        # Predictive scheduling — check if the habit timestamps cluster
+        # tighter against sunrise/sunset than against the wall clock.
+        # If so, the generated trigger swaps to `platform: sun` so the
+        # automation adapts with the seasons.
+        sun_trigger_data: tuple[str, int] | None = None
+        try:
+            from .sun_relative import detect_sun_relative_trigger
+
+            habit_local_times = [
+                dt_util.as_local(per_day[d]) for d in longest_run
+            ]
+            sun_trigger_data = detect_sun_relative_trigger(
+                habit_local_times, ctx.hass
+            )
+        except Exception:  # noqa: BLE001
+            sun_trigger_data = None
+
         # Build the apply-able automation YAML.
         automation = self._build_automation_yaml(
             entity_id=entity_id,
@@ -220,6 +237,7 @@ class ManualHabitDetector(Detector):
             stddev_min=stddev,
             days_count=len(longest_run),
             weekdays_only=weekdays_only,
+            sun_trigger=sun_trigger_data,
         )
 
         confidence = round(
@@ -280,31 +298,55 @@ class ManualHabitDetector(Detector):
         stddev_min: float,
         days_count: int,
         weekdays_only: bool,
+        sun_trigger: tuple[str, int] | None = None,
     ) -> dict[str, Any]:
         """Build a complete automation YAML for a detected manual habit.
 
-        The trigger is a single `at:` time rounded to the nearest 5 min,
-        because HA's time platform takes a single timestamp — humans
-        rarely automate around the exact same minute, and the observed
-        ±N min variance is surfaced in the description so the user
-        can decide whether to widen the trigger themselves (e.g., add
-        a sun-based / state-based / time_pattern alternative).
+        When `sun_trigger` is provided (event, offset_minutes), the
+        trigger is `platform: sun` with that offset — adapts with the
+        seasons. Otherwise falls back to a fixed `platform: time` at
+        the rounded trigger_time.
         """
         domain = entity_id.split(".", 1)[0]
         service = _DOMAIN_SERVICE_MAP[domain][target_state]
-        alias = (
-            f"HA Insights: {entity_id} → {target_state} @ {trigger_time}"
-            + (" (weekdays)" if weekdays_only else "")
-        )
-        variance_note = (
-            f"Observed variance was ±{int(round(stddev_min))} min around "
-            f"{avg_time_str[:5]} — your manual actions weren't always at "
-            f"exactly {trigger_time}. The trigger is set to {trigger_time} "
-            "(rounded). If you'd prefer a wider window, replace the time "
-            "trigger with a `time_pattern:` or a state-based trigger (e.g., "
-            "sun, presence, or another sensor that fires within the "
-            "window you actually want)."
-        )
+
+        if sun_trigger is not None:
+            from .sun_relative import build_sun_trigger, format_sun_offset
+
+            sun_event, sun_offset = sun_trigger
+            trigger = [build_sun_trigger(sun_event, sun_offset)]
+            trigger_human = (
+                f"{format_sun_offset(sun_offset)} "
+                f"from {sun_event}"
+            )
+            alias = (
+                f"HA Insights: {entity_id} → {target_state} "
+                f"@ {sun_event}{format_sun_offset(sun_offset)}"
+                + (" (weekdays)" if weekdays_only else "")
+            )
+            variance_note = (
+                f"Predictive: your manual timing tracks {sun_event} more "
+                f"tightly than the clock. Trigger fires {trigger_human} "
+                f"— adapts with the seasons automatically. (Clock-time "
+                f"variance was ±{int(round(stddev_min))} min around "
+                f"{avg_time_str[:5]}.) Replace with `platform: time` if "
+                "you prefer a fixed schedule."
+            )
+        else:
+            trigger = [{"platform": "time", "at": trigger_time}]
+            alias = (
+                f"HA Insights: {entity_id} → {target_state} @ {trigger_time}"
+                + (" (weekdays)" if weekdays_only else "")
+            )
+            variance_note = (
+                f"Observed variance was ±{int(round(stddev_min))} min around "
+                f"{avg_time_str[:5]} — your manual actions weren't always at "
+                f"exactly {trigger_time}. The trigger is set to {trigger_time} "
+                "(rounded). If you'd prefer a wider window, replace the time "
+                "trigger with a `time_pattern:` or a state-based trigger "
+                "(e.g., sun, presence, or another sensor that fires within "
+                "the window you actually want)."
+            )
         description = (
             f"Auto-suggested by HA Insights. You manually set "
             f"{entity_id} → {target_state} on {days_count} consecutive "
@@ -325,7 +367,7 @@ class ManualHabitDetector(Detector):
         return {
             "alias": alias,
             "description": description,
-            "trigger": [{"platform": "time", "at": trigger_time}],
+            "trigger": trigger,
             "condition": conditions,
             "action": [
                 {

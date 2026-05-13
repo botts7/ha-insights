@@ -211,6 +211,19 @@ class RoutineDetector(Detector):
         # Routine name heuristic from time of day
         routine_label = self._routine_label(avg_hour)
 
+        # Predictive scheduling — try sun-relative trigger first.
+        # Morning routines often track sunrise; evening routines track
+        # sunset. When the data fits, use that instead of a fixed time.
+        sun_trigger_data: tuple[str, int] | None = None
+        try:
+            from .sun_relative import detect_sun_relative_trigger
+
+            sun_trigger_data = detect_sun_relative_trigger(
+                core_day_times, ctx.hass
+            )
+        except Exception:  # noqa: BLE001
+            sun_trigger_data = None
+
         automation = self._build_routine_yaml(
             routine_pairs=routine_pairs,
             trigger_time=trigger_time,
@@ -219,6 +232,7 @@ class RoutineDetector(Detector):
             days_count=len(core_days),
             weekdays_only=weekdays_only,
             routine_label=routine_label,
+            sun_trigger=sun_trigger_data,
         )
 
         # Confidence — primarily based on how many days exhibited the
@@ -290,6 +304,7 @@ class RoutineDetector(Detector):
         days_count: int,
         weekdays_only: bool,
         routine_label: str,
+        sun_trigger: tuple[str, int] | None = None,
     ) -> dict[str, Any]:
         actions: list[dict[str, Any]] = []
         for entity_id, target_state in routine_pairs:
@@ -302,17 +317,38 @@ class RoutineDetector(Detector):
                 }
             )
 
-        alias = (
-            f"HA Insights: {routine_label} routine @ {trigger_time}"
-            + (" (weekdays)" if weekdays_only else "")
-        )
-        variance_note = (
-            f"Observed variance was ±{int(round(stddev_min))} min around "
-            f"{avg_time_str[:5]}. The trigger is set to {trigger_time}. "
-            "Each entity's manual action across the lookback hit ≥80% "
-            "of the routine days — feel free to trim entities that "
-            "shouldn't be part of the bundle."
-        )
+        if sun_trigger is not None:
+            from .sun_relative import build_sun_trigger, format_sun_offset
+
+            sun_event, sun_offset = sun_trigger
+            trigger = [build_sun_trigger(sun_event, sun_offset)]
+            alias = (
+                f"HA Insights: {routine_label} routine "
+                f"@ {sun_event}{format_sun_offset(sun_offset)}"
+                + (" (weekdays)" if weekdays_only else "")
+            )
+            variance_note = (
+                f"Predictive: your routine timing tracks {sun_event} more "
+                f"tightly than the wall clock. Trigger fires "
+                f"{format_sun_offset(sun_offset)} from {sun_event} — "
+                "adapts with the seasons. (Clock-time variance was "
+                f"±{int(round(stddev_min))} min around {avg_time_str[:5]}.) "
+                "Each entity hit ≥80% of routine days — trim what doesn't "
+                "belong before applying."
+            )
+        else:
+            trigger = [{"platform": "time", "at": trigger_time}]
+            alias = (
+                f"HA Insights: {routine_label} routine @ {trigger_time}"
+                + (" (weekdays)" if weekdays_only else "")
+            )
+            variance_note = (
+                f"Observed variance was ±{int(round(stddev_min))} min around "
+                f"{avg_time_str[:5]}. The trigger is set to {trigger_time}. "
+                "Each entity's manual action across the lookback hit ≥80% "
+                "of the routine days — feel free to trim entities that "
+                "shouldn't be part of the bundle."
+            )
         description = (
             f"Auto-suggested by HA Insights: a {routine_label.lower()} "
             f"routine with {len(routine_pairs)} actions you manually "
@@ -333,7 +369,7 @@ class RoutineDetector(Detector):
         return {
             "alias": alias,
             "description": description,
-            "trigger": [{"platform": "time", "at": trigger_time}],
+            "trigger": trigger,
             "condition": conditions,
             "action": actions,
             "mode": "single",
