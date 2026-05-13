@@ -1074,6 +1074,68 @@ def _():
     assert 'getattr(ev, "from_bootstrap", False)' in src
 
 
+@t("bootstrap filter (runtime): buffer.query() actually skips bootstrap events")
+def _():
+    """Runtime test — construct a buffer with 3 events (1 bootstrap,
+    2 normal), assert the default query yields only 2, and an
+    include_bootstrap=True query yields all 3. Catches regressions
+    where the field is wired but the filter logic breaks."""
+    buffer_mod = _load(
+        "state_event_buffer_runtime",
+        "custom_components/ha_insights/observers/state_event_buffer.py",
+    )
+    from datetime import UTC, datetime
+
+    StateEvent = buffer_mod.StateEvent
+    StateEventBuffer = buffer_mod.StateEventBuffer
+
+    b = StateEventBuffer()
+    base_ts = datetime(2026, 5, 13, 12, 0, tzinfo=UTC)
+    # 1 bootstrap event + 2 normal events
+    b.add(
+        StateEvent(
+            timestamp=base_ts,
+            entity_id="light.boot",
+            domain="light",
+            area_id=None,
+            old_state=None,  # bootstrap pattern
+            new_state="on",
+            from_bootstrap=True,
+        )
+    )
+    b.add(
+        StateEvent(
+            timestamp=base_ts,
+            entity_id="light.normal1",
+            domain="light",
+            area_id=None,
+            old_state="off",
+            new_state="on",
+        )
+    )
+    b.add(
+        StateEvent(
+            timestamp=base_ts,
+            entity_id="light.normal2",
+            domain="light",
+            area_id=None,
+            old_state="off",
+            new_state="on",
+        )
+    )
+
+    default_yield = list(b.query())
+    assert len(default_yield) == 2, (
+        f"default query should skip bootstrap, got {len(default_yield)}"
+    )
+    assert all(not ev.from_bootstrap for ev in default_yield)
+
+    opt_in_yield = list(b.query(include_bootstrap=True))
+    assert len(opt_in_yield) == 3, (
+        f"include_bootstrap=True should yield all, got {len(opt_in_yield)}"
+    )
+
+
 @t("cohort dedup: frequency_anomaly opts out (per-entity, not shared cause)")
 def _():
     """Two lights both firing 200×/day are TWO INDEPENDENT runaway
