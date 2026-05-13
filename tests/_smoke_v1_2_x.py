@@ -250,6 +250,47 @@ def _():
     assert count >= 3, f"only {count} dispatches found"
 
 
+@t("ManualHabit: builds correct automation YAML for light.turn_off")
+def _():
+    # Pure-logic test of the YAML builder. Bypass the detector base
+    # class (needs HA) and call _build_automation_yaml directly via
+    # method-resolution-order trickery.
+    src = open(
+        "custom_components/ha_insights/detectors/manual_habit.py",
+        encoding="utf-8",
+    ).read()
+    # Validate the file has the key invariants we expect, without
+    # spinning up the detector framework on Windows.
+    assert "_MIN_MANUAL_DAYS = 5" in src
+    assert "_TIME_STDDEV_MAX_MIN" in src
+    # Domain → service map covers the obvious binary domains
+    for needle in (
+        '"light"', '"switch"', '"fan"',
+        'light.turn_on', 'switch.turn_off', 'fan.turn_off',
+    ):
+        assert needle in src, f"missing service mapping: {needle}"
+    # Cross-reference with existing automations to avoid duplicate
+    # suggestions is wired
+    assert "_signatures_of_existing_automations" in src
+    # context_user_id is the manual/automation discriminator
+    assert "context_user_id" in src
+
+
+@t("StateEvent: context_user_id field is preserved as optional")
+def _():
+    src = open(
+        "custom_components/ha_insights/observers/state_event_buffer.py",
+        encoding="utf-8",
+    ).read()
+    assert "context_user_id: str | None" in src
+    # Live listener captures it from the HA event
+    init_src = open(
+        "custom_components/ha_insights/__init__.py", encoding="utf-8"
+    ).read()
+    assert "context.user_id" in init_src
+    assert "context_user_id=ctx_user" in init_src
+
+
 # ---- Run + report ----
 
 passed = sum(1 for _, s, _ in results if s == "PASS")

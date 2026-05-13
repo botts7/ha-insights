@@ -18,7 +18,15 @@ from datetime import UTC, datetime, timedelta
 
 @dataclass(frozen=True)
 class StateEvent:
-    """A single state-change event."""
+    """A single state-change event.
+
+    `context_user_id` is the HA user id that originated the change when
+    the action came from the UI / voice assistant / mobile app, else
+    None. Critical for ManualHabitDetector: a `user_id`-tagged change
+    is a manual action; an untagged one is automation/system. The field
+    is optional so backfilled events (from recorder, where the original
+    context isn't fully reconstructible) can be stored with None.
+    """
 
     timestamp: datetime
     entity_id: str
@@ -26,6 +34,7 @@ class StateEvent:
     area_id: str | None
     old_state: str | None
     new_state: str | None
+    context_user_id: str | None = None
 
 
 class StateEventBuffer:

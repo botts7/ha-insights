@@ -89,6 +89,19 @@ async def _setup_entry_body(
         domain = new_state.entity_id.split(".", 1)[0]
         entry_obj = entity_reg.async_get(new_state.entity_id)
         area_id = entry_obj.area_id if entry_obj else None
+        # Pull context.user_id when present — set by HA for any change
+        # originated via UI / voice / mobile app. None for automation
+        # actions and integration polling. ManualHabitDetector uses
+        # this to filter manual events vs system events.
+        ctx_user = None
+        try:
+            ctx_user = (
+                new_state.context.user_id
+                if getattr(new_state, "context", None) is not None
+                else None
+            )
+        except Exception:  # noqa: BLE001
+            ctx_user = None
 
         buffer_.add(
             StateEvent(
@@ -98,6 +111,7 @@ async def _setup_entry_body(
                 area_id=area_id,
                 old_state=old_state.state if old_state else None,
                 new_state=new_state.state,
+                context_user_id=ctx_user,
             )
         )
 
