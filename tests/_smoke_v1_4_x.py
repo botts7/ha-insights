@@ -1181,6 +1181,53 @@ def _():
     assert ("light.c", "light.b") in pairs
 
 
+@t("template filter: hierarchy.is_template_or_derived covers known platforms")
+def _():
+    src = _read(
+        "custom_components/ha_insights/detectors/hierarchy.py"
+    )
+    assert "is_template_or_derived" in src
+    # Each derived/template platform is in the set
+    for platform in (
+        '"template"',
+        '"group"',
+        '"statistics"',
+        '"utility_meter"',
+        '"derivative"',
+        '"integration"',
+        '"trend"',
+        '"threshold"',
+        '"min_max"',
+        '"filter"',
+        '"history_stats"',
+    ):
+        assert platform in src, f"missing platform: {platform}"
+
+
+@t("template filter: are_related drops pairs where either side is template/derived")
+def _():
+    """The cooccurrence/lagged_correlation inner loop calls
+    are_related(a, b) to drop structural pairs. Now also drops
+    pairs where either entity is computed from another (template,
+    statistics, etc.) — see HA_EVENT_SEMANTICS.md Gotcha 4."""
+    src = _read(
+        "custom_components/ha_insights/detectors/hierarchy.py"
+    )
+    assert "Gotcha 4" in src
+    assert "is_template_or_derived(eid_a)" in src
+    assert "is_template_or_derived(eid_b)" in src
+
+
+@t("template filter: lagged_correlation inherits cooccurrence's filter chain")
+def _():
+    """LaggedCorrelationDetector extends Cooccurrence and inherits
+    _pair_is_related. One fix covers both detectors."""
+    src = _read(
+        "custom_components/ha_insights/detectors/lagged_correlation.py"
+    )
+    assert "class LaggedCorrelationDetector(CooccurrenceDetector):" in src
+
+
 @t("unavailable filter: frequency_anomaly skips X ↔ unavailable transitions")
 def _():
     """Without this filter, a flaky WiFi node firing

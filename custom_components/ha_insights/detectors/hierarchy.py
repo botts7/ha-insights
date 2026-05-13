@@ -24,7 +24,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, ClassVar
 
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
@@ -216,8 +216,11 @@ class EntityHierarchy:
     def are_related(self, eid_a: str, eid_b: str) -> bool:
         """Whether two entities are connected via ANY hierarchy edge —
         same device, member ↔ container, sibling small-group member,
-        source ↔ derived. Used by cooccurrence to drop pairs that
-        reflect the same root event."""
+        source ↔ derived, OR either side is a template / derived
+        platform whose changes structurally follow another entity.
+        Used by cooccurrence to drop pairs that reflect the same
+        root event.
+        """
         if eid_a == eid_b:
             return True
         if self.share_device(eid_a, eid_b):
@@ -236,7 +239,46 @@ class EntityHierarchy:
             return True
         if self.source_of.get(eid_b) == eid_a:
             return True
+        # v1.5 (Gotcha 4): template / derivative platforms compute
+        # their state from OTHER entities. The dependency isn't
+        # always declared via attributes.source (template entities
+        # track dependencies at render-time, not via state attrs),
+        # so the derived_of / source_of edges above can miss it.
+        # If EITHER side is one of these "computed from elsewhere"
+        # platforms, any correlation is structural by construction
+        # — drop the pair conservatively.
+        if self.is_template_or_derived(eid_a):
+            return True
+        if self.is_template_or_derived(eid_b):
+            return True
         return False
+
+    # Platforms whose entities are computed from OTHER entities. A
+    # correlation between one of these and any other entity is
+    # structural by construction — the platform exists to express
+    # "this is a function of those". Conservative drop in
+    # cooccurrence + lagged_correlation. See
+    # docs/HA_EVENT_SEMANTICS.md Gotcha 4.
+    _COMPUTED_FROM_OTHER_PLATFORMS: ClassVar[frozenset[str]] = frozenset({
+        "template",         # Most common: binary_sensor.template, sensor.template, light.template, etc.
+        "group",            # group.* derived from members
+        "statistics",       # rolling stats over a source sensor
+        "utility_meter",    # cumulative meter on a source
+        "integration",      # integral of source over time
+        "derivative",       # derivative of source
+        "filter",           # smoothed source
+        "min_max",          # aggregate over source set
+        "threshold",        # binary derived from threshold check
+        "trend",            # rising/falling state of source
+        "history_stats",    # stats over source history
+    })
+
+    def is_template_or_derived(self, entity_id: str) -> bool:
+        """True iff the entity's integration is in the
+        'computed-from-other-entities' platform set. Cheap dict
+        lookup — runs inside the cooccurrence inner loop."""
+        platform = self.integration_of.get(entity_id)
+        return platform in self._COMPUTED_FROM_OTHER_PLATFORMS
 
 
 # ---------- Builder ---------------------------------------------------------
