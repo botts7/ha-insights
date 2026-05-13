@@ -21,7 +21,7 @@ from datetime import UTC, datetime, timedelta
 from homeassistant.util import dt as dt_util
 
 from ..insight import Insight, InsightKind
-from .base import Detector, DetectorContext, register_detector
+from .base import Detector, DetectorContext, Maturity, register_detector
 
 _LOGGER = logging.getLogger(__name__)
 

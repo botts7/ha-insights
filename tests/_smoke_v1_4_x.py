@@ -1181,6 +1181,42 @@ def _():
     assert ("light.c", "light.b") in pairs
 
 
+@t("maturity imports: every detector referencing Maturity also imports it")
+def _():
+    """Regression for the v1.5.4 deploy failure where
+    frequency_anomaly.py used Maturity.BETA but its imports list
+    didn't include Maturity, raising NameError at module load.
+    This test sweeps all detector files: if a file references
+    Maturity.X, it MUST import Maturity from .base."""
+    import os
+    import re
+
+    det_dir = "custom_components/ha_insights/detectors"
+    missing: list[str] = []
+    for fname in os.listdir(det_dir):
+        if not fname.endswith(".py"):
+            continue
+        if fname == "base.py":  # defines Maturity itself
+            continue
+        body = _read(f"{det_dir}/{fname}")
+        # Strip docstrings + comments to avoid false-positives on
+        # mentions in prose. Cheap heuristic: match `Maturity.X`
+        # outside of comment-leading lines.
+        code_only = "\n".join(
+            line for line in body.splitlines()
+            if not line.lstrip().startswith("#")
+        )
+        if re.search(r"\bMaturity\.\w+", code_only):
+            # Look for an explicit import of Maturity from .base
+            if not re.search(
+                r"from\s+\.base\s+import\s+[^\n]*\bMaturity\b", body
+            ):
+                missing.append(fname)
+    assert not missing, (
+        f"Detectors using Maturity.X but missing the import: {missing}"
+    )
+
+
 @t("maturity demotion: 4 risky detectors are now Maturity.BETA pre-HACS")
 def _():
     """Until field-tested across 3-5 real installs, the detectors
