@@ -230,11 +230,11 @@ def _():
     assert "async_get_integration" in src
 
 
-@t("manifest: at v1.4.x")
+@t("manifest: at v1.5.x")
 def _():
     m = json.load(open("custom_components/ha_insights/manifest.json"))
-    assert m["version"].startswith("1.4."), (
-        f'manifest version {m["version"]} not in 1.4.x line'
+    assert m["version"].startswith("1.5."), (
+        f'manifest version {m["version"]} not in 1.5.x line'
     )
 
 

@@ -1043,17 +1043,27 @@ def _():
     assert "if not include_bootstrap and ev.from_bootstrap:" in src
 
 
-@t("bootstrap filter: integration listens for EVENT_HOMEASSISTANT_STARTED")
+@t("bootstrap filter: integration marks window early + listens for STARTED")
 def _():
+    """v1.5.8 fix: the marker has to be set at SETUP time when HA
+    is still starting, because entity-platform restored-state
+    writes arrive BEFORE EVENT_HOMEASSISTANT_STARTED fires. The
+    listener-only approach (v1.4.9) never saw bootstrap events as
+    from_bootstrap. Verify both paths now exist:
+      - Setup-time marker when hass.state is not CoreState.running
+      - STARTED-event backstop for any stragglers
+    """
     src = _read("custom_components/ha_insights/__init__.py")
     assert "EVENT_HOMEASSISTANT_STARTED" in src
-    # Marks the bootstrap window
     assert "_bootstrap_until_ts" in src
-    # 5-second window matches HA's own state-trigger guard rationale
-    assert "_BOOTSTRAP_WINDOW_SEC = 5" in src
-    # Two-part check (window AND old_state=None) — mirrors HA core
+    # Window widened from 5 to 10s to absorb slow boots
+    assert "_BOOTSTRAP_WINDOW_SEC = 10" in src
+    # The two-part check (window AND old_state=None) mirrors HA's
+    # automation state-trigger guard
     assert "if old_state is None:" in src
     assert "from_bootstrap = True" in src
+    # Setup-time marker is gated on CoreState
+    assert "if hass.state is not CoreState.running:" in src
 
 
 @t("bootstrap filter: state events capture context_id for batch correlation")
@@ -1210,6 +1220,103 @@ def _():
         except SyntaxError as e:  # noqa: PERF203
             failed.append((fname, f"{type(e).__name__}: {e}"))
     assert not failed, f"detector files failed to parse: {failed}"
+
+
+@t("ultrareview #3: bootstrap marker set at setup time when HA not running")
+def _():
+    """The previous design only set the bootstrap_until_ts AFTER
+    EVENT_HOMEASSISTANT_STARTED fired — but entity platforms write
+    their restored state BEFORE that event. Fix: check CoreState
+    at setup time and mark the window IMMEDIATELY if HA is still
+    starting."""
+    src = _read("custom_components/ha_insights/__init__.py")
+    assert "if hass.state is not CoreState.running:" in src
+    assert "from homeassistant.core import (" in src
+    assert "CoreState," in src
+
+
+@t("ultrareview #2: StateEventBuffer.rename_entity preserves all fields")
+def _():
+    """The previous rename_entity dropped context_user_id,
+    from_bootstrap, context_id, source on every rename."""
+    src = _read(
+        "custom_components/ha_insights/observers/state_event_buffer.py"
+    )
+    # Inside the rename loop, every new-fields-on-StateEvent must
+    # be preserved (regression for the audit finding)
+    assert "context_user_id=ev.context_user_id" in src
+    assert "from_bootstrap=ev.from_bootstrap" in src
+    assert "context_id=ev.context_id" in src
+    assert "source=ev.source" in src
+
+
+@t("ultrareview #4: cloud_consent persists audit_* fields too")
+def _():
+    """Cloud-consent path previously dropped the 4 audit_* fields
+    the user may have just edited in the Advanced form."""
+    src = _read("custom_components/ha_insights/config_flow.py")
+    # The cloud_consent merged.update() block contains audit_* keys
+    # (find the chunk near "Cloud-consent path is reached from")
+    idx = src.find("Cloud-consent path is reached from")
+    assert idx > 0
+    # Look at the dict ABOVE that point
+    chunk = src[max(0, idx - 4000) : idx]
+    for key in (
+        "audit_rollup_window_days",
+        "audit_analysis_depth",
+        "audit_monthly_budget_usd",
+        "audit_auto_rollup_enabled",
+    ):
+        assert f'"{key}"' in chunk, f"cloud_consent missing {key}"
+
+
+@t("ultrareview #7: Advanced submit uses merged_options pattern (no field drop)")
+def _():
+    """The Advanced form previously rebuilt options from scratch,
+    silently dropping any option not in the hardcoded list
+    (analytics_install_uuid, last_wizard_version,
+    notify_user_overrides, etc.)."""
+    src = _read("custom_components/ha_insights/config_flow.py")
+    # Both Advanced and cloud_consent paths use the merged pattern
+    assert src.count("merged = dict(self.config_entry.options)") >= 3
+    assert src.count("return self.async_create_entry(title=\"\", data=merged)") >= 3
+
+
+@t("ultrareview #8: _on_options_updated only clears progress on window change")
+def _():
+    """Previous version wiped rollup progress on EVERY options
+    change. Now: only clears when window_days actually changed."""
+    src = _read("custom_components/ha_insights/__init__.py")
+    # Window-change guard present
+    assert "old_window != new_window" in src
+    assert "_known_rollup_window" in src
+    # Seed at setup time so first options change has a baseline
+    assert '"_known_rollup_window": get_audit_rollup_window_days(entry)' in src
+
+
+@t("ultrareview #15: mobile slug uses HA's canonical slugify()")
+def _():
+    """Hand-rolled slug missed many cases (emoji, NFKD-normalized
+    Unicode, punctuation). Mobile_app integration uses HA's
+    slugify() — use the same."""
+    src = _read(
+        "custom_components/ha_insights/notifications/user_routing.py"
+    )
+    assert "from homeassistant.util import slugify" in src
+    assert "slug = slugify(raw)" in src
+
+
+@t("ultrareview #1: phone_charge_reminder Jinja uses if/elif (not elif alone)")
+def _():
+    """Previous template was invalid Jinja2 (elif without leading if).
+    Generated automations would fail at template-render time."""
+    src = _read(
+        "custom_components/ha_insights/detectors/phone_charge_reminder.py"
+    )
+    # The structural fix: first branch is "if", subsequent are "elif"
+    assert 'keyword = "if" if i == 0 else "elif"' in src
+    # Endif terminator is present
+    assert '"      {% endif %}"' in src
 
 
 @t("import safety: pyflakes finds no undefined names across the integration")

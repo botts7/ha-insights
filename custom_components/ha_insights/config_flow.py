@@ -1618,9 +1618,14 @@ class HaInsightsOptionsFlow(OptionsFlow):
             if self._mode is LlmMode.CLOUD and current_mode != LlmMode.CLOUD.value:
                 # Only require fresh consent if switching INTO cloud
                 return await self.async_step_cloud_consent()
-            return self.async_create_entry(
-                title="",
-                data={
+            # v1.5 fix (ultrareview): start from existing options and
+            # overlay only what the Advanced form actually changed,
+            # so options NOT in this hardcoded list (analytics_install_uuid,
+            # last_wizard_version, notify_user_overrides, future options)
+            # survive the submit instead of getting silently dropped.
+            merged = dict(self.config_entry.options)
+            merged.update(
+                {
                     CONF_LLM_MODE: self._mode.value,
                     CONF_LOOKBACK_DAYS: self._lookback,
                     CONF_NOTIFY_ON_INSIGHT: self._notify_on,
@@ -1651,8 +1656,9 @@ class HaInsightsOptionsFlow(OptionsFlow):
                     "audit_analysis_depth": self._audit_analysis_depth,
                     "audit_monthly_budget_usd": self._audit_monthly_budget_usd,
                     "audit_auto_rollup_enabled": self._audit_auto_rollup_enabled,
-                },
+                }
             )
+            return self.async_create_entry(title="", data=merged)
 
         lo, hi = LOOKBACK_DAYS_RANGE
         schema = vol.Schema(
@@ -1898,6 +1904,18 @@ class HaInsightsOptionsFlow(OptionsFlow):
                         CONF_ENABLED_DETECTORS: self._enabled_detectors,
                         CONF_SCAN_AREAS: self._scan_areas,
                         CONF_SCAN_INTERVAL_HOURS: self._scan_interval_hours,
+                        # v1.5 fix (ultrareview): the cloud_consent
+                        # branch was missing the 4 audit_* fields the
+                        # user may have just edited in the Advanced
+                        # form. Silent data-loss whenever a user
+                        # changed audit knobs AND switched to cloud
+                        # in the same submit. merged = dict(options)
+                        # above preserves prior values; this update
+                        # captures freshly-edited ones.
+                        "audit_rollup_window_days": self._audit_rollup_window_days,
+                        "audit_analysis_depth": self._audit_analysis_depth,
+                        "audit_monthly_budget_usd": self._audit_monthly_budget_usd,
+                        "audit_auto_rollup_enabled": self._audit_auto_rollup_enabled,
                     }
                 )
                 return self.async_create_entry(title="", data=merged)

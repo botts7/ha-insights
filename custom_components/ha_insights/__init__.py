@@ -8,13 +8,21 @@ from datetime import UTC, datetime, timedelta
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EVENT_STATE_CHANGED, Platform
-from homeassistant.core import Event, HomeAssistant, ServiceCall, State, callback
+from homeassistant.core import (
+    CoreState,
+    Event,
+    HomeAssistant,
+    ServiceCall,
+    State,
+    callback,
+)
 from homeassistant.helpers import entity_registry as er
 
 from . import ws_api
 from .config_flow import (
     get_allow_user_detectors,
     get_analytics_settings,
+    get_audit_rollup_window_days,
     get_digest_settings,
     get_lookback_days,
     get_mobile_notify_policy,
@@ -83,36 +91,54 @@ async def _setup_entry_body(
 
     entity_reg = er.async_get(hass)
 
-    # Bootstrap-window tracker. Set when EVENT_HOMEASSISTANT_STARTED
-    # fires; reset to None outside the window. Used by _on_state_changed
-    # to flag events that fired during the boot fan-out (every entity
-    # platform writing its restored state with old_state=None). HA core
-    # makes no distinction; we have to mark them ourselves so detectors
-    # can skip them and avoid the "every restart looks like a routine"
-    # false positive. See docs/HA_EVENT_SEMANTICS.md Gotcha 5.
-    _BOOTSTRAP_WINDOW_SEC = 5
+    # Bootstrap-window tracker. code review caught the original
+    # design failing in practice: EVENT_HOMEASSISTANT_STARTED fires
+    # AFTER all entity platforms have already written their restored
+    # state, so a listener-only approach NEVER sees the fan-out
+    # events as from_bootstrap. The marker has to be set BEFORE the
+    # boot fan-out arrives at our listener.
+    #
+    # Two cases:
+    #   (a) Integration set up during HA boot (cold start, restart,
+    #       config-entry create on first install). hass.state is
+    #       NOT yet CoreState.running — boot is still in progress.
+    #       Mark the window NOW so events arriving at our state
+    #       listener within the next N seconds are flagged.
+    #   (b) Integration set up after HA finished booting (reload of
+    #       this entry mid-session). hass.state IS running — there
+    #       is no bootstrap fan-out to filter. Leave the marker
+    #       unset so nothing gets flagged from_bootstrap.
+    #
+    # See docs/HA_EVENT_SEMANTICS.md Gotcha 5.
+    _BOOTSTRAP_WINDOW_SEC = 10  # wider than 5 to absorb slow boots
 
-    @callback
-    def _on_homeassistant_started(_event: Event) -> None:
-        # Mark the start of the bootstrap window. The buffer reads
-        # this value at add()-time. If the integration loads AFTER
-        # HA finished starting (a reload mid-session), this never
-        # fires for us and bootstrap_until_ts stays at None — that's
-        # correct, since post-boot state_changed events shouldn't be
-        # flagged from_bootstrap.
+    if hass.state is not CoreState.running:
+        # Case (a) — we're loading during HA's startup. The boot
+        # fan-out for entity platforms hasn't necessarily reached
+        # us yet; mark the window now so it covers the inbound
+        # state_changed events that follow.
         hass.data.setdefault(DOMAIN, {})["_bootstrap_until_ts"] = (
             datetime.now(tz=UTC).timestamp() + _BOOTSTRAP_WINDOW_SEC
         )
+        # Also catch the STARTED event as a backstop — if anything
+        # slipped past our setup-time mark, we extend the window
+        # from STARTED + N seconds to cover any final stragglers
+        # that arrive between our setup-time mark and the bus
+        # truly settling.
+        from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
 
-    from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
+        @callback
+        def _on_homeassistant_started(_event: Event) -> None:
+            hass.data.setdefault(DOMAIN, {})["_bootstrap_until_ts"] = (
+                datetime.now(tz=UTC).timestamp() + _BOOTSTRAP_WINDOW_SEC
+            )
 
-    entry.async_on_unload(
-        hass.bus.async_listen_once(
-            EVENT_HOMEASSISTANT_STARTED, _on_homeassistant_started
+        entry.async_on_unload(
+            hass.bus.async_listen_once(
+                EVENT_HOMEASSISTANT_STARTED, _on_homeassistant_started
+            )
         )
-    )
-    # If we missed the start event (integration set up after boot),
-    # leave the marker unset so nothing gets flagged from_bootstrap.
+    # else: case (b) — running already, no bootstrap to mark.
 
     @callback
     def _on_state_changed(event: Event) -> None:
@@ -345,6 +371,11 @@ async def _setup_entry_body(
         "unsub_analytics": unsub_analytics,
         "last_backfill": None,
         "backfill_running": False,
+        # Seed for _on_options_updated's window-change detector. With
+        # this set at setup time, the FIRST options change has a
+        # baseline to compare against — without it, the old code
+        # would unconditionally clear rollup progress on every save.
+        "_known_rollup_window": get_audit_rollup_window_days(entry),
     }
 
     if not hass.data[DOMAIN].get(_WS_REGISTERED_FLAG):
@@ -539,28 +570,45 @@ async def _setup_entry_body(
     async def _on_options_updated(
         hass_: HomeAssistant, entry_: ConfigEntry
     ) -> None:
+        # the previous version called
+        # clear_rollup_progress() on EVERY options change — toggling
+        # a notification preset wiped weeks of rollup cursor work,
+        # forcing a full refill from recorder on the next pass.
+        # Only clear progress when the window ACTUALLY changed
+        # (the cursor's bucket layout depends on window_days; any
+        # other option change is window-orthogonal).
         try:
             from .config_flow import get_audit_rollup_window_days
 
             new_window = get_audit_rollup_window_days(entry_)
             entry_data = hass_.data.get(DOMAIN, {}).get(entry_.entry_id) or {}
             current_store = entry_data.get("store")
-            if current_store is not None:
+            old_window = entry_data.get("_known_rollup_window")
+            if (
+                current_store is not None
+                and old_window is not None
+                and old_window != new_window
+            ):
                 deleted = await current_store.prune_rollups_with_wrong_window(
                     new_window
                 )
-                # Always clear incremental progress on window change —
-                # the cursor was earned against the old window; the
-                # next batch must start fresh so historical buckets
-                # match the new window.
+                # Clear progress ONLY on window change — the cursor
+                # was earned against the old window; new buckets
+                # must rebuild against the new window.
                 progress_cleared = await current_store.clear_rollup_progress()
                 if deleted or progress_cleared:
                     _LOGGER.info(
-                        "audit: pruned %d rollup rows + %d progress cursors after window change to %d days",
+                        "audit: pruned %d rollup rows + %d progress cursors "
+                        "after window change %d → %d days",
                         deleted,
                         progress_cleared,
+                        old_window,
                         new_window,
                     )
+            # Update the "last seen window" marker so the next options
+            # change knows whether to compare.
+            if isinstance(entry_data, dict):
+                entry_data["_known_rollup_window"] = new_window
         except Exception as err:  # noqa: BLE001
             _LOGGER.debug("options-updated rollup prune skipped: %s", err)
         await hass_.config_entries.async_reload(entry_.entry_id)

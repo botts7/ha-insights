@@ -586,32 +586,40 @@ class PhoneChargeReminderDetector(Detector):
         # The forecast template — branches on trigger.id and applies
         # the appropriate hours-remaining to the rate. Encoded as a
         # single template condition so all triggers share the logic.
+        # the previous template emitted only
+        # `{% elif %}` branches without a leading `{% if %}`, which
+        # is invalid Jinja2 — the automation HA created would fail
+        # at template-render time with TemplateSyntaxError. Use
+        # `if` for the first branch and `elif` for the rest. The
+        # leading "0" sentinel was also a leftover non-branch
+        # number that the renderer would never reach; removed.
         rate_str = f"{rate_per_hour:.2f}"
         buf_str = str(_SAFETY_BUFFER_PCT)
-        bedtime_id_branches = "\n".join(
-            f"      {{% elif trigger.id == 'bedtime_minus_{h}h' %}} {h}"
-            for h in _CHECK_HOURS_BEFORE
-        )
-        home_branch = ""
+
+        # Build a single if/elif chain across the trigger IDs.
+        branches: list[tuple[str, str]] = []  # (trigger_id, hours_value)
+        for h in _CHECK_HOURS_BEFORE:
+            branches.append((f"bedtime_minus_{h}h", str(h)))
         if home_arrival_hhmm is not None:
             ha_h, ha_m = (int(x) for x in home_arrival_hhmm.split(":"))
             hours_home_to_bed = (
                 ((bedtime_h * 60 + bedtime_m) - (ha_h * 60 + ha_m)) / 60.0
             )
-            home_branch = (
-                f"      {{% elif trigger.id == 'home_arrival' %}} "
-                f"{hours_home_to_bed:.1f}\n"
+            branches.append(("home_arrival", f"{hours_home_to_bed:.1f}"))
+
+        branch_lines: list[str] = []
+        for i, (trig_id, hrs) in enumerate(branches):
+            keyword = "if" if i == 0 else "elif"
+            branch_lines.append(
+                f"      {{% {keyword} trigger.id == '{trig_id}' %}} {hrs}"
             )
+        branch_lines.append("      {% else %} 0")
+        branch_lines.append("      {% endif %}")
 
         forecast_template = (
-            "{% set hours_left = (\n"
-            + (
-                "      0\n"
-                + bedtime_id_branches
-                + "\n"
-                + home_branch
-                + "      {% else %} 0\n      {% endif %}\n)|float %}\n"
-            )
+            "{% set hours_left = ((\n"
+            + "\n".join(branch_lines)
+            + "\n)|float) %}\n"
             + f"{{% set rate = {rate_str} %}}\n"
             + f"{{% set buffer = {buf_str} %}}\n"
             + f"{{% set current = states('{battery_eid}')|float(100) %}}\n"

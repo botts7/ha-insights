@@ -194,6 +194,13 @@ class StateEventBuffer:
         rebuilt: deque[StateEvent] = deque()
         for ev in self._events:
             if ev.entity_id == old_id:
+                # v1.5 fix (ultrareview): preserve every StateEvent
+                # field across rename, including v1.4/v1.5 additions
+                # (context_user_id, from_bootstrap, context_id,
+                # source). Original code only listed pre-v1.4 fields,
+                # which silently zeroed the new ones on every rename
+                # — breaking the bootstrap filter, batch correlator,
+                # and recorder/live scaling for renamed entities.
                 rebuilt.append(
                     StateEvent(
                         timestamp=ev.timestamp,
@@ -202,6 +209,10 @@ class StateEventBuffer:
                         area_id=ev.area_id,
                         old_state=ev.old_state,
                         new_state=ev.new_state,
+                        context_user_id=ev.context_user_id,
+                        from_bootstrap=ev.from_bootstrap,
+                        context_id=ev.context_id,
+                        source=ev.source,
                     )
                 )
                 count += 1

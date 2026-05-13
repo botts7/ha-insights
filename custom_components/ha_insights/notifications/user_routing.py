@@ -47,21 +47,31 @@ def _mobile_app_entries(hass: HomeAssistant) -> list["ConfigEntry"]:
 
 def _service_from_entry(entry: "ConfigEntry") -> str | None:
     """`notify.mobile_app_<slug>` for a mobile_app config entry.
-    The mobile_app integration slugifies the device_name; we mirror
-    that closely enough for the common case (lowercase, spaces→
-    underscores). The exact slugifier lives in mobile_app and may
-    drift; if a mismatch shows up the user can supply the explicit
-    service name via the global targets list instead.
+
+    the previous hand-rolled slug only handled
+    spaces/hyphens/apostrophes. The mobile_app integration uses
+    HA's canonical `slugify()` which also strips emoji, normalises
+    Unicode (NFKD), drops anything that isn't [a-z0-9_], and
+    handles many more punctuation cases. A "User's iPhone 📱" device
+    became "notify.mobile_app_user_s_iphone" via our path but
+    `notify.mobile_app_users_iphone` via mobile_app's — push
+    silently failed.
+
+    Use HA's slugify() directly. It's a public helper, stable
+    across versions, and is what mobile_app itself calls.
     """
     raw = entry.data.get("device_name")
     if not isinstance(raw, str) or not raw:
         return None
-    slug = (
-        raw.lower()
-        .replace(" ", "_")
-        .replace("-", "_")
-        .replace("'", "")
-    )
+    try:
+        from homeassistant.util import slugify
+    except Exception:  # noqa: BLE001 — defensive; should always be importable
+        # Fallback to hand-rolled — better than nothing.
+        slug = raw.lower().replace(" ", "_").replace("-", "_").replace("'", "")
+    else:
+        slug = slugify(raw)
+    if not slug:
+        return None
     return f"notify.mobile_app_{slug}"
 
 
