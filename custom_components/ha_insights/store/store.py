@@ -125,18 +125,66 @@ class InsightStore:
     # --- Insights ---
 
     async def add_insight(self, insight: Insight) -> None:
-        """Insert or replace an insight by id."""
+        """Upsert an insight by id, PRESERVING dismiss/apply state.
+
+        v1.4 behaviour change (critical for notification UX):
+          - INSERT OR REPLACE used to wipe `dismissed_at`,
+            `applied_at`, and `applied_artifact_id` on every scan,
+            which meant a re-detected-but-dismissed insight fired a
+            FRESH "added" event → user got buzzed for the same thing
+            forever. Mobile notifications became unbearable on busy
+            installs.
+          - Now we INSERT ... ON CONFLICT(id) DO UPDATE that
+            explicitly leaves those three columns alone. Dismissed
+            insights stay dismissed across scans; applied insights
+            keep their artifact link.
+          - We also fire a DIFFERENT event when it's an update vs
+            a fresh insert: "added" (new) → notification fires,
+            "refreshed" (existing row, just-updated metadata) →
+            notification is SUPPRESSED by the listener.
+
+        The pre-check (SELECT 1 WHERE id=?) is one round-trip per
+        upsert, which is cheap relative to the write itself.
+        """
         snoozed_ts = (
             insight.snoozed_until.timestamp() if insight.snoozed_until else None
         )
+        # Detect whether this is a fresh insert or an update. We need
+        # this BEFORE the upsert so the post-upsert notification can
+        # pick the right event type. SQLite's RETURNING clause would
+        # avoid the extra read but requires SQLite ≥ 3.35; this is
+        # the broadest-compat path.
+        async with self._c.execute(
+            "SELECT 1 FROM insights WHERE id = ?", (insight.id,)
+        ) as cur:
+            existed = (await cur.fetchone()) is not None
         await self._c.execute(
             """
-            INSERT OR REPLACE INTO insights (
+            INSERT INTO insights (
                 id, kind, detector, area_id, title, confidence,
                 fingerprint_json, payload_json, payload_format,
                 explanation, conflicts_with_json, created_at, snoozed_until,
                 vendor, target_user_id, target_user_id_confidence
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                kind = excluded.kind,
+                detector = excluded.detector,
+                area_id = excluded.area_id,
+                title = excluded.title,
+                confidence = excluded.confidence,
+                fingerprint_json = excluded.fingerprint_json,
+                payload_json = excluded.payload_json,
+                payload_format = excluded.payload_format,
+                explanation = excluded.explanation,
+                conflicts_with_json = excluded.conflicts_with_json,
+                created_at = excluded.created_at,
+                snoozed_until = excluded.snoozed_until,
+                vendor = excluded.vendor,
+                target_user_id = excluded.target_user_id,
+                target_user_id_confidence = excluded.target_user_id_confidence
+                -- DELIBERATELY NOT TOUCHED: dismissed_at, applied_at,
+                -- applied_artifact_id. These represent user actions
+                -- and must survive re-emission of the same pattern.
             """,
             (
                 insight.id,
@@ -158,7 +206,12 @@ class InsightStore:
             ),
         )
         await self._c.commit()
-        self._notify("added", insight)
+        # "refreshed" for re-emission of an already-known insight
+        # (preserves dismiss/apply state — see docstring above) so
+        # the notification listener can skip pushing a duplicate
+        # alert. Card subscribers can still react if they want to
+        # update titles / confidence in-place.
+        self._notify("refreshed" if existed else "added", insight)
 
     # Reusable LEFT JOIN clause so applied insights carry their undo window
     # info on every read. _row_to_insight reads `i.*` PLUS the joined cols.

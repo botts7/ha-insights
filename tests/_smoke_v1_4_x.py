@@ -992,6 +992,49 @@ def _():
     )
 
 
+@t("dismiss-persistence: add_insight preserves dismissed_at + applied_at")
+def _():
+    """Regression for 'same insight keeps notifying me'. INSERT OR
+    REPLACE used to wipe dismissed_at + applied_at + applied_artifact_id
+    every scan, so a re-detected pattern fired a fresh 'added' event
+    and re-notified the user. Now we ON CONFLICT DO UPDATE everything
+    EXCEPT those three columns."""
+    src = _read("custom_components/ha_insights/store/store.py")
+    # Old behaviour gone
+    assert "INSERT OR REPLACE INTO insights" not in src
+    # New behaviour present
+    assert "ON CONFLICT(id) DO UPDATE SET" in src
+    # The three protected columns are NOT in the UPDATE SET list
+    update_clause_start = src.index("ON CONFLICT(id) DO UPDATE SET")
+    update_clause_end = src.index("DELIBERATELY NOT TOUCHED")
+    update_clause = src[update_clause_start:update_clause_end]
+    for protected in ("dismissed_at", "applied_at", "applied_artifact_id"):
+        assert protected not in update_clause, (
+            f"{protected} must NOT be in UPDATE SET — it's user action state"
+        )
+
+
+@t("dismiss-persistence: refresh event fires for updates, added for inserts")
+def _():
+    """The listener gates on event_type == 'added' to fire mobile
+    pushes. We need 'refreshed' for re-emissions so a dismissed
+    insight doesn't trigger a fresh notification when its title
+    or confidence ticks up."""
+    src = _read("custom_components/ha_insights/store/store.py")
+    # Pre-check determines event type
+    assert "SELECT 1 FROM insights WHERE id = ?" in src
+    # Conditional notify
+    assert 'self._notify("refreshed" if existed else "added", insight)' in src
+
+
+@t("dismiss-persistence: notification listener still only fires on 'added'")
+def _():
+    """If this assertion fails, dismissed insights will re-buzz the
+    user on every scan — exactly the bug we just fixed."""
+    src = _read("custom_components/ha_insights/__init__.py")
+    assert 'if event_type != "added"' in src
+
+
 @t("setup_quality: USELESS tier folds into rollup (no per-feature card)")
 def _():
     src = _read(
