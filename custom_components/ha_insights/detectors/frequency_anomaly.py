@@ -110,6 +110,14 @@ class FrequencyAnomalyDetector(Detector):
 
         today_counts: dict[str, int] = defaultdict(int)
         baseline_counts: dict[str, int] = defaultdict(int)
+        # v1.5 (Gotcha 8): track baseline source provenance. If the
+        # baseline was filled from recorder history (significance-
+        # filtered) while today's count is live (every event), the
+        # ratio is systematically inflated. Track per-entity which
+        # source dominates the baseline so we can scale below.
+        baseline_recorder_count: dict[str, int] = defaultdict(int)
+        baseline_live_count: dict[str, int] = defaultdict(int)
+
         for ev in events:
             # v1.5: skip `unavailable` ↔ X transitions. HA fires
             # state_changed on every availability flip; a flaky
@@ -125,6 +133,10 @@ class FrequencyAnomalyDetector(Detector):
                 today_counts[ev.entity_id] += 1
             else:
                 baseline_counts[ev.entity_id] += 1
+                if getattr(ev, "source", "live") == "recorder":
+                    baseline_recorder_count[ev.entity_id] += 1
+                else:
+                    baseline_live_count[ev.entity_id] += 1
 
         baseline_days = self.LOOKBACK_DAYS - 1
         # First pass: collect candidates per (device_id, entity) so we can
@@ -145,7 +157,24 @@ class FrequencyAnomalyDetector(Detector):
             baseline_count = baseline_counts.get(entity_id, 0)
             if baseline_count < self.MIN_BASELINE_EVENTS:
                 continue
-            baseline_per_day = baseline_count / baseline_days
+            # v1.5 (Gotcha 8): adjust the baseline upward when it
+            # was filled primarily from recorder (which significance-
+            # filters numeric / similar-state events). today_count
+            # is always live (every event), so an unadjusted ratio
+            # systematically over-states the actual change.
+            #
+            # Empirical scaling: HA's recorder typically retains
+            # 60-80% of live state_changed events depending on the
+            # entity (binary stays close to 100%, numeric sensors
+            # drop more). 1.25× scale-up assumes ~80% retention —
+            # under-corrects rather than over-corrects so we err
+            # on flagging when in doubt.
+            rec_count = baseline_recorder_count.get(entity_id, 0)
+            live_count = baseline_live_count.get(entity_id, 0)
+            total_baseline = max(1, rec_count + live_count)
+            recorder_share = rec_count / total_baseline
+            adjusted_baseline = baseline_count * (1.0 + 0.25 * recorder_share)
+            baseline_per_day = adjusted_baseline / baseline_days
             if baseline_per_day <= 0:
                 continue
             ratio = today_count / baseline_per_day

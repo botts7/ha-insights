@@ -136,6 +136,10 @@ async def backfill(
                 area_id=area_id,
                 old_state=prior_state,
                 new_state=new_state,
+                # v1.5 (Gotcha 8): tag provenance so detectors that
+                # care about event-count parity can compensate for
+                # recorder's significance filtering.
+                source="recorder",
             )
             if buffer_.add(event):
                 events_added += 1

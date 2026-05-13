@@ -1181,6 +1181,36 @@ def _():
     assert ("light.c", "light.b") in pairs
 
 
+@t("recorder vs live: StateEvent gains source field (live | recorder)")
+def _():
+    src = _read(
+        "custom_components/ha_insights/observers/state_event_buffer.py"
+    )
+    assert 'source: str = "live"' in src
+    assert "Gotcha 8" in src
+
+
+@t("recorder vs live: history_backfill tags events source='recorder'")
+def _():
+    src = _read(
+        "custom_components/ha_insights/observers/history_backfill.py"
+    )
+    assert 'source="recorder"' in src
+
+
+@t("recorder vs live: frequency_anomaly scales baseline by recorder share")
+def _():
+    src = _read(
+        "custom_components/ha_insights/detectors/frequency_anomaly.py"
+    )
+    # Tracks per-entity recorder vs live counts
+    assert "baseline_recorder_count" in src
+    assert "baseline_live_count" in src
+    # 1.25× scale at 100% recorder share (under-corrects to err
+    # on flagging) — empirical 80% retention assumption
+    assert "1.0 + 0.25 * recorder_share" in src
+
+
 @t("template filter: hierarchy.is_template_or_derived covers known platforms")
 def _():
     src = _read(

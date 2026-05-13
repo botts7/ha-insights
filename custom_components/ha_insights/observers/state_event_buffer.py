@@ -57,6 +57,17 @@ class StateEvent:
     context_user_id: str | None = None
     from_bootstrap: bool = False
     context_id: str | None = None
+    # v1.5 (Gotcha 8): provenance — "live" (captured from the HA
+    # event bus in real time) vs "recorder" (backfilled from
+    # HA's recorder history). The two have different completeness:
+    # recorder applies significance filters (numeric sensors round
+    # to sane precision, similar-state writes are dropped), so an
+    # entity that fires 100 state_changed events at the live bus
+    # may show up as only 60-80 in recorder history. Detectors
+    # that compare today_count (live) vs baseline_count (often
+    # backfilled) need to be aware of the asymmetry or they
+    # inflate ratios systematically.
+    source: str = "live"
 
 
 class StateEventBuffer:
