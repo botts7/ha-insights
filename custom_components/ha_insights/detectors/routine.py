@@ -180,7 +180,10 @@ class RoutineDetector(Detector):
             / len(minutes_past_midnight)
         ) ** 0.5
 
-        avg_minute = round(avg)
+        # round() can produce 1440 (= 24:00)
+        # when avg ≥ 23:59:30. time(hour=24) is invalid. Wrap to
+        # [0, 1440).
+        avg_minute = round(avg) % (24 * 60)
         avg_hour = avg_minute // 60
         avg_min_within = avg_minute % 60
         avg_time_str = time(

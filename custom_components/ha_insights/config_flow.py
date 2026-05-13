@@ -1157,13 +1157,23 @@ class HaInsightsOptionsFlow(OptionsFlow):
         existing = overrides.get(self._editing_user_id, {})
         # Form defaults: existing override values first, then global
         # policy fallbacks for any unset keys.
+        #
+        # `existing.get(k) or fallback` treats
+        # 0.0 / 0 / "" as missing because they're falsy. An admin
+        # who explicitly set a user's confidence_floor to 0.0 (or
+        # daily_cap to 0 = unlimited) saw the form revert to the
+        # global value. Use the `key in dict` test so genuine 0.0
+        # values are honored.
         global_policy = get_mobile_notify_policy(self.config_entry)
-        cur_preset = existing.get("preset") or global_policy.get(
-            "preset", DEFAULT_NOTIFY_PRESET
+        cur_preset = (
+            existing["preset"]
+            if "preset" in existing
+            else global_policy.get("preset", DEFAULT_NOTIFY_PRESET)
         )
         cur_floor = float(
-            existing.get("confidence_floor")
-            or global_policy.get("confidence_floor", 0.9)
+            existing["confidence_floor"]
+            if "confidence_floor" in existing
+            else global_policy.get("confidence_floor", 0.9)
         )
         cur_cap = int(
             existing.get("daily_cap")
@@ -1181,8 +1191,9 @@ class HaInsightsOptionsFlow(OptionsFlow):
             else global_policy.get("quiet_hours_end", 7)
         )
         cur_min_attr = float(
-            existing.get("min_attribution_confidence")
-            or global_policy.get("min_attribution_confidence", 0.85)
+            existing["min_attribution_confidence"]
+            if "min_attribution_confidence" in existing
+            else global_policy.get("min_attribution_confidence", 0.85)
         )
 
         if user_input is not None:

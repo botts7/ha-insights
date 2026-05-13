@@ -58,9 +58,32 @@ _PANEL_DEEP_LINK = "/ha-insights"
 
 # (entry_id, user_key, local_date) -> count of mobile pushes fired today.
 # `user_key` is target_user_id when attributed, else the literal
-# string "household". Day rollover happens naturally because the
-# next day's local_date key has no entry yet.
+# string "household".
+#
+# old comment claimed "day rollover happens
+# naturally" — true that NEW pushes use today's date as the key,
+# but yesterday's entries were never removed. A long-running
+# install accumulated ~1 entry per user per day forever. Pruned
+# at every push attempt below (cheap O(N) over current keys).
 _DAILY_COUNTERS: dict[tuple[str, str, date], int] = defaultdict(int)
+# How many days of counters to retain. Anything older than this
+# gets dropped at push time. 7 is generous for the use-case
+# (only today's count matters for the daily cap) but lets the
+# get_daily_push_count helper answer "did you push to user X
+# yesterday?" if anything ever needs it.
+_DAILY_COUNTER_RETENTION_DAYS = 7
+
+
+def _prune_old_daily_counters(today: date) -> None:
+    """Drop counter entries older than _DAILY_COUNTER_RETENTION_DAYS.
+    Called at push time so a long-running install doesn't accumulate
+    a row per user per day forever."""
+    from datetime import timedelta as _td
+
+    cutoff = today - _td(days=_DAILY_COUNTER_RETENTION_DAYS)
+    stale = [k for k in _DAILY_COUNTERS if k[2] < cutoff]
+    for k in stale:
+        _DAILY_COUNTERS.pop(k, None)
 
 
 def _build_payload(insight: Insight) -> dict[str, Any]:
@@ -238,7 +261,11 @@ async def fire_mobile_notifications(
 
     # Gate 4: daily cap (0 = unlimited).
     user_key = target_user_id or "household"
-    counter_key = (entry_id, user_key, local_now.date())
+    today = local_now.date()
+    counter_key = (entry_id, user_key, today)
+    # code review #14: prune stale entries so we don't leak memory
+    # at ~1 entry per user per day forever in a long-running install.
+    _prune_old_daily_counters(today)
     if daily_cap > 0 and _DAILY_COUNTERS[counter_key] >= daily_cap:
         _LOGGER.info(
             "HA Insights mobile push for insight %s deferred: "

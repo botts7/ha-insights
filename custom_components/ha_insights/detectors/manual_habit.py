@@ -182,7 +182,12 @@ class ManualHabitDetector(Detector):
         if stddev > _TIME_STDDEV_MAX_MIN:
             return None
 
-        avg_minute = round(avg)
+        # avg minute can round to 1440 (= 24:00)
+        # when the average is 23:59:30 or later. time(hour=24, ...)
+        # raises ValueError. Wrap the rounded value back into
+        # [0, 1440) so the detector still emits a sensible
+        # late-night habit at 23:59 instead of crashing.
+        avg_minute = round(avg) % (24 * 60)
         avg_hour = avg_minute // 60
         avg_min_within = avg_minute % 60
         avg_time_str = time(hour=avg_hour, minute=avg_min_within).strftime(

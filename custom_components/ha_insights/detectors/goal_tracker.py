@@ -250,9 +250,25 @@ class GoalTrackerDetector(Detector):
 
         target_min = target.hour * 60 + target.minute
         observed_local = [dt_util.as_local(t) for t in observed]
-        observed_min = [
-            t.hour * 60 + t.minute + t.second / 60.0 for t in observed_local
-        ]
+        # midnight wrap-around for evening
+        # goals. A `bedtime_by: 22:30` observation at 00:15 means
+        # the user is 1h45m LATE, not 22h15m EARLY. Map post-
+        # midnight observations to target_day+1 by adding 24h when:
+        #   - the goal's target is in the evening (≥ 16:00), AND
+        #   - the observation's local time is before noon
+        # That window catches genuine late-bedtime cases without
+        # mis-classifying intentional 6am wake-up observations on
+        # bedtime goals (those just look like a huge miss, which
+        # is correct behaviour for someone who didn't go to bed).
+        EVENING_GOAL_MIN = 16 * 60  # 16:00 local
+        WRAP_DETECTION_MAX = 12 * 60  # observations before noon
+        target_is_evening = target_min >= EVENING_GOAL_MIN
+        observed_min: list[float] = []
+        for t in observed_local:
+            m = t.hour * 60 + t.minute + t.second / 60.0
+            if target_is_evening and m < WRAP_DETECTION_MAX:
+                m += 24 * 60  # rolled past midnight; add a full day
+            observed_min.append(m)
 
         # Tally hits — for late-is-miss goals, "hit" means observed time
         # is <= target. wake_up_by also wants <= target (earlier wake

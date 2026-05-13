@@ -398,7 +398,20 @@ async def _query_states_chunk(
     except ImportError:  # recorder not available — graceful no-op
         return None
 
-    def _query() -> list[Any] | None:
+    def _query() -> list[Any] | str | None:
+        """Three-valued return so the caller can tell apart:
+          - list: chunk succeeded, here are the states
+          - "rowcap": chunk exceeded the OOM-safety row cap; skip
+            forward by 1 day (the chunk would always be too big)
+          - None: query itself failed (recorder timeout, schema
+            issue, etc.); cursor must NOT be advanced — retry on
+            next batch
+        the previous bool-collapsed contract
+        (`None` for both row-cap AND failure) caused failures to be
+        treated as row-cap, advancing the cursor by 1 day per fail
+        — losing up to 6 days of recoverable history if the
+        recorder hiccupped during a chunked backfill.
+        """
         try:
             result = get_significant_states(
                 hass,
@@ -417,14 +430,13 @@ async def _query_states_chunk(
                 chunk_end.isoformat(),
                 err,
             )
-            return None
+            return None  # genuine failure — caller retries chunk
         rows = result.get(entity_id) if isinstance(result, dict) else []
         rows = rows or []
         if len(rows) > _CHUNK_ROW_CAP:
-            # Don't return the data — caller treats as safety skip.
-            # Allocating tens of thousands of rows is exactly what
-            # we want to avoid for OOM safety.
-            return None
+            # Row-cap — chunk too big to safely materialize. Caller
+            # advances cursor 1 day to skip the worst day.
+            return "rowcap"
         return rows
 
     # `recorder.get_instance(hass).async_add_executor_job` routes
@@ -547,12 +559,24 @@ async def _compute_rollups_for_entity_incremental(
             break  # leave cursor; next batch retries
 
         if states is None:
-            # Failure or row-cap exceeded. Don't advance — but if
-            # row-cap, retrying gets the same result, so increment
-            # the cursor by one day to skip past the worst day and
-            # try again next call. Conservative: advance by exactly
-            # one day so we make forward progress on chatty entities
-            # without losing context.
+            # genuine query failure (recorder
+            # crash, schema mismatch, etc.). NOT row-cap. Leave the
+            # cursor where it is so we retry the same chunk on the
+            # next batch — anything else would lose up to 6 days of
+            # recoverable history per failure.
+            _LOGGER.warning(
+                "rollup: %s chunk %s..%s query failed; cursor not "
+                "advanced — will retry next batch",
+                entity_id,
+                chunk_start.date(),
+                chunk_end.date(),
+            )
+            break
+        if states == "rowcap":
+            # Row-cap exceeded — chunk is too large to safely
+            # materialize. Retrying gets the same result, so advance
+            # the cursor by exactly one day to skip past the worst
+            # day. Conservative: don't skip the whole chunk.
             cursor_ts = (chunk_start + timedelta(days=1)).timestamp()
             await store.set_rollup_progress(
                 entity_id,

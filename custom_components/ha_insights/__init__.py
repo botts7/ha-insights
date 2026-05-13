@@ -318,9 +318,17 @@ async def _setup_entry_body(
         def _on_analytics_tick(_now) -> None:
             # ISO weekday 1=Monday. async_track_time_change doesn't
             # have a weekday filter, so we gate inside the callback.
-            from datetime import datetime as _dt
+            #
+            # must use HA's configured timezone,
+            # not datetime.now() (which uses the host's local tz).
+            # On a host where HA's HA timezone differs from the OS
+            # (Docker, hass.io with overridden config), the gate
+            # fired on the wrong day. async_track_time_change's
+            # _now is already in HA's local tz.
+            from homeassistant.util import dt as dt_util
 
-            if _dt.now().isoweekday() != 1:
+            ha_now = dt_util.now()
+            if ha_now.isoweekday() != 1:
                 return
             entry.async_create_background_task(
                 hass,
