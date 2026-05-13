@@ -584,6 +584,69 @@ def _():
     assert "EXAMPLE_PAYLOAD_KEY" in src
 
 
+# ---- Onboarding / refinement wizard ----
+
+
+@t("wizard: OptionsFlow init shows a menu (not the old big form)")
+def _():
+    src = _read("custom_components/ha_insights/config_flow.py")
+    assert "self.async_show_menu(" in src
+    # Menu offers wizard + advanced paths
+    assert '"wizard_intro":' in src
+    assert '"advanced":' in src
+
+
+@t("wizard: five sequential async_step_wizard_* methods present")
+def _():
+    src = _read("custom_components/ha_insights/config_flow.py")
+    for step in (
+        "async_step_wizard_intro",
+        "async_step_wizard_preset",
+        "async_step_wizard_mobile",
+        "async_step_wizard_experimental",
+        "async_step_wizard_done",
+    ):
+        assert f"def {step}(" in src, f"missing wizard step {step}"
+
+
+@t("wizard: chains forward (intro→preset→mobile→experimental→done)")
+def _():
+    src = _read("custom_components/ha_insights/config_flow.py")
+    assert "return await self.async_step_wizard_preset()" in src
+    assert "return await self.async_step_wizard_mobile()" in src
+    assert "return await self.async_step_wizard_experimental()" in src
+    assert "return await self.async_step_wizard_done()" in src
+
+
+@t("wizard: done step PRESERVES existing options (no destructive overwrite)")
+def _():
+    src = _read("custom_components/ha_insights/config_flow.py")
+    # The merged dict starts from existing options and only overlays
+    # wizard outputs — critical so the user doesn't lose audit
+    # thresholds, scan areas, etc by running the wizard.
+    assert "merged = dict(self.config_entry.options)" in src
+    assert "merged.update(" in src
+
+
+@t("wizard: tracks last_wizard_version so 'what's new' can compare")
+def _():
+    src = _read("custom_components/ha_insights/config_flow.py")
+    assert '"last_wizard_version"' in src
+    # Intro screen surfaces is_upgrade + current_version placeholders
+    assert '"is_upgrade"' in src
+    assert '"current_version"' in src
+
+
+@t("wizard: advanced form still reachable (step_id renamed to 'advanced')")
+def _():
+    src = _read("custom_components/ha_insights/config_flow.py")
+    assert "async def async_step_advanced(" in src
+    # The full-form helper still exists and returns step_id="advanced"
+    assert 'step_id="advanced", data_schema=schema' in src
+    # Cloud-consent rejection bounces back to advanced, not init
+    assert "return await self.async_step_advanced()" in src
+
+
 # ---- Run + report ----
 
 passed = sum(1 for _, s, _ in results if s == "PASS")

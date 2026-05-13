@@ -820,6 +820,181 @@ class HaInsightsOptionsFlow(OptionsFlow):
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
+        """Entry point — choose Quick wizard or Advanced settings.
+
+        The Quick wizard walks 4 short screens optimised for "the
+        decisions that actually matter". Advanced settings exposes
+        every option as one large form (the original surface).
+        Existing users keep working — saved settings persist across
+        either path.
+        """
+        return self.async_show_menu(
+            step_id="init",
+            menu_options={
+                "wizard_intro": "Quick setup (recommended)",
+                "advanced": "Advanced settings (all options)",
+            },
+        )
+
+    async def async_step_wizard_intro(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Welcome screen for the wizard. Explains the path + lets
+        the user back out to Advanced settings if they prefer.
+
+        Detects whether this is an upgrade (last_wizard_version
+        differs from current integration_version) and frames the
+        intro accordingly — new users see "Let's set up" and
+        returning users see "Here's what's new since you last
+        looked".
+        """
+        if user_input is not None:
+            return await self.async_step_wizard_preset()
+        last_wizard_version = self.config_entry.options.get(
+            "last_wizard_version", ""
+        )
+        # Reuse manifest read from the hello handshake — cheap.
+        try:
+            from homeassistant.loader import async_get_integration
+
+            integration = await async_get_integration(self.hass, DOMAIN)
+            current_version = integration.version or "1.0"
+        except Exception:  # noqa: BLE001
+            current_version = "1.0"
+        # Description placeholders aren't formally bound to strings.json
+        # in this minimal wizard — surface via description_placeholders
+        # so the translation file can pick them up later. Keeps the
+        # wizard self-contained today.
+        return self.async_show_form(
+            step_id="wizard_intro",
+            data_schema=vol.Schema({}),
+            description_placeholders={
+                "is_upgrade": "true" if last_wizard_version else "false",
+                "last_version": last_wizard_version or "(first time)",
+                "current_version": current_version,
+            },
+        )
+
+    async def async_step_wizard_preset(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Notification mode picker — the most user-visible knob."""
+        current = get_notify_preset(self.config_entry)
+        if user_input is not None:
+            self._notify_preset = str(
+                user_input.get(CONF_NOTIFY_PRESET, current)
+            )
+            return await self.async_step_wizard_mobile()
+        return self.async_show_form(
+            step_id="wizard_preset",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(
+                        CONF_NOTIFY_PRESET, default=current
+                    ): vol.In(
+                        {
+                            NOTIFY_PRESET_MINIMAL: "Quiet — only critical, sleep-aware",
+                            NOTIFY_PRESET_BALANCED: "Balanced — recommended",
+                            NOTIFY_PRESET_CHATTY: "Chatty — show more patterns",
+                            NOTIFY_PRESET_ADAPTIVE: "Adaptive — auto-tune",
+                            NOTIFY_PRESET_CUSTOM: "I'll configure manually",
+                        }
+                    ),
+                }
+            ),
+        )
+
+    async def async_step_wizard_mobile(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Mobile push targets — comma-separated notify.mobile_app_*.
+        Optional — empty = panel-only notifications."""
+        current = ", ".join(
+            get_notify_mobile_targets(self.config_entry)
+        )
+        if user_input is not None:
+            self._notify_mobile_targets = str(
+                user_input.get(CONF_NOTIFY_MOBILE_TARGETS, current)
+            )
+            return await self.async_step_wizard_experimental()
+        return self.async_show_form(
+            step_id="wizard_mobile",
+            data_schema=vol.Schema(
+                {
+                    vol.Optional(
+                        CONF_NOTIFY_MOBILE_TARGETS, default=current
+                    ): str,
+                }
+            ),
+            description_placeholders={
+                "example": "notify.mobile_app_iphone, notify.mobile_app_pixel",
+            },
+        )
+
+    async def async_step_wizard_experimental(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Opt into experimental detectors (off by default)."""
+        current = get_allow_experimental_detectors(self.config_entry)
+        if user_input is not None:
+            self._allow_experimental_detectors = bool(
+                user_input.get(
+                    CONF_ALLOW_EXPERIMENTAL_DETECTORS, current
+                )
+            )
+            return await self.async_step_wizard_done()
+        return self.async_show_form(
+            step_id="wizard_experimental",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(
+                        CONF_ALLOW_EXPERIMENTAL_DETECTORS,
+                        default=current,
+                    ): bool,
+                }
+            ),
+        )
+
+    async def async_step_wizard_done(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Save wizard choices, merge with existing options, record
+        the wizard version so we know what was new next time."""
+        try:
+            from homeassistant.loader import async_get_integration
+
+            integration = await async_get_integration(self.hass, DOMAIN)
+            current_version = integration.version or "1.0"
+        except Exception:  # noqa: BLE001
+            current_version = "1.0"
+        # Preserve every existing option, overlay only the wizard
+        # outputs. This is critical — a user who set custom audit
+        # thresholds shouldn't lose them by going through the
+        # wizard.
+        merged = dict(self.config_entry.options)
+        merged.update(
+            {
+                CONF_NOTIFY_PRESET: self._notify_preset,
+                CONF_NOTIFY_MOBILE_TARGETS: self._notify_mobile_targets,
+                CONF_ALLOW_EXPERIMENTAL_DETECTORS: (
+                    self._allow_experimental_detectors
+                ),
+                "last_wizard_version": current_version,
+            }
+        )
+        return self.async_create_entry(title="", data=merged)
+
+    async def async_step_advanced(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Full options form (the original surface) — every knob.
+        Reached from `init` when the user picks 'Advanced settings'.
+        """
+        return await self._async_step_full_form(user_input)
+
+    async def _async_step_full_form(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
         """Mode + lookback + notification picker."""
         current_mode = get_active_mode(self.config_entry)
         current_lookback = get_lookback_days(self.config_entry)
@@ -1206,7 +1381,7 @@ class HaInsightsOptionsFlow(OptionsFlow):
                 ): bool,
             }
         )
-        return self.async_show_form(step_id="init", data_schema=schema)
+        return self.async_show_form(step_id="advanced", data_schema=schema)
 
     async def async_step_cloud_consent(
         self, user_input: dict[str, Any] | None = None
@@ -1240,7 +1415,9 @@ class HaInsightsOptionsFlow(OptionsFlow):
                     },
                 )
             self._mode = None
-            return await self.async_step_init()
+            # Cloud-consent path is reached from the Advanced form
+            # only — bounce back to the same surface, not the menu.
+            return await self.async_step_advanced()
 
         schema = vol.Schema({vol.Required(CONF_CLOUD_CONSENT, default=False): bool})
         return self.async_show_form(step_id="cloud_consent", data_schema=schema)
