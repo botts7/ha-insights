@@ -992,6 +992,55 @@ def _():
     )
 
 
+@t("setup_quality: USELESS tier folds into rollup (no per-feature card)")
+def _():
+    src = _read(
+        "custom_components/ha_insights/detectors/setup_quality.py"
+    )
+    # Per-feature insight builder skips both GREAT and USELESS
+    assert 'if tier in ("GREAT", "USELESS"):' in src
+    # The fold happens in the rollup which receives the full eval
+    assert "per_feature_full" in src
+    assert "useless_items" in src
+
+
+@t("setup_quality: rollup suppressed when nothing is fixable")
+def _():
+    src = _read(
+        "custom_components/ha_insights/detectors/setup_quality.py"
+    )
+    # If everything is GOOD/GREAT, don't clutter the panel with a
+    # "100% all good" card.
+    assert (
+        "counts[\"USELESS\"] == 0 and counts[\"LIMITED\"] == 0" in src
+    )
+    assert "return None" in src
+
+
+@t("setup_quality: rollup payload exposes useless_next_steps for the card")
+def _():
+    src = _read(
+        "custom_components/ha_insights/detectors/setup_quality.py"
+    )
+    # Card needs structured data so it can render the bullet list
+    # without parsing the explanation text.
+    assert '"useless_next_steps":' in src
+    # And the rollup title leads with the actionable count, not raw
+    # tier breakdown
+    assert "would unlock" in src
+
+
+@t("setup_quality: rollup explanation lists USELESS gaps inline")
+def _():
+    src = _read(
+        "custom_components/ha_insights/detectors/setup_quality.py"
+    )
+    # Bullet-style listing in the explanation so the user sees the
+    # next steps under the title without expanding the payload.
+    assert "Not yet unlocked (tap each to learn more):" in src
+    assert 'lines.append(f"  • {feature} — {step}")' in src
+
+
 @t("OptionsFlow: __init__ initializes audit fields defensively")
 def _():
     src = _read("custom_components/ha_insights/config_flow.py")
