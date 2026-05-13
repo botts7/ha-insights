@@ -993,6 +993,14 @@ class HaInsightsOptionsFlow(OptionsFlow):
         # Per-user override flow state: which user is being edited
         self._editing_user_id: str | None = None
         self._editing_user_name: str | None = None
+        # Audit option mirrors. Only set when the Advanced form is
+        # submitted, but initialized here so any defensive read path
+        # (e.g. cloud_consent rebound after Advanced) doesn't crash
+        # with AttributeError.
+        self._audit_rollup_window_days: int = 90
+        self._audit_analysis_depth: str = "concise"
+        self._audit_monthly_budget_usd: float = 5.0
+        self._audit_auto_rollup_enabled: bool = False
         self._enabled_detectors: list[str] | None = None
         self._scan_areas: list[str] = []
         self._scan_interval_hours: int = DEFAULT_SCAN_INTERVAL_HOURS
@@ -1855,33 +1863,44 @@ class HaInsightsOptionsFlow(OptionsFlow):
         """Re-confirm cloud consent when switching INTO cloud mode."""
         if user_input is not None:
             if user_input.get(CONF_CLOUD_CONSENT):
-                return self.async_create_entry(
-                    title="",
-                    data={
+                # v1.4 fix: instead of building the dict from scratch
+                # (and inevitably forgetting fields as new options are
+                # added — the v1.0 review caught this exact regression),
+                # start from existing options + overlay only what the
+                # Advanced form actually changed. Every field the user
+                # didn't touch is preserved by construction.
+                merged = dict(self.config_entry.options)
+                merged.update(
+                    {
                         CONF_LLM_MODE: LlmMode.CLOUD.value,
                         CONF_LOOKBACK_DAYS: self._lookback,
                         CONF_NOTIFY_ON_INSIGHT: self._notify_on,
                         CONF_NOTIFY_THRESHOLD: self._notify_threshold,
+                        CONF_NOTIFY_MOBILE_TARGETS: self._notify_mobile_targets,
+                        CONF_NOTIFY_PRESET: self._notify_preset,
+                        CONF_NOTIFY_MOBILE_THRESHOLD: self._notify_mobile_threshold,
+                        CONF_NOTIFY_MOBILE_DAILY_CAP: self._notify_mobile_daily_cap,
+                        CONF_NOTIFY_QUIET_HOURS_START: self._notify_quiet_hours_start,
+                        CONF_NOTIFY_QUIET_HOURS_END: self._notify_quiet_hours_end,
+                        CONF_NOTIFY_MIN_ATTRIBUTION_CONFIDENCE: (
+                            self._notify_min_attribution_confidence
+                        ),
                         CONF_DIGEST_ENABLED: self._digest_enabled,
                         CONF_DIGEST_HOUR: self._digest_hour,
                         CONF_PREFERRED_AGENT_ID: self._preferred_agent_id or "",
                         CONF_REFINE_COST_THRESHOLD_USD: self._refine_cost_threshold,
-                        # v1.0 review #3 follow-up: this branch must mirror
-                        # every field set in the init persist branch above.
-                        # Forgetting one silently drops a setting whenever
-                        # a user toggles it AND switches into Cloud mode in
-                        # the same visit.
                         CONF_ALLOW_USER_DETECTORS: self._allow_user_detectors,
-                    CONF_ALLOW_EXPERIMENTAL_DETECTORS: (
-                        self._allow_experimental_detectors
-                    ),
-                    CONF_ANALYTICS_ENABLED: self._analytics_enabled,
-                    CONF_ANALYTICS_ENDPOINT: self._analytics_endpoint,
+                        CONF_ALLOW_EXPERIMENTAL_DETECTORS: (
+                            self._allow_experimental_detectors
+                        ),
+                        CONF_ANALYTICS_ENABLED: self._analytics_enabled,
+                        CONF_ANALYTICS_ENDPOINT: self._analytics_endpoint,
                         CONF_ENABLED_DETECTORS: self._enabled_detectors,
                         CONF_SCAN_AREAS: self._scan_areas,
                         CONF_SCAN_INTERVAL_HOURS: self._scan_interval_hours,
-                    },
+                    }
                 )
+                return self.async_create_entry(title="", data=merged)
             self._mode = None
             # Cloud-consent path is reached from the Advanced form
             # only — bounce back to the same surface, not the menu.

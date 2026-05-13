@@ -917,6 +917,93 @@ def _():
     assert "current.pop(target_user_id, None)" in src
 
 
+@t("cloud_consent persist uses merged_options (no field drift on cloud switch)")
+def _():
+    """Regression: switching to cloud mode used to wipe notification
+    settings because the cloud_consent persist branch enumerated
+    fields manually and missed every new option we added. Now it
+    starts from existing options and overlays."""
+    src = _read("custom_components/ha_insights/config_flow.py")
+    joined = " ".join(src.split())
+    assert "merged = dict(self.config_entry.options) merged.update(" in joined or (
+        "merged = dict(self.config_entry.options)" in src
+        and "merged.update(" in src
+        and "return self.async_create_entry(title=\"\", data=merged)" in src
+    )
+    # And the missing-field set is now part of merged
+    for missing in (
+        "CONF_NOTIFY_MOBILE_TARGETS",
+        "CONF_NOTIFY_PRESET",
+        "CONF_NOTIFY_MOBILE_THRESHOLD",
+        "CONF_NOTIFY_QUIET_HOURS_START",
+        "CONF_ANALYTICS_ENABLED",
+        "CONF_ALLOW_EXPERIMENTAL_DETECTORS",
+    ):
+        assert missing in src, f"cloud_consent missing {missing}"
+
+
+@t("insight: dismissed_at now first-class on the dataclass")
+def _():
+    src = _read("custom_components/ha_insights/insight.py")
+    # Defined as a field with default None
+    assert "dismissed_at: datetime | None = None" in src
+    # Serialized in to_dict for WS round-trip
+    assert '"dismissed_at"' in src
+
+
+@t("adaptive: uses Insight.dismissed_at, not getattr fallback")
+def _():
+    src = _read("custom_components/ha_insights/notifications/adaptive.py")
+    # Old broken pattern is gone
+    assert 'getattr(i, "dismissed_at"' not in src
+    # New direct attribute access
+    assert "i.dismissed_at is not None" in src
+
+
+@t("store: _row_to_insight reads dismissed_at column")
+def _():
+    src = _read("custom_components/ha_insights/store/store.py")
+    assert 'row["dismissed_at"]' in src
+    # Defensive: tolerates older rows where the column key isn't set
+    assert '"dismissed_at" in row.keys()' in src
+
+
+@t("ws: SUPPORTED_METHODS matches actually-registered handlers")
+def _():
+    """Every ws_api.async_register_command call should have a
+    corresponding entry in SUPPORTED_METHODS. Mismatches mean the
+    hello handshake lies to the card about what's available."""
+    import re
+
+    src = _read("custom_components/ha_insights/ws_api.py")
+    # Pull registered names
+    registered = set(
+        re.findall(r"async_register_command\(hass, ws_(\w+)\)", src)
+    )
+    # Pull SUPPORTED_METHODS strings
+    methods_block = re.search(
+        r"SUPPORTED_METHODS = \(([\s\S]*?)\)", src
+    )
+    assert methods_block, "SUPPORTED_METHODS tuple not found"
+    advertised = set(re.findall(r'"([\w_]+)"', methods_block.group(1)))
+    missing = registered - advertised
+    assert not missing, (
+        f"registered but not advertised: {sorted(missing)}"
+    )
+
+
+@t("OptionsFlow: __init__ initializes audit fields defensively")
+def _():
+    src = _read("custom_components/ha_insights/config_flow.py")
+    for field in (
+        "self._audit_rollup_window_days: int =",
+        "self._audit_analysis_depth: str =",
+        "self._audit_monthly_budget_usd: float =",
+        "self._audit_auto_rollup_enabled: bool =",
+    ):
+        assert field in src, f"missing init: {field}"
+
+
 @t("panel: setup + unload only call async_remove_panel when registered")
 def _():
     """Regression for the recurring 'Removing unknown panel ha-insights'

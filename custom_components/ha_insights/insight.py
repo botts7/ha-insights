@@ -96,6 +96,13 @@ class Insight:
     # to every configured target. Multi-user HA installs need this so
     # "your phone is about to die" reaches the phone's actual owner.
     target_user_id: str | None = None
+    # v1.4: timestamp the insight was dismissed by the user, if any.
+    # The store has had a `dismissed_at` column since v1 but the
+    # Insight dataclass never exposed it — readers had to query the
+    # store directly. Adaptive notification tuner needs this on the
+    # dataclass so it can compute dismiss-rate without an extra
+    # round-trip. None for active / applied insights.
+    dismissed_at: datetime | None = None
     # How confident the detector is that `target_user_id` is the
     # right owner of this pattern. Independent of the pattern's own
     # `confidence` field (which measures signal strength). Examples:
@@ -152,6 +159,9 @@ class Insight:
             "vendor": self.vendor,
             "target_user_id": self.target_user_id,
             "target_user_id_confidence": self.target_user_id_confidence,
+            "dismissed_at": (
+                self.dismissed_at.isoformat() if self.dismissed_at else None
+            ),
         }
 
     @classmethod

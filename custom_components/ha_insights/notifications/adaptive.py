@@ -117,14 +117,12 @@ async def tune_adaptive_floor(
     # insights count toward neither (the user hasn't acted yet —
     # we can't say if it was useful or annoying).
     applied = sum(1 for i in in_window if i.applied_at is not None)
+    # v1.4: `dismissed_at` is now a first-class field on Insight, so
+    # we can detect dismissals without a separate store query.
     dismissed = sum(
         1
         for i in in_window
-        # `dismissed_at` isn't on the dataclass currently; store
-        # exposes it via list filters. Inferred: an insight that
-        # the user filtered out from the active list AND that
-        # wasn't applied is dismissed.
-        if i.applied_at is None and getattr(i, "dismissed_at", None) is not None
+        if i.applied_at is None and i.dismissed_at is not None
     )
     scored = applied + dismissed
     if scored < _MIN_SAMPLES:

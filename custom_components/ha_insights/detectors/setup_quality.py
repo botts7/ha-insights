@@ -261,9 +261,14 @@ class SetupQualityDetector(Detector):
     async def scan(self, ctx: DetectorContext) -> list[Insight]:
         insights: list[Insight] = []
         per_feature_tiers: list[tuple[str, str]] = []
+        # Carry recipe + advice along with the tier so the rollup can
+        # surface USELESS gaps inline (the per-feature card path
+        # intentionally skips USELESS — see _build_feature_insight).
+        per_feature_full: list[tuple[dict[str, Any], str, str]] = []
         for recipe in _RECIPES:
             tier, advice, details = self._evaluate_recipe(ctx, recipe)
             per_feature_tiers.append((recipe["name"], tier))
+            per_feature_full.append((recipe, tier, advice))
             insight = self._build_feature_insight(
                 recipe=recipe,
                 tier=tier,
@@ -273,8 +278,13 @@ class SetupQualityDetector(Detector):
             if insight is not None:
                 insights.append(insight)
 
-        # Roll-up summary
-        summary = self._build_summary_insight(per_feature_tiers)
+        # Roll-up summary — receives full eval so it can list the
+        # USELESS gaps inline (since those are no longer their own
+        # cards). This is the ONE place a brand-new install will see
+        # what's worth setting up.
+        summary = self._build_summary_insight(
+            per_feature_tiers, per_feature_full
+        )
         if summary is not None:
             insights.append(summary)
         return insights
@@ -313,10 +323,12 @@ class SetupQualityDetector(Detector):
         advice: str,
         details: list[str],
     ) -> Insight | None:
-        # Skip emitting GREAT (everything is fine — no actionable
-        # advice). Users only need to see what needs improvement +
-        # what's working at a baseline.
-        if tier == "GREAT":
+        # Skip emitting GREAT (no actionable advice) AND USELESS
+        # (folded into the rollup so the panel doesn't get spammed
+        # with "fix this" cards for features the user hasn't enabled
+        # yet). LIMITED + GOOD still get per-feature cards — they're
+        # progress signals worth seeing on their own.
+        if tier in ("GREAT", "USELESS"):
             return None
         tier_emoji = {
             "USELESS": "🔴",
@@ -380,6 +392,7 @@ class SetupQualityDetector(Detector):
     def _build_summary_insight(
         self,
         per_feature_tiers: list[tuple[str, str]],
+        per_feature_full: list[tuple[dict[str, Any], str, str]] | None = None,
     ) -> Insight | None:
         if not per_feature_tiers:
             return None
@@ -393,11 +406,67 @@ class SetupQualityDetector(Detector):
             + counts["GOOD"] * 0.66
             + counts["GREAT"] * 1.0
         ) / max(1, n)
-        title = (
-            f"Setup quality: {counts['GREAT']} GREAT, {counts['GOOD']} GOOD, "
-            f"{counts['LIMITED']} LIMITED, {counts['USELESS']} USELESS "
-            f"(overall {score*100:.0f}%)"
-        )
+
+        # If everything is GREAT, suppress the rollup entirely — there's
+        # nothing actionable here, and the panel doesn't need a "100%
+        # all good" badge cluttering it.
+        if counts["USELESS"] == 0 and counts["LIMITED"] == 0:
+            return None
+
+        # USELESS items are no longer their own cards. Surface them
+        # INLINE in the rollup so the user sees the actionable
+        # next-steps in one place.
+        useless_items: list[tuple[str, str]] = []  # (feature, next_step)
+        if per_feature_full:
+            for recipe, tier, _advice in per_feature_full:
+                if tier == "USELESS":
+                    useless_items.append(
+                        (recipe["name"], recipe.get("next_step", ""))
+                    )
+
+        # Title leads with the count of fixable gaps — most actionable
+        # framing. Falls back to the old score-only title when nothing
+        # is fixable (LIMITED-only setups).
+        if useless_items:
+            title = (
+                f"⚙️ Setup health {score*100:.0f}%: "
+                f"{len(useless_items)} thing"
+                f"{'s' if len(useless_items) > 1 else ''} would unlock "
+                "high-impact detectors. Tap for next steps."
+            )
+        else:
+            title = (
+                f"⚙️ Setup health {score*100:.0f}%: "
+                f"{counts['LIMITED']} feature"
+                f"{'s' if counts['LIMITED'] > 1 else ''} could be improved."
+            )
+
+        # Explanation lists each USELESS gap + its one-line action,
+        # then notes the LIMITED + GOOD progress. The user sees this
+        # under the title without expanding the payload.
+        lines: list[str] = []
+        if useless_items:
+            lines.append("Not yet unlocked (tap each to learn more):")
+            for feature, step in useless_items:
+                if step:
+                    lines.append(f"  • {feature} — {step}")
+                else:
+                    lines.append(f"  • {feature}")
+        if counts["LIMITED"]:
+            lines.append("")
+            lines.append(
+                f"In progress: {counts['LIMITED']} feature"
+                f"{'s' if counts['LIMITED'] > 1 else ''} "
+                "(see the per-feature card below for next step)."
+            )
+        if counts["GREAT"]:
+            lines.append("")
+            lines.append(
+                f"Working great: {counts['GREAT']} feature"
+                f"{'s' if counts['GREAT'] > 1 else ''}."
+            )
+        explanation = "\n".join(lines)
+
         fingerprint = {"kind": "setup_quality_summary"}
         payload = {
             "score": round(score, 3),
@@ -406,10 +475,13 @@ class SetupQualityDetector(Detector):
                 {"feature": name, "tier": tier}
                 for name, tier in per_feature_tiers
             ],
+            "useless_next_steps": [
+                {"feature": f, "next_step": s} for f, s in useless_items
+            ],
             "advice": (
-                "Each feature has a per-tier breakdown above (LIMITED / "
-                "USELESS rows). Address those first — they unlock the "
-                "highest-impact detectors. GREAT tiers don't need anything."
+                "Address the 'Not yet unlocked' items first — each is a "
+                "one-step setup change that activates a detector you "
+                "don't have right now."
             ),
         }
         return Insight(
@@ -418,9 +490,13 @@ class SetupQualityDetector(Detector):
             detector=self.name,
             area_id=None,
             title=title,
-            confidence=0.9,
+            # Slightly lower than the per-feature confidence so the
+            # rollup sorts BELOW any LIMITED/GOOD per-feature cards
+            # when sorted by confidence (those are more actionable).
+            confidence=0.6 if useless_items else 0.4,
             fingerprint=fingerprint,
             payload=payload,
             payload_format="report",
+            explanation=explanation,
             created_at=datetime.now(tz=UTC),
         )

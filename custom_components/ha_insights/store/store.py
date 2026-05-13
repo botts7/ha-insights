@@ -607,6 +607,11 @@ class InsightStore:
                 if "target_user_id_confidence" in row.keys()
                 else None
             ),
+            dismissed_at=(
+                datetime.fromtimestamp(row["dismissed_at"], tz=UTC)
+                if "dismissed_at" in row.keys() and row["dismissed_at"]
+                else None
+            ),
         )
 
     # --- Pseudonym map ---
