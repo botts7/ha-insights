@@ -14,6 +14,7 @@ from homeassistant.helpers import entity_registry as er
 from . import ws_api
 from .config_flow import (
     get_allow_user_detectors,
+    get_analytics_settings,
     get_digest_settings,
     get_lookback_days,
     get_mobile_notify_policy,
@@ -219,6 +220,40 @@ async def _setup_entry_body(
         schedule_digest(hass, store, hour=digest_hour) if digest_enabled else None
     )
 
+    # v1.4: Community analytics — weekly POST of aggregate counts
+    # to the project receiver. OFF by default; only fires when the
+    # user explicitly opts in via the OptionsFlow. Schedule is
+    # Monday 04:00 local (low-traffic, after the digest hour).
+    analytics_enabled, analytics_endpoint = get_analytics_settings(entry)
+    unsub_analytics = None
+    if analytics_enabled:
+        from homeassistant.helpers.event import async_track_time_change
+
+        from .analytics import send_report
+
+        @callback
+        def _on_analytics_tick(_now) -> None:
+            # ISO weekday 1=Monday. async_track_time_change doesn't
+            # have a weekday filter, so we gate inside the callback.
+            from datetime import datetime as _dt
+
+            if _dt.now().isoweekday() != 1:
+                return
+            entry.async_create_background_task(
+                hass,
+                send_report(
+                    hass,
+                    entry,
+                    store,
+                    endpoint=analytics_endpoint or None,
+                ),
+                name=f"{DOMAIN}_analytics_send",
+            )
+
+        unsub_analytics = async_track_time_change(
+            hass, _on_analytics_tick, hour=4, minute=0, second=0
+        )
+
     # v1.4: Adaptive notification tuner. Schedules a daily nudge at
     # 03:00 local that reads recent dismiss/apply outcomes and
     # adjusts the mobile-push confidence floor accordingly. No-op
@@ -250,6 +285,7 @@ async def _setup_entry_body(
         "unsub_store": unsub_store,
         "unsub_digest": unsub_digest,
         "unsub_adaptive": unsub_adaptive,
+        "unsub_analytics": unsub_analytics,
         "last_backfill": None,
         "backfill_running": False,
     }
@@ -1249,6 +1285,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         data["unsub_digest"]()
     if data.get("unsub_adaptive") is not None:
         data["unsub_adaptive"]()
+    if data.get("unsub_analytics") is not None:
+        data["unsub_analytics"]()
     # Phase D scheduler cleanup. Cancelling unregisters the time-interval
     # listener so we don't keep firing scans after unload.
     if data.get("scan_scheduler_cancel") is not None:

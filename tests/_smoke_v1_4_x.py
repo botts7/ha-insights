@@ -647,6 +647,71 @@ def _():
     assert "return await self.async_step_advanced()" in src
 
 
+# ---- Community analytics stub ----
+
+
+@t("analytics: module defines schema + privacy-safe payload builder")
+def _():
+    src = _read("custom_components/ha_insights/analytics.py")
+    assert "DEFAULT_ANALYTICS_ENDPOINT" in src
+    assert "def build_report_payload(" in src
+    assert "def get_or_create_install_uuid(" in src
+    # Privacy contract is documented + enforced (the structural
+    # surface the receiver sees)
+    assert '"schema_version": 1' in src
+    assert '"detector_outcomes"' in src
+    assert "No entity names" in src
+    assert "No insight titles" in src
+
+
+@t("analytics: payload includes maturity tier per detector")
+def _():
+    src = _read("custom_components/ha_insights/analytics.py")
+    # The receiver tracks tier distribution so we can graduate
+    # experimental detectors based on real apply rates.
+    assert '"maturity": maturity_by_detector.get(' in src
+
+
+@t("analytics: opt-in config keys + getter defined")
+def _():
+    src = _read("custom_components/ha_insights/config_flow.py")
+    assert 'CONF_ANALYTICS_ENABLED = "analytics_enabled"' in src
+    assert 'CONF_ANALYTICS_ENDPOINT = "analytics_endpoint"' in src
+    assert "DEFAULT_ANALYTICS_ENABLED = False" in src
+    assert "def get_analytics_settings(" in src
+
+
+@t("analytics: WS preview endpoint lets users inspect payload before opting in")
+def _():
+    src = _read("custom_components/ha_insights/ws_api.py")
+    assert "ws_analytics_preview" in src
+    assert '"analytics_preview"' in src  # in SUPPORTED_METHODS
+    # Returns the EXACT payload + the default endpoint so users
+    # can decide before flipping the switch
+    assert "build_report_payload" in src
+    assert "default_endpoint" in src
+
+
+@t("analytics: weekly scheduler fires Monday 04:00 local when enabled")
+def _():
+    src = _read("custom_components/ha_insights/__init__.py")
+    assert "unsub_analytics" in src
+    assert "from .analytics import send_report" in src
+    # Gated on opt-in
+    assert "if analytics_enabled:" in src
+    # Monday-only inside the daily-tick callback
+    assert "isoweekday() != 1" in src
+
+
+@t("analytics: best-effort POST — failures must not break the integration")
+def _():
+    src = _read("custom_components/ha_insights/analytics.py")
+    # Catch-all around the POST + log at DEBUG (not exception)
+    assert "best-effort" in src
+    # Timeout is hard-bounded so a slow receiver doesn't stall HA
+    assert "_REQUEST_TIMEOUT_SEC" in src
+
+
 # ---- Run + report ----
 
 passed = sum(1 for _, s, _ in results if s == "PASS")

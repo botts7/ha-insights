@@ -69,6 +69,7 @@ SUPPORTED_METHODS = (
     "detector_directory",
     "inject_examples",
     "clear_examples",
+    "analytics_preview",
 )
 
 
@@ -104,6 +105,7 @@ def async_register(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_detector_directory)
     websocket_api.async_register_command(hass, ws_inject_examples)
     websocket_api.async_register_command(hass, ws_clear_examples)
+    websocket_api.async_register_command(hass, ws_analytics_preview)
 
 
 def _get_store(
@@ -3381,3 +3383,52 @@ async def ws_clear_examples(
         connection.send_error(msg["id"], "clear_failed", str(err))
         return
     connection.send_result(msg["id"], {"removed": removed})
+
+
+# -- Community analytics preview --
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "home_insights/analytics_preview",
+    }
+)
+@websocket_api.async_response
+async def ws_analytics_preview(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Return the EXACT payload that would be POSTed to the
+    community analytics receiver. The user can inspect this in the
+    panel BEFORE enabling — every field is auditable.
+
+    Returns None (no transmission) — this is purely informational.
+    """
+    store = _get_store(hass)
+    if store is None:
+        connection.send_error(msg["id"], "not_set_up", "Store not initialized")
+        return
+    entries = hass.config_entries.async_entries(DOMAIN)
+    if not entries:
+        connection.send_error(
+            msg["id"], "no_entry", "No HA Insights entry found"
+        )
+        return
+    try:
+        from .analytics import (
+            DEFAULT_ANALYTICS_ENDPOINT,
+            build_report_payload,
+        )
+
+        payload = await build_report_payload(hass, entries[0], store)
+        connection.send_result(
+            msg["id"],
+            {
+                "payload": payload,
+                "default_endpoint": DEFAULT_ANALYTICS_ENDPOINT,
+            },
+        )
+    except Exception as err:  # noqa: BLE001
+        _LOGGER.exception("analytics_preview failed")
+        connection.send_error(msg["id"], "preview_failed", str(err))

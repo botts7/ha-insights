@@ -163,6 +163,15 @@ DEFAULT_ALLOW_USER_DETECTORS = False
 # escape hatch.
 CONF_ALLOW_EXPERIMENTAL_DETECTORS = "allow_experimental_detectors"
 DEFAULT_ALLOW_EXPERIMENTAL_DETECTORS = False
+# v1.4: opt-in community analytics. Sends weekly aggregates (detector
+# fire/apply/dismiss counts, never PII) so the project can see how
+# detectors perform in the wild and graduate experimental ones to
+# beta/stable. See custom_components/ha_insights/analytics.py for
+# the full payload contract — it's auditable.
+CONF_ANALYTICS_ENABLED = "analytics_enabled"
+DEFAULT_ANALYTICS_ENABLED = False
+CONF_ANALYTICS_ENDPOINT = "analytics_endpoint"
+DEFAULT_ANALYTICS_ENDPOINT_PLACEHOLDER = ""  # "" = use module default
 DEFAULT_LOOKBACK_DAYS = 14
 LOOKBACK_DAYS_RANGE = (0, 30)  # 0 disables backfill entirely
 DEFAULT_NOTIFY_ON_INSIGHT = True
@@ -442,6 +451,25 @@ def get_allow_user_detectors(entry: ConfigEntry) -> bool:
         entry.data.get(CONF_ALLOW_USER_DETECTORS, DEFAULT_ALLOW_USER_DETECTORS),
     )
     return bool(raw)
+
+
+def get_analytics_settings(
+    entry: ConfigEntry,
+) -> tuple[bool, str]:
+    """Resolve (enabled, endpoint_override). Endpoint of "" means
+    "use the module default" — kept as a string in options so
+    self-hosters can paste their own receiver URL without forking."""
+    enabled_raw = entry.options.get(
+        CONF_ANALYTICS_ENABLED,
+        entry.data.get(CONF_ANALYTICS_ENABLED, DEFAULT_ANALYTICS_ENABLED),
+    )
+    endpoint_raw = entry.options.get(
+        CONF_ANALYTICS_ENDPOINT,
+        entry.data.get(
+            CONF_ANALYTICS_ENDPOINT, DEFAULT_ANALYTICS_ENDPOINT_PLACEHOLDER
+        ),
+    )
+    return bool(enabled_raw), str(endpoint_raw or "").strip()
 
 
 def get_allow_experimental_detectors(entry: ConfigEntry) -> bool:
@@ -813,6 +841,8 @@ class HaInsightsOptionsFlow(OptionsFlow):
         self._allow_experimental_detectors: bool = (
             DEFAULT_ALLOW_EXPERIMENTAL_DETECTORS
         )
+        self._analytics_enabled: bool = DEFAULT_ANALYTICS_ENABLED
+        self._analytics_endpoint: str = DEFAULT_ANALYTICS_ENDPOINT_PLACEHOLDER
         self._enabled_detectors: list[str] | None = None
         self._scan_areas: list[str] = []
         self._scan_interval_hours: int = DEFAULT_SCAN_INTERVAL_HOURS
@@ -1015,6 +1045,9 @@ class HaInsightsOptionsFlow(OptionsFlow):
         current_allow_experimental = get_allow_experimental_detectors(
             self.config_entry
         )
+        current_analytics_enabled, current_analytics_endpoint = (
+            get_analytics_settings(self.config_entry)
+        )
         # Phase B/C/D scan controls. Default to "all detectors run" when the
         # user hasn't customized (preserve v1.0 → v1.1 upgrade behavior).
         current_enabled_detectors = get_enabled_detectors(self.config_entry)
@@ -1117,6 +1150,16 @@ class HaInsightsOptionsFlow(OptionsFlow):
                     current_allow_experimental,
                 )
             )
+            self._analytics_enabled = bool(
+                user_input.get(
+                    CONF_ANALYTICS_ENABLED, current_analytics_enabled
+                )
+            )
+            self._analytics_endpoint = str(
+                user_input.get(
+                    CONF_ANALYTICS_ENDPOINT, current_analytics_endpoint
+                )
+            )
             # Phase B: enabled detectors. If the user submits exactly the
             # same set as "all known detectors", store None to keep the
             # back-compat semantics (None == all). Otherwise store the
@@ -1190,6 +1233,8 @@ class HaInsightsOptionsFlow(OptionsFlow):
                     CONF_ALLOW_EXPERIMENTAL_DETECTORS: (
                         self._allow_experimental_detectors
                     ),
+                    CONF_ANALYTICS_ENABLED: self._analytics_enabled,
+                    CONF_ANALYTICS_ENDPOINT: self._analytics_endpoint,
                     CONF_ENABLED_DETECTORS: self._enabled_detectors,
                     CONF_SCAN_AREAS: self._scan_areas,
                     CONF_SCAN_INTERVAL_HOURS: self._scan_interval_hours,
@@ -1320,6 +1365,21 @@ class HaInsightsOptionsFlow(OptionsFlow):
                     CONF_ALLOW_EXPERIMENTAL_DETECTORS,
                     default=current_allow_experimental,
                 ): bool,
+                # v1.4: opt-in community analytics. Sends anonymous
+                # weekly aggregate counts (detector fire/apply/dismiss
+                # per maturity tier, install UUID, integration version,
+                # HA major.minor). Never PII, never payloads. Use the
+                # WS preview endpoint to inspect the exact bytes
+                # before enabling. Empty endpoint = use the project's
+                # default URL.
+                vol.Optional(
+                    CONF_ANALYTICS_ENABLED,
+                    default=current_analytics_enabled,
+                ): bool,
+                vol.Optional(
+                    CONF_ANALYTICS_ENDPOINT,
+                    default=current_analytics_endpoint,
+                ): str,
                 # Phase B: per-detector enable/disable. Defaults to the
                 # full set when the user hasn't customized; explicit
                 # selection persists their choice. If the user selects
@@ -1409,6 +1469,8 @@ class HaInsightsOptionsFlow(OptionsFlow):
                     CONF_ALLOW_EXPERIMENTAL_DETECTORS: (
                         self._allow_experimental_detectors
                     ),
+                    CONF_ANALYTICS_ENABLED: self._analytics_enabled,
+                    CONF_ANALYTICS_ENDPOINT: self._analytics_endpoint,
                         CONF_ENABLED_DETECTORS: self._enabled_detectors,
                         CONF_SCAN_AREAS: self._scan_areas,
                         CONF_SCAN_INTERVAL_HOURS: self._scan_interval_hours,
