@@ -40,6 +40,12 @@ class InsightKind(StrEnum):
     # "automation linter" output. payload_format="report" or "automation"
     # depending on whether we just describe the issue or propose a fix.
     AUTOMATION_IMPROVEMENT = "automation_improvement"
+    # v1.3: observational findings that aren't directly actionable. Used
+    # by detectors that describe a pattern the user might want to know
+    # about but where the "what to do" is left to the user's judgement
+    # (presence inference, sleep/wake windows, weekday habit deltas,
+    # data-quality tier reports). payload_format is typically "report".
+    PATTERN_OBSERVATION = "pattern_observation"
 
 
 # "report" — informational finding, payload describes the issue but isn't

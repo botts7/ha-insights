@@ -745,6 +745,39 @@ def _():
     assert "get_or_create_install_uuid(entry, hass=hass)" in src
 
 
+@t("insight: every InsightKind referenced by a detector exists in the enum")
+def _():
+    """Regression for the v1.4.0 deploy failure where four detectors
+    referenced InsightKind.PATTERN_OBSERVATION which wasn't in the
+    enum, crashing the integration at module load. Walks every
+    detector file, extracts InsightKind.* references, and asserts
+    each one is defined."""
+    import re
+
+    src = _read("custom_components/ha_insights/insight.py")
+    # Extract enum names from the file
+    defined = set(re.findall(r"^\s+([A-Z_]+) = \"", src, flags=re.MULTILINE))
+    assert "PATTERN_OBSERVATION" in defined, (
+        "PATTERN_OBSERVATION must be in InsightKind"
+    )
+    # Now sweep every detector for references and confirm coverage
+    import os
+
+    refs: set[str] = set()
+    det_dir = "custom_components/ha_insights/detectors"
+    for fname in os.listdir(det_dir):
+        if not fname.endswith(".py"):
+            continue
+        body = _read(f"{det_dir}/{fname}")
+        for match in re.findall(r"InsightKind\.([A-Z_]+)", body):
+            refs.add(match)
+    missing = refs - defined
+    assert not missing, (
+        f"InsightKind values referenced by detectors but missing from "
+        f"the enum: {missing}"
+    )
+
+
 @t("stability: schema migration tolerates duplicate-column re-runs")
 def _():
     src = _read("custom_components/ha_insights/store/store.py")

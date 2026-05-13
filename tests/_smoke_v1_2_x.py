@@ -230,10 +230,12 @@ def _():
     assert "async_get_integration" in src
 
 
-@t("manifest: at v1.2.0")
+@t("manifest: at v1.4.x")
 def _():
     m = json.load(open("custom_components/ha_insights/manifest.json"))
-    assert m["version"] == "1.2.0", f'manifest version {m["version"]} != 1.2.0'
+    assert m["version"].startswith("1.4."), (
+        f'manifest version {m["version"]} not in 1.4.x line'
+    )
 
 
 @t("card: refresh-from-event handler exists")
