@@ -318,11 +318,16 @@ async def run_all_detectors(
         )
 
     enabled = None
+    allow_experimental = False
     if entry is not None:
         # Lazy import to avoid circular at module-load time.
-        from ..config_flow import get_enabled_detectors
+        from ..config_flow import (
+            get_allow_experimental_detectors,
+            get_enabled_detectors,
+        )
 
         enabled = get_enabled_detectors(entry)
+        allow_experimental = get_allow_experimental_detectors(entry)
 
     buffer_size = (
         len(ctx.event_buffer.snapshot()) if ctx.event_buffer is not None else 0
@@ -347,11 +352,32 @@ async def run_all_detectors(
         if enabled is not None and name not in enabled:
             _LOGGER.debug("Detector %r disabled by config; skipping", name)
             continue
+        # Experimental gate. Detectors marked Maturity.EXPERIMENTAL
+        # only run when the user has flipped the global opt-in OR
+        # explicitly named the detector in CONF_ENABLED_DETECTORS.
+        # Off by default so new installs aren't surprised by
+        # unverified output. Lazy import — Maturity is only needed
+        # if we have at least one EXPERIMENTAL detector registered.
+        from .base import Maturity as _Maturity
+
+        explicitly_enabled = enabled is not None and name in enabled
+        if (
+            getattr(detector_cls, "maturity", _Maturity.STABLE)
+            == _Maturity.EXPERIMENTAL
+            and not allow_experimental
+            and not explicitly_enabled
+        ):
+            _LOGGER.debug(
+                "Skipping experimental detector %r: opt-in required "
+                "(set allow_experimental_detectors or add to "
+                "CONF_ENABLED_DETECTORS)",
+                name,
+            )
+            continue
         # Self-protective: skip detectors whose declared scale ceiling
         # is below current buffer size. User can override via explicit
         # opt-in in CONF_ENABLED_DETECTORS.
         max_buf = getattr(detector_cls, "max_buffer_for_full_scan", None)
-        explicitly_enabled = enabled is not None and name in enabled
         if max_buf is not None and buffer_size > max_buf and not explicitly_enabled:
             _LOGGER.info(
                 "HA Insights skipping detector %r: buffer %d > scale ceiling %d. "

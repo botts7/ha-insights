@@ -10,10 +10,38 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from enum import StrEnum
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from ..insight import Insight, InsightKind
 from ..observers.state_event_buffer import StateEventBuffer
+
+
+class Maturity(StrEnum):
+    """Three-tier maturity flag surfaced on every Detector.
+
+    The flag answers the question "should I trust this detector's
+    output?" — orthogonal to whether the detector is ENABLED.
+
+      - STABLE: shipped in a prior release, no major bugs reported,
+        verified against real data. Auto-enabled. No badge.
+      - BETA: functionally complete + tested, but may have edges.
+        Auto-enabled with a dismissable banner. 🟡 badge.
+      - EXPERIMENTAL: works in theory, not field-verified. Disabled
+        by default; user must explicitly opt in via the experimental
+        toggle in OptionsFlow OR by adding the detector name to
+        CONF_ENABLED_DETECTORS. 🧪 badge on every emitted insight,
+        with a "was this useful?" prompt.
+
+    Promotion path (manual for now, automatable once analytics
+    lands): track apply / dismiss ratios per detector across the
+    fleet; promote EXPERIMENTAL → BETA when ≥ N installs use it
+    with ≥ X% apply rate and no HIGH-severity bugs in N weeks.
+    """
+
+    STABLE = "stable"
+    BETA = "beta"
+    EXPERIMENTAL = "experimental"
 
 if TYPE_CHECKING:
     from homeassistant.core import Event, HomeAssistant
@@ -94,6 +122,11 @@ class Detector(ABC):
     name: ClassVar[str]
     kind: ClassVar[InsightKind]
     requires_recorder: ClassVar[bool] = False
+    # Maturity tier — see the Maturity enum docstring for the
+    # semantics. Defaults to STABLE because the default makes the
+    # detector visible. Brand-new detectors should explicitly set
+    # this to BETA or EXPERIMENTAL until they've earned promotion.
+    maturity: ClassVar[Maturity] = Maturity.STABLE
     # Human-readable summary surfaced in the OptionsFlow + WS for users
     # so they can decide if it's worth enabling. Should answer "what
     # does this detector actually do for me?" in one sentence.

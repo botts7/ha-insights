@@ -52,7 +52,7 @@ from typing import TYPE_CHECKING, Any
 from homeassistant.util import dt as dt_util
 
 from ..insight import Insight, InsightKind
-from .base import Detector, DetectorContext, register_detector
+from .base import Detector, DetectorContext, Maturity, register_detector
 
 if TYPE_CHECKING:
     from ..observers.state_event_buffer import StateEvent
@@ -82,6 +82,7 @@ class PhoneChargeReminderDetector(Detector):
     name = "phone_charge_reminder"
     kind = InsightKind.AUTOMATION_PROPOSAL
     requires_recorder = False
+    maturity = Maturity.EXPERIMENTAL
     description = (
         "Predicts whether your phone will run flat before bedtime / home "
         "arrival using your evening drain rate, and suggests a "

@@ -39,7 +39,7 @@ from typing import TYPE_CHECKING, Any
 from homeassistant.util import dt as dt_util
 
 from ..insight import Insight, InsightKind
-from .base import Detector, DetectorContext, register_detector
+from .base import Detector, DetectorContext, Maturity, register_detector
 
 if TYPE_CHECKING:
     from ..observers.state_event_buffer import StateEvent
@@ -67,6 +67,7 @@ class WeatherCorrelationDetector(Detector):
     name = "weather_correlation"
     kind = InsightKind.AUTOMATION_PROPOSAL
     requires_recorder = False
+    maturity = Maturity.EXPERIMENTAL
     description = (
         "Finds habit timings that shift with weather — earlier kitchen "
         "lights on rainy days, coffee earlier on cold mornings, etc — "

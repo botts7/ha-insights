@@ -67,6 +67,8 @@ SUPPORTED_METHODS = (
     "refine_automation",
     "apply_automation_refinement",
     "detector_directory",
+    "inject_examples",
+    "clear_examples",
 )
 
 
@@ -100,6 +102,8 @@ def async_register(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_apply_automation_refinement)
     websocket_api.async_register_command(hass, ws_audit_suggest)
     websocket_api.async_register_command(hass, ws_detector_directory)
+    websocket_api.async_register_command(hass, ws_inject_examples)
+    websocket_api.async_register_command(hass, ws_clear_examples)
 
 
 def _get_store(
@@ -3269,6 +3273,15 @@ def ws_detector_directory(
         if tier == "GOOD" and optional_status:
             if any(o["satisfied"] for o in optional_status):
                 tier = "GREAT"
+        # Maturity tier — defaults to "stable" for detectors that
+        # don't declare it. The panel renders 🟡 BETA / 🧪 EXPERIMENTAL
+        # badges from this value.
+        maturity_obj = getattr(cls, "maturity", None)
+        maturity = (
+            maturity_obj.value
+            if maturity_obj is not None and hasattr(maturity_obj, "value")
+            else "stable"
+        )
         out.append(
             {
                 "name": name,
@@ -3282,6 +3295,89 @@ def ws_detector_directory(
                 "required_data": required_status,
                 "optional_data": optional_status,
                 "tier": tier,
+                "maturity": maturity,
             }
         )
     connection.send_result(msg["id"], {"detectors": out})
+
+
+# -- Example data (first-run demo) --
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "home_insights/inject_examples",
+    }
+)
+@websocket_api.async_response
+async def ws_inject_examples(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Populate the store with a curated set of EXAMPLE insights so a
+    brand-new install can see what the panel looks like before its
+    own data accumulates. Each example carries
+    `payload._example = True` so the card can render an EXAMPLE pill
+    and `clear_examples` can remove them in one query. Idempotent —
+    re-injecting replaces existing examples with the same fingerprints.
+    """
+    store = _get_store(hass)
+    if store is None:
+        connection.send_error(msg["id"], "not_set_up", "Store not initialized")
+        return
+    from .examples import build_example_insights
+
+    added = 0
+    try:
+        for ins in build_example_insights():
+            await store.add_insight(ins)
+            added += 1
+    except Exception as err:  # noqa: BLE001
+        _LOGGER.exception("inject_examples failed")
+        connection.send_error(msg["id"], "inject_failed", str(err))
+        return
+    connection.send_result(msg["id"], {"injected": added})
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "home_insights/clear_examples",
+    }
+)
+@websocket_api.async_response
+async def ws_clear_examples(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Remove every example insight from the store. Looks for
+    `payload._example = True` to identify them — real insights never
+    set that key. Returns the deletion count.
+    """
+    store = _get_store(hass)
+    if store is None:
+        connection.send_error(msg["id"], "not_set_up", "Store not initialized")
+        return
+    from .examples import EXAMPLE_PAYLOAD_KEY
+
+    removed = 0
+    try:
+        # No bulk-delete-by-payload helper in the store; walk the
+        # active + dismissed lists, dismiss each example. The next
+        # scan's sweep will GC them once we add a hard-delete API.
+        # For now, dismissing is enough to hide from the panel.
+        all_ins = await store.list_insights(
+            include_dismissed=True,
+            include_applied=True,
+            include_snoozed=True,
+        )
+        for ins in all_ins:
+            if ins.payload.get(EXAMPLE_PAYLOAD_KEY) is True:
+                await store.dismiss_insight(ins.id)
+                removed += 1
+    except Exception as err:  # noqa: BLE001
+        _LOGGER.exception("clear_examples failed")
+        connection.send_error(msg["id"], "clear_failed", str(err))
+        return
+    connection.send_result(msg["id"], {"removed": removed})

@@ -497,6 +497,93 @@ def _():
     assert "get_adaptive_floor" in src
 
 
+# ---- Maturity flag + experimental gate ----
+
+
+@t("maturity: enum exposes STABLE/BETA/EXPERIMENTAL")
+def _():
+    src = _read("custom_components/ha_insights/detectors/base.py")
+    assert "class Maturity(StrEnum)" in src
+    assert 'STABLE = "stable"' in src
+    assert 'BETA = "beta"' in src
+    assert 'EXPERIMENTAL = "experimental"' in src
+    # Detector base declares the field with safe default
+    assert "maturity: ClassVar[Maturity] = Maturity.STABLE" in src
+
+
+@t("maturity: phone_charge_reminder + weather_correlation are EXPERIMENTAL")
+def _():
+    for fname in (
+        "phone_charge_reminder.py",
+        "weather_correlation.py",
+    ):
+        src = _read(f"custom_components/ha_insights/detectors/{fname}")
+        assert "maturity = Maturity.EXPERIMENTAL" in src, f"{fname} missing"
+
+
+@t("maturity: experimental detectors gated off by default in scan loop")
+def _():
+    src = _read("custom_components/ha_insights/detectors/__init__.py")
+    assert "allow_experimental" in src
+    assert "_Maturity.EXPERIMENTAL" in src
+    # Gate is bypassed when user explicitly enabled the detector
+    assert "and not explicitly_enabled" in src
+
+
+@t("maturity: config_flow getter + opt-in default False")
+def _():
+    src = _read("custom_components/ha_insights/config_flow.py")
+    assert "CONF_ALLOW_EXPERIMENTAL_DETECTORS" in src
+    assert "DEFAULT_ALLOW_EXPERIMENTAL_DETECTORS = False" in src
+    assert "def get_allow_experimental_detectors" in src
+
+
+@t("maturity: ws detector_directory returns maturity per detector")
+def _():
+    src = _read("custom_components/ha_insights/ws_api.py")
+    assert '"maturity": maturity' in src
+
+
+# ---- Try with example data ----
+
+
+@t("examples: fixture module returns sample insights covering kinds")
+def _():
+    """Structural test — load examples.py source and confirm
+    `build_example_insights` exists, returns multiple records, and
+    every record has the EXAMPLE_PAYLOAD_KEY marker. Importing the
+    module directly fails due to its relative `from .insight`
+    import, so we test the source surface instead."""
+    src = _read("custom_components/ha_insights/examples.py")
+    assert "def build_example_insights() -> list[Insight]:" in src
+    assert "EXAMPLE_PAYLOAD_KEY" in src
+    assert '"_example"' in src or "'_example'" in src
+    # Count detector names referenced — should be ≥4 distinct
+    import re
+
+    detectors = set(re.findall(r'detector="([a-z_]+)"', src))
+    assert len(detectors) >= 4, (
+        f"too few detector kinds in examples: {detectors}"
+    )
+
+
+@t("examples: WS inject + clear handlers registered + in SUPPORTED_METHODS")
+def _():
+    src = _read("custom_components/ha_insights/ws_api.py")
+    assert "ws_inject_examples" in src
+    assert "ws_clear_examples" in src
+    assert '"inject_examples"' in src  # in SUPPORTED_METHODS
+    assert '"clear_examples"' in src
+
+
+@t("examples: clear walks active + dismissed + applied to find marked rows")
+def _():
+    src = _read("custom_components/ha_insights/ws_api.py")
+    assert "include_dismissed=True" in src
+    assert "include_applied=True" in src
+    assert "EXAMPLE_PAYLOAD_KEY" in src
+
+
 # ---- Run + report ----
 
 passed = sum(1 for _, s, _ in results if s == "PASS")

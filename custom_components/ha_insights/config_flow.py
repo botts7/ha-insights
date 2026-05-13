@@ -155,6 +155,14 @@ DEFAULT_REFINE_COST_THRESHOLD_USD = 0.05
 # adds a forbidden-imports check on top of the opt-in.
 CONF_ALLOW_USER_DETECTORS = "allow_user_detectors"
 DEFAULT_ALLOW_USER_DETECTORS = False
+# v1.4: experimental-detector opt-in. New / unverified detectors
+# declare `maturity = Maturity.EXPERIMENTAL` and are skipped at scan
+# time unless this flag is on OR the user has explicitly enabled
+# them in CONF_ENABLED_DETECTORS. Either path is fine — the goal
+# is "no surprises by default" while keeping the explicit-enable
+# escape hatch.
+CONF_ALLOW_EXPERIMENTAL_DETECTORS = "allow_experimental_detectors"
+DEFAULT_ALLOW_EXPERIMENTAL_DETECTORS = False
 DEFAULT_LOOKBACK_DAYS = 14
 LOOKBACK_DAYS_RANGE = (0, 30)  # 0 disables backfill entirely
 DEFAULT_NOTIFY_ON_INSIGHT = True
@@ -432,6 +440,25 @@ def get_allow_user_detectors(entry: ConfigEntry) -> bool:
     raw = entry.options.get(
         CONF_ALLOW_USER_DETECTORS,
         entry.data.get(CONF_ALLOW_USER_DETECTORS, DEFAULT_ALLOW_USER_DETECTORS),
+    )
+    return bool(raw)
+
+
+def get_allow_experimental_detectors(entry: ConfigEntry) -> bool:
+    """Resolve the experimental-detector opt-in flag.
+
+    Detectors marked Maturity.EXPERIMENTAL are only run when this is
+    True, or when the user has explicitly named them in
+    CONF_ENABLED_DETECTORS (the per-detector enable list always
+    wins). Off by default so new installs aren't surprised by
+    unverified output.
+    """
+    raw = entry.options.get(
+        CONF_ALLOW_EXPERIMENTAL_DETECTORS,
+        entry.data.get(
+            CONF_ALLOW_EXPERIMENTAL_DETECTORS,
+            DEFAULT_ALLOW_EXPERIMENTAL_DETECTORS,
+        ),
     )
     return bool(raw)
 
@@ -783,6 +810,9 @@ class HaInsightsOptionsFlow(OptionsFlow):
         self._preferred_agent_id: str | None = None
         self._refine_cost_threshold: float = DEFAULT_REFINE_COST_THRESHOLD_USD
         self._allow_user_detectors: bool = DEFAULT_ALLOW_USER_DETECTORS
+        self._allow_experimental_detectors: bool = (
+            DEFAULT_ALLOW_EXPERIMENTAL_DETECTORS
+        )
         self._enabled_detectors: list[str] | None = None
         self._scan_areas: list[str] = []
         self._scan_interval_hours: int = DEFAULT_SCAN_INTERVAL_HOURS
@@ -807,6 +837,9 @@ class HaInsightsOptionsFlow(OptionsFlow):
         current_preferred = get_preferred_agent_id(self.config_entry) or ""
         current_refine_threshold = get_refine_cost_threshold(self.config_entry)
         current_allow_user_detectors = get_allow_user_detectors(self.config_entry)
+        current_allow_experimental = get_allow_experimental_detectors(
+            self.config_entry
+        )
         # Phase B/C/D scan controls. Default to "all detectors run" when the
         # user hasn't customized (preserve v1.0 → v1.1 upgrade behavior).
         current_enabled_detectors = get_enabled_detectors(self.config_entry)
@@ -903,6 +936,12 @@ class HaInsightsOptionsFlow(OptionsFlow):
                     CONF_ALLOW_USER_DETECTORS, current_allow_user_detectors
                 )
             )
+            self._allow_experimental_detectors = bool(
+                user_input.get(
+                    CONF_ALLOW_EXPERIMENTAL_DETECTORS,
+                    current_allow_experimental,
+                )
+            )
             # Phase B: enabled detectors. If the user submits exactly the
             # same set as "all known detectors", store None to keep the
             # back-compat semantics (None == all). Otherwise store the
@@ -973,6 +1012,9 @@ class HaInsightsOptionsFlow(OptionsFlow):
                     CONF_PREFERRED_AGENT_ID: self._preferred_agent_id or "",
                     CONF_REFINE_COST_THRESHOLD_USD: self._refine_cost_threshold,
                     CONF_ALLOW_USER_DETECTORS: self._allow_user_detectors,
+                    CONF_ALLOW_EXPERIMENTAL_DETECTORS: (
+                        self._allow_experimental_detectors
+                    ),
                     CONF_ENABLED_DETECTORS: self._enabled_detectors,
                     CONF_SCAN_AREAS: self._scan_areas,
                     CONF_SCAN_INTERVAL_HOURS: self._scan_interval_hours,
@@ -1094,6 +1136,15 @@ class HaInsightsOptionsFlow(OptionsFlow):
                     CONF_ALLOW_USER_DETECTORS,
                     default=current_allow_user_detectors,
                 ): bool,
+                # v1.4: enable experimental (unverified) detectors.
+                # 🧪 detectors are not field-tested; their output may
+                # be wrong. Insights from them are tagged in the panel
+                # with a "was this useful?" prompt so user feedback can
+                # graduate them to BETA / STABLE over time.
+                vol.Optional(
+                    CONF_ALLOW_EXPERIMENTAL_DETECTORS,
+                    default=current_allow_experimental,
+                ): bool,
                 # Phase B: per-detector enable/disable. Defaults to the
                 # full set when the user hasn't customized; explicit
                 # selection persists their choice. If the user selects
@@ -1180,6 +1231,9 @@ class HaInsightsOptionsFlow(OptionsFlow):
                         # a user toggles it AND switches into Cloud mode in
                         # the same visit.
                         CONF_ALLOW_USER_DETECTORS: self._allow_user_detectors,
+                    CONF_ALLOW_EXPERIMENTAL_DETECTORS: (
+                        self._allow_experimental_detectors
+                    ),
                         CONF_ENABLED_DETECTORS: self._enabled_detectors,
                         CONF_SCAN_AREAS: self._scan_areas,
                         CONF_SCAN_INTERVAL_HOURS: self._scan_interval_hours,
