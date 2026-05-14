@@ -1569,12 +1569,25 @@ def _():
 def _():
     """Without this filter, a flaky WiFi node firing
     on↔unavailable↔on 30 times/hr looks like a 30× ratio runaway
-    automation. Source-level guard the count loop skips them."""
+    automation. v1.5.16 extracted the inline guard into
+    lib/event_filters.is_unavailable_transition; the detector still
+    calls into the same logic, just via the shared module."""
     src = _read(
         "custom_components/ha_insights/detectors/frequency_anomaly.py"
     )
-    assert "Gotcha 6" in src
-    assert 'ev.old_state == "unavailable" or ev.new_state == "unavailable"' in src
+    # Imported from the shared module
+    assert (
+        "from ..lib.event_filters import is_unavailable_transition" in src
+    )
+    # Used at the top of the count loop
+    assert (
+        "if is_unavailable_transition(ev.old_state, ev.new_state):" in src
+    )
+    # And the shared module's docstring still cites Gotcha 6 as the rationale
+    lib = _read(
+        "custom_components/ha_insights/lib/event_filters.py"
+    )
+    assert "Gotcha 6" in lib
 
 
 @t("unavailable filter: orphan_device skips entities whose latest event was an availability flip")
@@ -2031,25 +2044,37 @@ def _():
     assert "iot_class_by_integration=iot_class_by_integration" in src_det
 
 
-@t("v1.5.14: streak/schedule/seasonality/cooccurrence drop FROM-unavailable transitions")
+@t("v1.5.16: HA-semantic filters live in lib/event_filters.py")
 def _():
-    """Vehicle integrations (BYD, Tesla), Bluetooth devices, and any
-    cloud-polled integration go `unavailable` between polls. When they
-    wake up, every sensor transitions in lockstep. Without filtering
-    the `old_state == unavailable` side, daily-pattern detectors invent
-    phantom 'X happens every morning at 09:46' streaks. The user's
-    BYD car was the canary — three byd_vehicle entities formed a
-    streak at 09:46 daily, all driven by integration wake-ups not
-    real behaviour. Same fix applied to all four daily-pattern
-    detectors so the class is closed, not just streak."""
+    """Filters that used to be inlined in each daily-pattern detector
+    are now imported from a shared lib/event_filters.py module. The
+    module is HA-core-adoptable: pure functions over typed primitives,
+    no dependency on our buffer/store/detectors.
+
+    v1.5.14 was the inline fix; v1.5.16 extracts it. Same semantic
+    behaviour, but the rule lives in one place and the module is a
+    self-contained PR candidate for HA core."""
+    lib = _read("custom_components/ha_insights/lib/event_filters.py")
+    # Module is self-contained — no imports from our detectors / store
+    # / buffer beyond what's safe.
+    assert "is_from_unavailable_state" in lib
+    assert "is_unavailable_transition" in lib
+    assert "is_template_or_derived" in lib
+    assert "UNAVAILABLE_STATES" in lib
+    assert "COMPUTED_FROM_OTHER_PLATFORMS" in lib
+    assert "BOOTSTRAP_FANOUT_SECONDS" in lib
+    assert "StateEventLike" in lib  # Protocol — keeps it portable
+    # Each daily-pattern detector imports from the shared module
     for module in ("streak", "schedule", "seasonality", "cooccurrence"):
         src = _read(f"custom_components/ha_insights/detectors/{module}.py")
-        # Standard pattern: check old_state with the same enum-state
-        # filter that already gates new_state.
         assert (
-            "ev.old_state is not None and not self._is_enum_state(ev.old_state)"
-            in src
-        ), f"{module}.py missing old_state unavailable filter"
+            "from ..lib.event_filters import is_from_unavailable_state" in src
+        ), f"{module}.py doesn't import the shared filter"
+    # frequency_anomaly uses the both-sides variant
+    src = _read("custom_components/ha_insights/detectors/frequency_anomaly.py")
+    assert (
+        "from ..lib.event_filters import is_unavailable_transition" in src
+    ), "frequency_anomaly doesn't import shared transition filter"
 
 
 @t("ws_api: cohort payload carries per-member integration + external_source")
@@ -2077,6 +2102,26 @@ def _():
     assert "_renderSetupStep" in src
     assert 'insight.detector === "setup_quality"' in src
     assert "setup-guide-body" in src
+
+
+@t("card: bulk-area-assign dialog is bundled and uses only HA core WS APIs")
+def _():
+    """The bulk-assign-areas dialog must be portable into HA core. It
+    calls only HA's standard registry WS APIs (no home_insights/* calls)
+    and registers itself as <bulk-area-assign-dialog>. Bundled into the
+    card so users without HA core support get the feature today."""
+    src = _read("dev/config/www/ha-insights-card.js")
+    # Custom element registered
+    assert "bulk-area-assign-dialog" in src
+    # Built-in registry APIs used
+    assert "config/area_registry/list" in src
+    assert "config/device_registry/list" in src
+    assert "config/entity_registry/list" in src
+    assert "config/device_registry/update" in src
+    assert "config/entity_registry/update_entity" in src
+    # NO custom backend dependency
+    assert "home_insights/list_unareaed" not in src
+    assert "home_insights/bulk_assign" not in src
 
 
 @t("OptionsFlow: __init__ initializes audit fields defensively")

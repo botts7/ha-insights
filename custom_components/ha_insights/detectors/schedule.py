@@ -26,6 +26,7 @@ from typing import TYPE_CHECKING
 from homeassistant.util import dt as dt_util
 
 from ..insight import Insight, InsightKind
+from ..lib.event_filters import is_from_unavailable_state
 from .base import Detector, DetectorContext, register_detector
 
 if TYPE_CHECKING:
@@ -86,14 +87,9 @@ class ScheduleDetector(Detector):
             return False
         if not self._is_enum_state(ev.new_state):
             return False
-        # v1.5.14: drop transitions where the previous state was
-        # unavailable/unknown/none — those are poll-cycle wake-ups
-        # (vehicle integrations, Bluetooth devices, cloud-polled
-        # APIs that go idle overnight). The integration reconnected
-        # at ~09:46 and *learned* the state, not "X just changed".
-        # Without this, every morning wake-up creates a phantom
-        # daily-pattern. Mirrors the fix in streak / Gotcha 6.
-        if ev.old_state is not None and not self._is_enum_state(ev.old_state):
+        # v1.5.16 (extracted to lib/event_filters.py): drop FROM-unavailable
+        # transitions — poll-cycle wake-ups, not real schedule events.
+        if is_from_unavailable_state(ev.old_state):
             return False
         return True
 

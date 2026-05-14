@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING
 from homeassistant.util import dt as dt_util
 
 from ..insight import Insight, InsightKind
+from ..lib.event_filters import is_from_unavailable_state
 from .base import Detector, DetectorContext, register_detector
 
 if TYPE_CHECKING:
@@ -97,10 +98,9 @@ class SeasonalityDetector(Detector):
             return False
         if not self._is_enum_state(ev.new_state):
             return False
-        # v1.5.14: drop transitions FROM unavailable/unknown/none —
-        # those are poll-cycle wake-ups, not real seasonal behaviour.
-        # See streak.py for full rationale.
-        if ev.old_state is not None and not self._is_enum_state(ev.old_state):
+        # v1.5.16 (extracted to lib/event_filters.py): drop FROM-unavailable
+        # transitions — poll-cycle wake-ups, not seasonal behaviour.
+        if is_from_unavailable_state(ev.old_state):
             return False
         return True
 

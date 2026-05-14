@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING
 from homeassistant.util import dt as dt_util
 
 from ..insight import Insight, InsightKind
+from ..lib.event_filters import is_from_unavailable_state
 from .base import Detector, DetectorContext, register_detector
 
 if TYPE_CHECKING:
@@ -72,19 +73,12 @@ class StreakDetector(Detector):
             return False
         if not self._is_enum_state(ev.new_state):
             return False
-        # v1.5.14: also drop transitions where the PREVIOUS state was
-        # unavailable/unknown/none. These aren't real behaviour — they're
-        # poll-cycle wake-ups (the integration reconnected and finally
-        # *learned* the state, not "the door just opened"). Common with
-        # vehicle integrations (BYD, Tesla), Bluetooth devices, and any
-        # cloud-polled integration that goes idle overnight. Without
-        # this, a single "device wakes up every morning at 09:46" event
-        # turns into a 30-day streak insight. Mirrors the unavailable
-        # filter in frequency_anomaly (HA-semantics Gotcha 6) but
-        # applied at streak's stricter angle: streaks specifically
-        # look for daily-cadence patterns, which is exactly where
-        # poll-cycle noise is most damaging.
-        if ev.old_state is not None and not self._is_enum_state(ev.old_state):
+        # v1.5.14 (extracted to lib/event_filters.py in v1.5.16):
+        # drop transitions where the PREVIOUS state was
+        # unavailable/unknown/none — poll-cycle wake-ups, not real
+        # behaviour. Without this, a vehicle integration's daily
+        # ~09:46 cellular wake creates a phantom 30-day streak.
+        if is_from_unavailable_state(ev.old_state):
             return False
         return True
 

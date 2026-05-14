@@ -16,6 +16,7 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 from ..insight import Insight, InsightKind
+from ..lib.event_filters import is_from_unavailable_state
 from .base import Detector, DetectorContext, Maturity, register_detector
 
 if TYPE_CHECKING:
@@ -251,12 +252,11 @@ class CooccurrenceDetector(Detector):
             return False
         if not self._is_enum_state(ev.new_state):
             return False
-        # v1.5.14: drop transitions FROM unavailable/unknown/none.
+        # v1.5.16 (extracted to lib/event_filters.py): drop FROM-unavailable.
         # Cooccurrence is especially vulnerable — when an integration
         # wakes up after a long sleep, ALL its entities transition
-        # together, which manufactures bogus "X co-occurs with Y"
-        # pairs across every sibling sensor.
-        if ev.old_state is not None and not self._is_enum_state(ev.old_state):
+        # together, manufacturing bogus "X co-occurs with Y" pairs.
+        if is_from_unavailable_state(ev.old_state):
             return False
         return True
 

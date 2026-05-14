@@ -21,6 +21,7 @@ from datetime import UTC, datetime, timedelta
 from homeassistant.util import dt as dt_util
 
 from ..insight import Insight, InsightKind
+from ..lib.event_filters import is_unavailable_transition
 from .base import Detector, DetectorContext, Maturity, register_detector
 
 _LOGGER = logging.getLogger(__name__)
@@ -127,15 +128,12 @@ class FrequencyAnomalyDetector(Detector):
         baseline_live_count: dict[str, int] = defaultdict(int)
 
         for ev in events:
-            # v1.5: skip `unavailable` ↔ X transitions. HA fires
-            # state_changed on every availability flip; a flaky
-            # WiFi device hits 30+ events/hr without doing
-            # anything. Counting those as state changes inflates
-            # both today_counts and baseline_counts symmetrically
-            # in steady-state, but a SUDDEN flap day (broken AP
-            # this morning) shows as a runaway-automation false
-            # positive. See docs/HA_EVENT_SEMANTICS.md Gotcha 6.
-            if ev.old_state == "unavailable" or ev.new_state == "unavailable":
+            # v1.5.16 (extracted to lib/event_filters.py): skip
+            # `unavailable` ↔ X transitions. HA fires state_changed
+            # on every availability flip; counting those as state
+            # changes turns a flaky WiFi device into a runaway-
+            # automation false positive on flap days.
+            if is_unavailable_transition(ev.old_state, ev.new_state):
                 continue
             if ev.timestamp >= today_start_utc:
                 today_counts[ev.entity_id] += 1
