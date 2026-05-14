@@ -2079,6 +2079,28 @@ def _():
         )
 
 
+@t("v1.5.28: ws_api emits `labels` per insight from hierarchy.labels_of")
+def _():
+    """HA 2024.4+ added the label registry — entities/devices/areas can
+    carry user-defined labels for cross-cutting tagging ('garden',
+    'guest-mode', 'critical'). The panel exposes a Label filter chip
+    and group_by; both need the WS list to carry the labels per
+    insight. ws_api reads hierarchy.labels_of for the primary entity
+    and emits a sorted list (empty when no labels)."""
+    src = _read("custom_components/ha_insights/ws_api.py")
+    assert "d[\"labels\"]" in src
+    assert "hierarchy.labels_of.get(eid)" in src
+    # Card mirrors with label_filter + group_by:label. Skip when the
+    # sibling card repo isn't co-located (CI / fresh clone).
+    import os
+    card_types_path = "../ha-insights-card/src/types.ts"
+    if os.path.exists(card_types_path):
+        card_types = _read(card_types_path)
+        assert "label_filter?: string[]" in card_types
+        assert "labels?: string[]" in card_types
+        assert '"label"' in card_types
+
+
 @t("v1.5.27: conflict scanner factors `for:` duration into state-trigger signatures")
 def _():
     """Two state triggers with the same entity + to_state but materially

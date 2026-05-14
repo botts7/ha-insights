@@ -573,6 +573,12 @@ async def ws_list(
         d["floor_id"] = None
         d["floor_name"] = None
         d["integration"] = None
+        # v1.5.28: surface labels (HA 2024.4+) per insight so the panel
+        # can filter / group by them. Labels are HA-native tags users
+        # apply to entities/devices/areas; this lets installs that use
+        # `label: outdoor` / `label: critical` / etc. slice insights
+        # by their organizational taxonomy without manual filtering.
+        d["labels"] = []
         if isinstance(eid, str) and hierarchy is not None:
             aid = hierarchy.area_of.get(eid)
             d["area_id"] = aid
@@ -583,6 +589,10 @@ async def ws_list(
             if fid:
                 d["floor_name"] = hierarchy.floor_name_by_id.get(fid) or fid
             d["integration"] = hierarchy.integration_of.get(eid)
+            labels = hierarchy.labels_of.get(eid)
+            if labels:
+                # Sorted for stable group_by ordering across scans.
+                d["labels"] = sorted(labels)
         # External-schedule hint. We only surface it when the entity is
         # NOT already tied to an HA automation — otherwise it's the
         # user's own automation doing the work and the pill is wrong.
