@@ -180,6 +180,27 @@ DEFAULT_ANALYTICS_ENDPOINT_PLACEHOLDER = ""  # "" = use module default
 # global policy. Lets the admin say "Dad gets balanced mode but
 # quiet after 21:00, Mum gets adaptive".
 CONF_NOTIFY_USER_OVERRIDES = "notify_user_overrides"
+# v1.5.29: GoalTrackerDetector reads `goals_json` from this entry's
+# options — a stringified JSON dict mapping goal name → "HH:MM" target.
+# Up to v1.5.28 the field was never surfaced in the OptionsFlow, so
+# the detector silently no-op'd on every install. We now expose five
+# discrete time pickers (one per recognized goal name) and serialize
+# them into the same goals_json string the detector already reads —
+# users who set the raw JSON manually before this change keep working
+# unchanged.
+CONF_GOAL_GET_TO_WORK_BY = "goal_get_to_work_by"
+CONF_GOAL_HOME_BY = "goal_home_by"
+CONF_GOAL_BEDTIME_BY = "goal_bedtime_by"
+CONF_GOAL_WAKE_UP_BY = "goal_wake_up_by"
+CONF_GOAL_LEAVE_HOME_BY = "goal_leave_home_by"
+# Goal-key → CONF-field mapping used by the (de)serializer below.
+_GOAL_KEY_TO_FIELD: dict[str, str] = {
+    "get_to_work_by": CONF_GOAL_GET_TO_WORK_BY,
+    "home_by": CONF_GOAL_HOME_BY,
+    "bedtime_by": CONF_GOAL_BEDTIME_BY,
+    "wake_up_by": CONF_GOAL_WAKE_UP_BY,
+    "leave_home_by": CONF_GOAL_LEAVE_HOME_BY,
+}
 DEFAULT_LOOKBACK_DAYS = 14
 LOOKBACK_DAYS_RANGE = (0, 30)  # 0 disables backfill entirely
 DEFAULT_NOTIFY_ON_INSIGHT = True
@@ -209,6 +230,42 @@ def get_active_mode(entry: ConfigEntry) -> str:
     return entry.options.get(
         CONF_LLM_MODE, entry.data.get(CONF_LLM_MODE, LlmMode.OFF.value)
     )
+
+
+def get_goal_times(entry: ConfigEntry) -> dict[str, str]:
+    """Return the per-goal HH:MM strings currently stored on this entry.
+
+    Reads two surfaces, in priority order:
+      1. Discrete CONF_GOAL_* fields written by the v1.5.29 form. Empty
+         strings mean "not set" and are filtered out.
+      2. Legacy `goals_json` JSON string from anyone who set it
+         manually before the structured form shipped.
+
+    The two paths converge on the same flat dict the detector + setup-
+    quality check already consume, so callers don't need to know which
+    surface the user wrote through.
+    """
+    out: dict[str, str] = {}
+    for goal_key, conf_field in _GOAL_KEY_TO_FIELD.items():
+        raw = entry.options.get(conf_field) or entry.data.get(conf_field) or ""
+        if isinstance(raw, str) and raw.strip():
+            out[goal_key] = raw.strip()
+    if out:
+        return out
+    legacy = entry.options.get("goals_json") or entry.data.get("goals_json")
+    if isinstance(legacy, str) and legacy.strip():
+        try:
+            import json
+
+            parsed = json.loads(legacy)
+            if isinstance(parsed, dict):
+                for k, v in parsed.items():
+                    if isinstance(k, str) and isinstance(v, str) and v.strip():
+                        key = k.strip().lower().replace(" ", "_").replace("-", "_")
+                        out[key] = v.strip()
+        except (json.JSONDecodeError, TypeError):
+            pass
+    return out
 
 
 def get_audit_rollup_window_days(entry: ConfigEntry) -> int:
@@ -1470,6 +1527,10 @@ class HaInsightsOptionsFlow(OptionsFlow):
         current_audit_depth = get_audit_analysis_depth(self.config_entry)
         current_audit_budget = get_audit_monthly_budget_usd(self.config_entry)
         current_auto_rollup = get_audit_auto_rollup_enabled(self.config_entry)
+        # v1.5.29: surface GoalTrackerDetector targets as discrete time
+        # fields. Defaulted from the merged getter so users who set
+        # goals_json by hand pre-1.5.29 see their values pre-filled.
+        current_goals = get_goal_times(self.config_entry)
         # When the user has never customized, present "all checked" so they
         # can clearly see what's on; the underlying CONF_ENABLED_DETECTORS
         # remains None (== all) until they explicitly drop a checkbox.
@@ -1626,6 +1687,36 @@ class HaInsightsOptionsFlow(OptionsFlow):
                     "audit_auto_rollup_enabled", current_auto_rollup
                 )
             )
+            # v1.5.29: serialize the five discrete goal fields back into
+            # the goals_json string the detector reads. Empty fields are
+            # left out so an unset goal really is "off", not "00:00".
+            self._goal_get_to_work_by = str(
+                user_input.get(
+                    CONF_GOAL_GET_TO_WORK_BY,
+                    current_goals.get("get_to_work_by", ""),
+                ) or ""
+            ).strip()
+            self._goal_home_by = str(
+                user_input.get(
+                    CONF_GOAL_HOME_BY, current_goals.get("home_by", "")
+                ) or ""
+            ).strip()
+            self._goal_bedtime_by = str(
+                user_input.get(
+                    CONF_GOAL_BEDTIME_BY, current_goals.get("bedtime_by", "")
+                ) or ""
+            ).strip()
+            self._goal_wake_up_by = str(
+                user_input.get(
+                    CONF_GOAL_WAKE_UP_BY, current_goals.get("wake_up_by", "")
+                ) or ""
+            ).strip()
+            self._goal_leave_home_by = str(
+                user_input.get(
+                    CONF_GOAL_LEAVE_HOME_BY,
+                    current_goals.get("leave_home_by", ""),
+                ) or ""
+            ).strip()
             if self._mode is LlmMode.CLOUD and current_mode != LlmMode.CLOUD.value:
                 # Only require fresh consent if switching INTO cloud
                 return await self.async_step_cloud_consent()
@@ -1667,8 +1758,32 @@ class HaInsightsOptionsFlow(OptionsFlow):
                     "audit_analysis_depth": self._audit_analysis_depth,
                     "audit_monthly_budget_usd": self._audit_monthly_budget_usd,
                     "audit_auto_rollup_enabled": self._audit_auto_rollup_enabled,
+                    CONF_GOAL_GET_TO_WORK_BY: self._goal_get_to_work_by,
+                    CONF_GOAL_HOME_BY: self._goal_home_by,
+                    CONF_GOAL_BEDTIME_BY: self._goal_bedtime_by,
+                    CONF_GOAL_WAKE_UP_BY: self._goal_wake_up_by,
+                    CONF_GOAL_LEAVE_HOME_BY: self._goal_leave_home_by,
                 }
             )
+            # v1.5.29: also write goals_json so the detector + setup-
+            # quality check (both keyed on goals_json today) see the
+            # values without us having to touch their read paths. A
+            # second writer (the structured fields above) lets a future
+            # detector refactor drop goals_json without losing data.
+            import json
+
+            goals_dict: dict[str, str] = {}
+            if self._goal_get_to_work_by:
+                goals_dict["get_to_work_by"] = self._goal_get_to_work_by
+            if self._goal_home_by:
+                goals_dict["home_by"] = self._goal_home_by
+            if self._goal_bedtime_by:
+                goals_dict["bedtime_by"] = self._goal_bedtime_by
+            if self._goal_wake_up_by:
+                goals_dict["wake_up_by"] = self._goal_wake_up_by
+            if self._goal_leave_home_by:
+                goals_dict["leave_home_by"] = self._goal_leave_home_by
+            merged["goals_json"] = json.dumps(goals_dict) if goals_dict else ""
             return self.async_create_entry(title="", data=merged)
 
         lo, hi = LOOKBACK_DAYS_RANGE
@@ -1870,6 +1985,33 @@ class HaInsightsOptionsFlow(OptionsFlow):
                     "audit_auto_rollup_enabled",
                     default=current_auto_rollup,
                 ): bool,
+                # v1.5.29: GoalTrackerDetector targets. Each field is a
+                # free-text HH:MM (or HH:MM:SS) string — empty disables
+                # that goal. We deliberately use TextSelector rather than
+                # TimeSelector because TimeSelector defaults to "now" on
+                # render and gives no "(no goal set)" affordance; a
+                # blank text field is unambiguously "off" and round-
+                # trips cleanly through the legacy goals_json reader.
+                vol.Optional(
+                    CONF_GOAL_BEDTIME_BY,
+                    default=current_goals.get("bedtime_by", ""),
+                ): str,
+                vol.Optional(
+                    CONF_GOAL_WAKE_UP_BY,
+                    default=current_goals.get("wake_up_by", ""),
+                ): str,
+                vol.Optional(
+                    CONF_GOAL_LEAVE_HOME_BY,
+                    default=current_goals.get("leave_home_by", ""),
+                ): str,
+                vol.Optional(
+                    CONF_GOAL_GET_TO_WORK_BY,
+                    default=current_goals.get("get_to_work_by", ""),
+                ): str,
+                vol.Optional(
+                    CONF_GOAL_HOME_BY,
+                    default=current_goals.get("home_by", ""),
+                ): str,
             }
         )
         return self.async_show_form(step_id="advanced", data_schema=schema)

@@ -157,7 +157,12 @@
           "audit_rollup_window_days": "Audit rollup window (days)",
           "audit_analysis_depth": "Audit LLM verbosity",
           "audit_monthly_budget_usd": "Audit monthly cloud-LLM budget (USD)",
-          "audit_auto_rollup_enabled": "Auto-refresh audit rollups every 6h (recorder reads)"
+          "audit_auto_rollup_enabled": "Auto-refresh audit rollups every 6h (recorder reads)",
+          "goal_bedtime_by": "Goal: bedtime by (HH:MM)",
+          "goal_wake_up_by": "Goal: wake up by (HH:MM)",
+          "goal_leave_home_by": "Goal: leave home by (HH:MM)",
+          "goal_get_to_work_by": "Goal: get to work by (HH:MM)",
+          "goal_home_by": "Goal: home by (HH:MM)"
         },
         "data_description": {
           "llm_mode": "Off: pattern detection only. Local: data stays on your network. Cloud: pseudonymized data sent off-network.",
@@ -185,7 +190,12 @@
           "notify_min_attribution_confidence": "Honored only when the preset is Advanced. Below this, target-specific mobile pushes are downgraded to persistent_notification (avoids buzzing the wrong person on a weak manual-map match).",
           "allow_experimental_detectors": "Off by default. Experimental detectors (PhoneChargeReminder, WeatherCorrelation) have a wider noise/signal trade-off than the stable set. Enable to help refine new detectors; insights from them are tagged with a 🧪 badge.",
           "analytics_enabled": "Off by default. Sends anonymous weekly aggregate counts (detector fire/apply/dismiss per maturity tier, install UUID, integration version, HA major.minor) to the project. Never PII, never payloads. Use the WS preview endpoint to inspect the exact bytes before enabling.",
-          "analytics_endpoint": "Blank = use the project's default URL. Set to your own receiver URL to self-host the analytics endpoint."
+          "analytics_endpoint": "Blank = use the project's default URL. Set to your own receiver URL to self-host the analytics endpoint.",
+          "goal_bedtime_by": "Target time you want to start charging your phone by (i.e. bedtime). HH:MM 24-hour. The Goal Tracker detector reports adherence — 'on time on 4 of last 7 nights'. Leave blank to disable.",
+          "goal_wake_up_by": "Target time you want to be up by — measured as 'phone stops charging'. HH:MM 24-hour. Leave blank to disable.",
+          "goal_leave_home_by": "Target time you want to leave home — measured from your device_tracker leaving the Home zone. HH:MM 24-hour. Leave blank to disable.",
+          "goal_get_to_work_by": "Target time you want to arrive at a non-home zone (work). HH:MM 24-hour. Needs the HA Companion app's location tracking. Leave blank to disable.",
+          "goal_home_by": "Target time you want to be back home. HH:MM 24-hour. Leave blank to disable."
         }
       },
       "cloud_consent": {

@@ -2079,6 +2079,38 @@ def _():
         )
 
 
+@t("v1.5.29: OptionsFlow surfaces per-goal time fields backed by goals_json")
+def _():
+    """GoalTrackerDetector reads `goals_json` from entry.options to
+    decide which targets to track — but pre-1.5.29 the OptionsFlow
+    never asked the user for them, so the detector silently no-op'd
+    on every install. v1.5.29 adds five Optional string fields (one
+    per recognized goal name) that the form serializes into the same
+    goals_json string the detector + setup-quality already consume.
+    Translations expose them as 'Goal: bedtime by (HH:MM)' etc."""
+    src = _read("custom_components/ha_insights/config_flow.py")
+    # All five field constants present
+    for const_name in (
+        "CONF_GOAL_GET_TO_WORK_BY",
+        "CONF_GOAL_HOME_BY",
+        "CONF_GOAL_BEDTIME_BY",
+        "CONF_GOAL_WAKE_UP_BY",
+        "CONF_GOAL_LEAVE_HOME_BY",
+    ):
+        assert const_name in src, f"missing {const_name}"
+    # Mapping table the (de)serializer keys off
+    assert "_GOAL_KEY_TO_FIELD" in src
+    # Getter is exposed so other modules don't need to re-implement the merge
+    assert "def get_goal_times(" in src
+    # Form actually serializes the discrete fields into goals_json
+    assert 'merged["goals_json"]' in src
+    assert "json.dumps(goals_dict)" in src
+    # Translations
+    en = _read("custom_components/ha_insights/translations/en.json")
+    assert "goal_bedtime_by" in en
+    assert "goal_wake_up_by" in en
+
+
 @t("v1.5.28: ws_api emits `labels` per insight from hierarchy.labels_of")
 def _():
     """HA 2024.4+ added the label registry — entities/devices/areas can
