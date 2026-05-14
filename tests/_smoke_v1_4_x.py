@@ -2044,6 +2044,67 @@ def _():
     assert "iot_class_by_integration=iot_class_by_integration" in src_det
 
 
+@t("v1.6 Phase 2: detectors group event.* entities by event_type")
+def _():
+    """Phase 1 captured event_type on StateEvent. Phase 2 makes
+    detectors USE it: streak / schedule / cooccurrence call
+    pattern_value() which returns event_type for `event.*` entities
+    (where new_state is a unique-per-fire timestamp) and new_state
+    for everything else.
+
+    Without this, an event entity firing N times produces N distinct
+    groups (one per unique timestamp state). With it, they collapse
+    into one group per event_type — "button single_press" patterns
+    can finally be detected."""
+    lib = _read("custom_components/ha_insights/lib/event_filters.py")
+    # Helper exists and is documented
+    assert "def pattern_value(" in lib
+    assert "ev.event_type" in lib  # the actual return for event entities
+    # Detectors import it
+    for module in ("streak", "schedule", "cooccurrence"):
+        src = _read(f"custom_components/ha_insights/detectors/{module}.py")
+        assert (
+            "pattern_value" in src
+        ), f"{module}.py doesn't import pattern_value"
+        # event.* entities skip the no-op transition guard (timestamps
+        # are unique per fire, never == old_state)
+        assert (
+            'if ev.domain != "event" and ev.new_state == ev.old_state:' in src
+        ), f"{module}.py doesn't guard the noop check for event entities"
+
+
+@t("v1.5.19: setup_quality only counts INTERACTIVE-domain events as manual")
+def _():
+    """v1.5.18 bug: any event from a local integration with no context
+    counted as a 'physical switch press' — including passive sensor
+    telemetry (Zigbee temperature readings, ESPHome humidity polls).
+    User showed a temp sensor changing 18.6→18.5 with parent_id=null
+    from a local Zigbee integration — would have been counted as a
+    manual event. v1.5.19 restricts the count to interactive domains
+    (light/switch/fan/cover/lock/button/event/etc.) — domains where
+    a user actually initiates the change."""
+    src = _read("custom_components/ha_insights/detectors/setup_quality.py")
+    assert "_INTERACTIVE_DOMAINS" in src
+    # Domain filter applied at the count site
+    assert "ev.domain in _INTERACTIVE_DOMAINS" in src
+    # Spot-check the allow-list — sensors NOT in, button/event IN
+    assert '"button"' in src
+    assert '"event"' in src
+    # Confirm sensors aren't in the interactive list
+    # (would over-count passive telemetry)
+    # Direct check: the literal "sensor" string within the
+    # _INTERACTIVE_DOMAINS frozenset should not appear in its body
+    import re
+    m = re.search(
+        r"_INTERACTIVE_DOMAINS: frozenset\[str\] = frozenset\(\{([^}]+)\}\)",
+        src,
+    )
+    assert m is not None
+    body = m.group(1)
+    assert '"sensor"' not in body
+    assert '"binary_sensor"' not in body
+
+
 @t("v1.6 Phase 1: StateEvent captures event_type for HA event.* entities")
 def _():
     """HA's native `event` platform exposes button presses as entities

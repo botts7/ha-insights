@@ -157,15 +157,33 @@ _LOCAL_INTEGRATION_PLATFORMS: frozenset[str] = frozenset({
     "rflink", "homekit_controller", "lutron_caseta", "hue", "axis",
     "amcrest", "frigate", "blueiris", "reolink",
 })
+# v1.5.19: only domains the user ACTIVELY CONTROLS count toward the
+# manual-event check. Sensor / binary_sensor / device_tracker readings
+# come from local integrations with no context (the device reports
+# autonomously), but they're telemetry — not user signals. Without
+# this domain filter, every Zigbee temperature sensor reading was
+# inflating the "physical events" count. Mirrors ManualHabitDetector's
+# _DOMAIN_SERVICE_MAP plus `event` for button-platform entities.
+_INTERACTIVE_DOMAINS: frozenset[str] = frozenset({
+    "light", "switch", "fan", "input_boolean", "lock", "cover",
+    "climate", "media_player", "vacuum", "button", "event",
+    "scene", "script", "select", "number", "input_select",
+    "input_number", "input_button",
+})
 
 
 def _has_user_context_events(ctx: DetectorContext) -> tuple[bool, str]:
     """Buffer must contain at least some events that look manual.
     "Manual" = either (a) HA dashboard/app click (context_user_id set)
     or (b) physical switch press (no user_id AND no parent_id AND
-    entity from a local integration). v1.5.18 expanded this beyond
-    UI clicks — a wall-switch toggle IS a manual habit even though
-    HA doesn't see a user_id for it."""
+    entity from a local integration AND entity is in a domain the user
+    actively controls).
+
+    v1.5.19 bugfix: the v1.5.18 version counted ANY event with no
+    context from a local integration as "physical" — which over-counted
+    passive sensor telemetry (Zigbee temp readings, ESPHome humidity
+    polls, etc.) as button presses. Now restricted to interactive
+    domains only."""
     if ctx.event_buffer is None:
         return (False, "buffer empty")
     # Local-integration entity set for the physical-switch heuristic.
@@ -175,7 +193,7 @@ def _has_user_context_events(ctx: DetectorContext) -> tuple[bool, str]:
             if platform in _LOCAL_INTEGRATION_PLATFORMS:
                 local_entities.add(eid)
     n_manual = 0  # HA UI / app
-    n_physical = 0  # likely physical switch (no context + local)
+    n_physical = 0  # likely physical switch (no context + local + interactive)
     n_total = 0
     for ev in ctx.event_buffer.query():
         n_total += 1
@@ -184,6 +202,7 @@ def _has_user_context_events(ctx: DetectorContext) -> tuple[bool, str]:
         elif (
             getattr(ev, "context_parent_id", None) is None
             and ev.entity_id in local_entities
+            and ev.domain in _INTERACTIVE_DOMAINS
         ):
             n_physical += 1
     if n_total == 0:

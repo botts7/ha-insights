@@ -207,6 +207,36 @@ def is_recorder_sourced(ev: Any) -> bool:
     return getattr(ev, "source", "live") == "recorder"
 
 
+# ---------- Pattern-value extraction ---------------------------------------
+
+
+def pattern_value(ev: Any) -> str | None:
+    """Return the value a pattern-matching detector should group/match on.
+
+    For HA's native `event.*` platform entities, the *meaningful* value
+    is `ev.event_type` (the attribute carrying "single_press" /
+    "long_press" / "rotate_clockwise_step_3" / etc.). The entity's
+    `state` is just a unique-per-fire timestamp — using it as the
+    grouping key would make every fire its own group, defeating any
+    streak / schedule / cooccurrence detection on event entities.
+
+    For everything else, the value is `ev.new_state` (the entity's
+    actual state — "on", "playing", "locked", etc.).
+
+    Returns None when the value is missing or unusable:
+      - event entity with no `event_type` attribute (older HA versions
+        or misconfigured entities) — None
+      - any entity with new_state == None (added/removed transitions
+        we don't have a target value for) — None
+
+    Caller must None-check; returning None lets detectors skip
+    cleanly instead of grouping on a sentinel.
+    """
+    if getattr(ev, "domain", None) == "event":
+        return getattr(ev, "event_type", None)
+    return getattr(ev, "new_state", None)
+
+
 # ---------- Composable filter chains ---------------------------------------
 
 
@@ -293,6 +323,8 @@ __all__ = [
     "is_template_or_derived",
     "is_unavailable_state",
     "is_unavailable_transition",
+    # Pattern-value extraction (event.* aware)
+    "pattern_value",
     # Composers
     "daily_pattern_filter",
     "default_event_filter",

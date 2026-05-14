@@ -16,7 +16,7 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 from ..insight import Insight, InsightKind
-from ..lib.event_filters import is_from_unavailable_state
+from ..lib.event_filters import is_from_unavailable_state, pattern_value
 from .base import Detector, DetectorContext, Maturity, register_detector
 
 if TYPE_CHECKING:
@@ -246,17 +246,26 @@ class CooccurrenceDetector(Detector):
         return insights[: self.MAX_INSIGHTS_PER_SCAN]
 
     def _is_candidate(self, ev: StateEvent) -> bool:
-        if ev.new_state is None or ev.new_state == ev.old_state:
+        # v1.6 Phase 2: pattern_value() — event_type for event.* entities,
+        # new_state otherwise. event.* entities fire with unique timestamps,
+        # so the no-op transition guard never matches and shouldn't.
+        # Pair-building logic (which uses new_state as the leader/follower
+        # state key) still uses raw new_state — those event-entity pairs
+        # land in Phase 4 with the cross-link detector.
+        value = pattern_value(ev)
+        if value is None:
+            return False
+        if ev.domain != "event" and ev.new_state == ev.old_state:
             return False
         if ev.domain in self.domains_default_blocked:
             return False
-        if not self._is_enum_state(ev.new_state):
+        if not self._is_enum_state(value):
             return False
-        # v1.5.16 (extracted to lib/event_filters.py): drop FROM-unavailable.
-        # Cooccurrence is especially vulnerable — when an integration
-        # wakes up after a long sleep, ALL its entities transition
-        # together, manufacturing bogus "X co-occurs with Y" pairs.
-        if is_from_unavailable_state(ev.old_state):
+        # v1.5.16: drop FROM-unavailable. Cooccurrence is especially
+        # vulnerable — when an integration wakes up after a long sleep,
+        # ALL its entities transition together, manufacturing bogus
+        # "X co-occurs with Y" pairs. Skipped for event.* entities.
+        if ev.domain != "event" and is_from_unavailable_state(ev.old_state):
             return False
         return True
 

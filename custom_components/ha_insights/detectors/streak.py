@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING
 from homeassistant.util import dt as dt_util
 
 from ..insight import Insight, InsightKind
-from ..lib.event_filters import is_from_unavailable_state
+from ..lib.event_filters import is_from_unavailable_state, pattern_value
 from .base import Detector, DetectorContext, register_detector
 
 if TYPE_CHECKING:
@@ -56,8 +56,15 @@ class StreakDetector(Detector):
         for ev in ctx.event_buffer.query(since=cutoff):
             if not self._is_candidate_event(ev):
                 continue
-            assert ev.new_state is not None
-            groups[(ev.entity_id, ev.new_state)].append(ev)
+            # v1.6: pattern_value() returns event_type for event.*
+            # entities, new_state for everything else. Grouping by the
+            # right value is what makes button presses (which all share
+            # the same event_type per kind but have unique timestamps
+            # as state) cluster into a single pattern row.
+            value = pattern_value(ev)
+            if value is None:
+                continue
+            groups[(ev.entity_id, value)].append(ev)
 
         insights: list[Insight] = []
         for (entity_id, new_state), events in groups.items():
@@ -67,18 +74,26 @@ class StreakDetector(Detector):
         return insights
 
     def _is_candidate_event(self, ev: StateEvent) -> bool:
-        if ev.new_state is None or ev.new_state == ev.old_state:
+        # v1.6: event.* entities fire with new_state = unique timestamp,
+        # so the "no-op transition" guard (new_state == old_state) never
+        # triggers and shouldn't — every event fire IS a new event. Use
+        # the pattern_value indirection so the same code path works for
+        # both regular entities and event entities.
+        value = pattern_value(ev)
+        if value is None:
+            return False
+        if ev.domain != "event" and ev.new_state == ev.old_state:
             return False
         if ev.domain in self.domains_default_blocked:
             return False
-        if not self._is_enum_state(ev.new_state):
+        if not self._is_enum_state(value):
             return False
         # v1.5.14 (extracted to lib/event_filters.py in v1.5.16):
         # drop transitions where the PREVIOUS state was
         # unavailable/unknown/none — poll-cycle wake-ups, not real
-        # behaviour. Without this, a vehicle integration's daily
-        # ~09:46 cellular wake creates a phantom 30-day streak.
-        if is_from_unavailable_state(ev.old_state):
+        # behaviour. Skipped for event.* entities (their old_state is
+        # always a timestamp, never unavailable).
+        if ev.domain != "event" and is_from_unavailable_state(ev.old_state):
             return False
         return True
 

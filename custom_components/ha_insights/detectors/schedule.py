@@ -26,7 +26,7 @@ from typing import TYPE_CHECKING
 from homeassistant.util import dt as dt_util
 
 from ..insight import Insight, InsightKind
-from ..lib.event_filters import is_from_unavailable_state
+from ..lib.event_filters import is_from_unavailable_state, pattern_value
 from .base import Detector, DetectorContext, register_detector
 
 if TYPE_CHECKING:
@@ -70,8 +70,11 @@ class ScheduleDetector(Detector):
         for ev in ctx.event_buffer.query(since=cutoff):
             if not self._is_candidate_event(ev):
                 continue
-            assert ev.new_state is not None
-            groups[(ev.entity_id, ev.new_state)].append(ev)
+            # v1.6: event.* entities group by event_type, others by new_state
+            value = pattern_value(ev)
+            if value is None:
+                continue
+            groups[(ev.entity_id, value)].append(ev)
 
         insights: list[Insight] = []
         for (entity_id, new_state), events in groups.items():
@@ -81,15 +84,21 @@ class ScheduleDetector(Detector):
         return insights
 
     def _is_candidate_event(self, ev: StateEvent) -> bool:
-        if ev.new_state is None or ev.new_state == ev.old_state:
+        # v1.6: pattern_value() resolves event_type for event.*, new_state
+        # otherwise. event.* entities fire with unique timestamps, so the
+        # no-op transition guard never matches and shouldn't.
+        value = pattern_value(ev)
+        if value is None:
+            return False
+        if ev.domain != "event" and ev.new_state == ev.old_state:
             return False
         if ev.domain in self.domains_default_blocked:
             return False
-        if not self._is_enum_state(ev.new_state):
+        if not self._is_enum_state(value):
             return False
-        # v1.5.16 (extracted to lib/event_filters.py): drop FROM-unavailable
-        # transitions — poll-cycle wake-ups, not real schedule events.
-        if is_from_unavailable_state(ev.old_state):
+        # v1.5.16: drop FROM-unavailable transitions. Skipped for event.*
+        # (old_state is always a timestamp, never an unavailable sentinel).
+        if ev.domain != "event" and is_from_unavailable_state(ev.old_state):
             return False
         return True
 
