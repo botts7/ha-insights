@@ -97,6 +97,11 @@ class SeasonalityDetector(Detector):
             return False
         if not self._is_enum_state(ev.new_state):
             return False
+        # v1.5.14: drop transitions FROM unavailable/unknown/none —
+        # those are poll-cycle wake-ups, not real seasonal behaviour.
+        # See streak.py for full rationale.
+        if ev.old_state is not None and not self._is_enum_state(ev.old_state):
+            return False
         return True
 
     @staticmethod

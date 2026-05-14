@@ -1998,6 +1998,27 @@ def _():
     assert "setup-guide-body" in src
 
 
+@t("v1.5.14: streak/schedule/seasonality/cooccurrence drop FROM-unavailable transitions")
+def _():
+    """Vehicle integrations (BYD, Tesla), Bluetooth devices, and any
+    cloud-polled integration go `unavailable` between polls. When they
+    wake up, every sensor transitions in lockstep. Without filtering
+    the `old_state == unavailable` side, daily-pattern detectors invent
+    phantom 'X happens every morning at 09:46' streaks. The user's
+    BYD car was the canary — three byd_vehicle entities formed a
+    streak at 09:46 daily, all driven by integration wake-ups not
+    real behaviour. Same fix applied to all four daily-pattern
+    detectors so the class is closed, not just streak."""
+    for module in ("streak", "schedule", "seasonality", "cooccurrence"):
+        src = _read(f"custom_components/ha_insights/detectors/{module}.py")
+        # Standard pattern: check old_state with the same enum-state
+        # filter that already gates new_state.
+        assert (
+            "ev.old_state is not None and not self._is_enum_state(ev.old_state)"
+            in src
+        ), f"{module}.py missing old_state unavailable filter"
+
+
 @t("ws_api: cohort payload carries per-member integration + external_source")
 def _():
     """When a cohort row aggregates entities from multiple integrations,
