@@ -290,6 +290,39 @@ async def run_all_detectors(
     #   2. Mark detector emissions with conflicts_with after the run
     # Read off the loop via the helper (executor for YAML I/O); cheap.
     existing_automations = await _load_existing_automations(hass)
+
+    # v1.5.22: load iot_class for every integration the hierarchy
+    # knows about, on the MAIN event loop. Detectors that need it
+    # (cross-integration audit) read from ctx.iot_class_by_integration
+    # instead of awaiting async_get_integration from inside a
+    # worker-thread event loop — that caused a deadlock-style hang
+    # that hit the 30s detector budget on installs with many
+    # integrations.
+    iot_class_by_integration: dict[str, str] = {}
+    try:
+        from homeassistant.loader import async_get_integration
+
+        domains = {
+            d
+            for d in hierarchy.integration_of.values()
+            if isinstance(d, str) and d
+        }
+        # Yield to the loop between each integration load. async_get_integration
+        # may schedule executor jobs for manifest reads; yielding keeps the
+        # WS API responsive even if disk is slow on the user's install.
+        for domain in domains:
+            try:
+                integration = await async_get_integration(hass, domain)
+                iot_class = getattr(integration, "iot_class", None)
+                if isinstance(iot_class, str):
+                    iot_class_by_integration[domain] = iot_class
+            except Exception:  # noqa: BLE001
+                # Custom integration not installed / manifest missing —
+                # skip and let the audit observation treat as unknown.
+                continue
+            await asyncio.sleep(0)
+    except Exception:  # pragma: no cover — defensive
+        _LOGGER.exception("HA Insights: iot_class load failed (non-fatal)")
     if existing_automations:
         _LOGGER.info(
             "HA Insights scan: %d existing automations loaded "
@@ -310,6 +343,7 @@ async def run_all_detectors(
         entity_dependencies=entity_dependencies,
         container_to_members=container_to_members,
         hierarchy=hierarchy,
+        iot_class_by_integration=iot_class_by_integration,
     )
     if ctx.event_buffer is not None:
         snapshot = ctx.event_buffer.snapshot()

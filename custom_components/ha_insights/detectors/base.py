@@ -110,6 +110,16 @@ class DetectorContext:
     # refactor; legacy fields keep working until then. See
     # detectors/hierarchy.py for query methods.
     hierarchy: "EntityHierarchy | None" = None  # noqa: F821 — forward ref
+    # v1.5.22: iot_class per integration, loaded ON THE MAIN LOOP by
+    # run_all_detectors before dispatching detectors to worker threads.
+    # Earlier (v1.5.15) the audit detector loaded these inside its
+    # async scan() — which ran on a worker thread via asyncio.run.
+    # HA's loader.async_get_integration expects to be called from the
+    # main event loop; calling it from a worker thread can deadlock
+    # against hass.async_add_executor_job during manifest loading.
+    # With 60+ integrations the sequential awaits compounded into the
+    # automation_audit detector exceeding its 30s budget every scan.
+    iot_class_by_integration: dict[str, str] = field(default_factory=dict)
 
 
 class Detector(ABC):

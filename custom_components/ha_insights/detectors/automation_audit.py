@@ -160,13 +160,15 @@ class AutomationAuditDetector(Detector):
             if s.last_changed is not None
         }
 
-        # v1.5.15 — Build iot_class lookup for every integration this
-        # scan will touch. HA's loader has a per-domain cache, so the
-        # async_get_integration calls return quickly after the first
-        # warm-up. Used by the cross-integration coupling observation
-        # to detect cloud vs. local from each integration's manifest
-        # rather than from a hardcoded list.
-        iot_class_by_integration = await self._load_iot_classes(ctx)
+        # v1.5.22 — iot_class map is now pre-loaded on the MAIN event
+        # loop by run_all_detectors and handed in via ctx. The
+        # original v1.5.15 implementation awaited async_get_integration
+        # from inside this scan() — which runs on a worker thread's
+        # private event loop. That deadlocked against HA's loader's
+        # internal use of hass.async_add_executor_job, blowing past
+        # the 30s detector budget on installs with many integrations.
+        # Now: instant dict lookup, no awaits, no thread crossing.
+        iot_class_by_integration = ctx.iot_class_by_integration
 
         # Build packets + emit insights. Pure / fast per automation.
         now = datetime.now(tz=UTC)
@@ -195,23 +197,20 @@ class AutomationAuditDetector(Detector):
             insights.append(self._build_insight(packet, now=now))
         return insights
 
-    async def _load_iot_classes(
+    # NOTE: _load_iot_classes was removed in v1.5.22. Its async-on-
+    # worker-thread call to homeassistant.loader.async_get_integration
+    # deadlocked against HA's loader internals (which expect to run
+    # on the main event loop). Replaced by a pre-load on the main
+    # loop in run_all_detectors, passed via ctx.iot_class_by_integration.
+    # See detectors/__init__.py.
+    async def _DELETED_load_iot_classes_v15_22(
         self,
         ctx: DetectorContext,
     ) -> dict[str, str]:
-        """Return `{integration_domain: iot_class}` for every integration
-        whose entities are referenced by an audit target. Pulled from
-        HA's integration manifests via `async_get_integration` — the
-        same source HA Settings → Integrations uses to render the
-        cloud/local pill on each integration card.
-
-        Tolerates per-integration failure: a missing or unloadable
-        integration just gets omitted, and the cross-integration
-        observation treats it as 'unknown locality'."""
+        """REMOVED — see note above. Kept as a marker to prevent
+        someone re-introducing the same pattern."""
         if ctx.hierarchy is None:
             return {}
-        # Collect unique integration domains across all audit targets'
-        # entities. integration_of is a dict[entity_id, str | None].
         domains: set[str] = {
             d
             for d in ctx.hierarchy.integration_of.values()
@@ -221,7 +220,7 @@ class AutomationAuditDetector(Detector):
             return {}
         try:
             from homeassistant.loader import async_get_integration
-        except Exception:  # pragma: no cover — HA always has this
+        except Exception:
             return {}
         out: dict[str, str] = {}
         for domain in domains:

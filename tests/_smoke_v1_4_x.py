@@ -2038,10 +2038,21 @@ def _():
     assert "_observe_cross_integration_coupling" in src_pkt
     # Both buckets must be non-empty to trigger
     assert "if not (cloud_entities and local_entities):" in src_pkt
-    # Detector must actually fetch iot_class from HA's loader
-    assert "_load_iot_classes" in src_det
-    assert "async_get_integration" in src_det
-    assert "iot_class_by_integration=iot_class_by_integration" in src_det
+    # v1.5.22: iot_class is loaded ONCE on the main loop in
+    # run_all_detectors (detectors/__init__.py), then passed via
+    # DetectorContext.iot_class_by_integration. The audit detector
+    # reads from ctx — no per-scan await chain in a worker thread,
+    # which deadlocked on installs with many integrations.
+    main_loop_src = _read("custom_components/ha_insights/detectors/__init__.py")
+    assert "async_get_integration" in main_loop_src
+    assert "iot_class_by_integration[domain] = iot_class" in main_loop_src
+    assert "iot_class_by_integration=iot_class_by_integration" in main_loop_src
+    # Audit detector reads from ctx, doesn't await
+    assert "ctx.iot_class_by_integration" in src_det
+    # Sentinel: the renamed _DELETED_ stub is still there as a
+    # tripwire so we catch a regression that re-introduces the
+    # worker-thread call.
+    assert "_DELETED_load_iot_classes_v15_22" in src_det
 
 
 @t("v1.6 Phase 3: ButtonPressHabitDetector pairs press → consequent into automation YAML")
