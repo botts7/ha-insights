@@ -257,11 +257,13 @@ _RECIPES: list[dict[str, Any]] = [
         "name": "Goal tracking",
         "feature_key": "goal_tracker",
         "next_step": 'add goals JSON in Configure → Advanced (e.g. {"bedtime_by": "22:30"})',
-        # Lands on the integration's config-entry page; user clicks
-        # Configure to reach the OptionsFlow wizard. HA core doesn't
-        # expose a deeper URL for individual options-flow steps.
-        "setup_url": "/config/integrations/integration/ha_insights",
-        "setup_url_label": "Open HA Insights Options",
+        # v1.5.17: /config/integrations/integration/<domain> rendered
+        # blank on some HA versions. The canonical dashboard URL
+        # /config/integrations works everywhere — user clicks the
+        # HA Insights tile, then Configure. One extra click but
+        # zero confusion.
+        "setup_url": "/config/integrations",
+        "setup_url_label": "Open HA Integrations (click the HA Insights tile → Configure)",
         "setup_url_external": False,
         "scenarios": [
             "Track 'you make it to bedtime by 22:30 on 4 of 7 nights'",
