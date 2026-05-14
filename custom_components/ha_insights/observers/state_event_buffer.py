@@ -57,6 +57,16 @@ class StateEvent:
     context_user_id: str | None = None
     from_bootstrap: bool = False
     context_id: str | None = None
+    # v1.5.18: parent_id distinguishes "automation chain" from "no
+    # context at all". Combined with context_user_id and the entity's
+    # integration locality (local vs cloud), this lets ManualHabit /
+    # setup_quality count physical-switch presses as manual (they
+    # have user_id=None AND parent_id=None AND come from local
+    # integrations like zigbee2mqtt, esphome, mqtt, hue, etc.).
+    # Cloud-app-managed entities (Tuya schedule, SmartThings routine)
+    # stay excluded because their no-context signal is indistinguishable
+    # from a real physical press to us.
+    context_parent_id: str | None = None
     # v1.5 (Gotcha 8): provenance — "live" (captured from the HA
     # event bus in real time) vs "recorder" (backfilled from
     # HA's recorder history). The two have different completeness:
@@ -212,6 +222,7 @@ class StateEventBuffer:
                         context_user_id=ev.context_user_id,
                         from_bootstrap=ev.from_bootstrap,
                         context_id=ev.context_id,
+                        context_parent_id=ev.context_parent_id,
                         source=ev.source,
                     )
                 )

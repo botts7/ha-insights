@@ -91,11 +91,18 @@ class ManualHabitDetector(Detector):
         if ctx.event_buffer is None:
             return []
 
+        # v1.5.18: build the local-integration set once so the candidate
+        # filter can recognize physical-switch events (no context_user_id
+        # AND no context_parent_id AND entity from a local integration).
+        # Without this, wall-switch presses look like automation events
+        # and never count as manual habits — even though they ARE manual.
+        local_integration_entities = self._build_local_integration_set(ctx)
+
         # Filter buffer to MANUAL events only. Bucket by (entity, target_state).
         cutoff = datetime.now(tz=UTC) - timedelta(days=_LOOKBACK_DAYS)
         groups: dict[tuple[str, str], list["StateEvent"]] = defaultdict(list)
         for ev in ctx.event_buffer.query(since=cutoff):
-            if not self._is_candidate_event(ev):
+            if not self._is_candidate_event(ev, local_integration_entities):
                 continue
             assert ev.new_state is not None
             groups[(ev.entity_id, ev.new_state)].append(ev)
@@ -116,11 +123,29 @@ class ManualHabitDetector(Detector):
 
     # -------- candidate filter --------
 
-    def _is_candidate_event(self, ev: "StateEvent") -> bool:
+    def _is_candidate_event(
+        self,
+        ev: "StateEvent",
+        local_integration_entities: frozenset[str],
+    ) -> bool:
         if ev.new_state is None or ev.new_state == ev.old_state:
             return False
-        # Manual-only. context_user_id None = automation / system change.
-        if ev.context_user_id is None:
+        # v1.5.18: classify origin via context attribution.
+        #   - context_user_id set         → HA UI / mobile app → manual ✓
+        #   - context_parent_id set       → automation chain   → skip
+        #   - neither set, local entity   → likely physical switch → manual ✓
+        #   - neither set, cloud entity   → likely vendor app   → skip (could
+        #                                     be a Tuya schedule, can't tell)
+        #   - neither set, unknown entity → skip (conservative)
+        is_manual = False
+        if ev.context_user_id is not None:
+            is_manual = True  # HA UI / mobile app
+        elif ev.context_parent_id is None:
+            # No HA-side context at all → physical or external. Local
+            # integration → physical switch press; cloud → vendor app.
+            if ev.entity_id in local_integration_entities:
+                is_manual = True
+        if not is_manual:
             return False
         if ev.domain in self.domains_default_blocked:
             return False
@@ -129,6 +154,36 @@ class ManualHabitDetector(Detector):
         if ev.new_state not in _DOMAIN_SERVICE_MAP[ev.domain]:
             return False
         return True
+
+    def _build_local_integration_set(
+        self, ctx: "DetectorContext"
+    ) -> frozenset[str]:
+        """Entity IDs whose source integration is locally hosted (Zigbee,
+        Z-Wave, ESPHome, MQTT, Hue local-bridge, etc.). Mirrors the
+        cloud/local classifier in audit/packet.py — local entities can
+        have no-context events that are physical switch presses; cloud
+        entities can have no-context events that are vendor-app schedules
+        and shouldn't count as manual."""
+        if ctx.hierarchy is None:
+            return frozenset()
+        # Same allow-list used by the audit cross-integration detector
+        # (audit/packet.py _LOCAL_INTEGRATIONS via iot_class). We keep
+        # this list here as a defensive duplicate so manual_habit
+        # doesn't pull from the audit module (different concern, same
+        # facts). When v1.5.15's iot_class loader is available via
+        # ctx, this can shrink to a single call.
+        local_platforms = frozenset({
+            "esphome", "mqtt", "zha", "zwave_js", "matter", "knx",
+            "modbus", "shelly", "tasmota", "wled", "deconz",
+            "zigbee2mqtt", "rfxtrx", "rflink", "homekit_controller",
+            "lutron_caseta", "hue", "axis", "amcrest", "frigate",
+            "blueiris", "reolink",
+        })
+        out: set[str] = set()
+        for eid, platform in ctx.hierarchy.integration_of.items():
+            if platform in local_platforms:
+                out.add(eid)
+        return frozenset(out)
 
     # -------- evaluation --------
 

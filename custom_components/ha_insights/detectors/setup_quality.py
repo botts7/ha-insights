@@ -151,22 +151,50 @@ def _has_goals_configured(ctx: DetectorContext) -> tuple[bool, str]:
     return (False, "no goals set")
 
 
+_LOCAL_INTEGRATION_PLATFORMS: frozenset[str] = frozenset({
+    "esphome", "mqtt", "zha", "zwave_js", "matter", "knx", "modbus",
+    "shelly", "tasmota", "wled", "deconz", "zigbee2mqtt", "rfxtrx",
+    "rflink", "homekit_controller", "lutron_caseta", "hue", "axis",
+    "amcrest", "frigate", "blueiris", "reolink",
+})
+
+
 def _has_user_context_events(ctx: DetectorContext) -> tuple[bool, str]:
-    """Buffer must contain at least some events with context_user_id —
-    proves the user actually clicks things in HA's UI / app, not just
-    everything-via-automation."""
+    """Buffer must contain at least some events that look manual.
+    "Manual" = either (a) HA dashboard/app click (context_user_id set)
+    or (b) physical switch press (no user_id AND no parent_id AND
+    entity from a local integration). v1.5.18 expanded this beyond
+    UI clicks — a wall-switch toggle IS a manual habit even though
+    HA doesn't see a user_id for it."""
     if ctx.event_buffer is None:
         return (False, "buffer empty")
-    n_manual = 0
+    # Local-integration entity set for the physical-switch heuristic.
+    local_entities: set[str] = set()
+    if ctx.hierarchy is not None:
+        for eid, platform in ctx.hierarchy.integration_of.items():
+            if platform in _LOCAL_INTEGRATION_PLATFORMS:
+                local_entities.add(eid)
+    n_manual = 0  # HA UI / app
+    n_physical = 0  # likely physical switch (no context + local)
     n_total = 0
     for ev in ctx.event_buffer.query():
         n_total += 1
         if ev.context_user_id is not None:
             n_manual += 1
+        elif (
+            getattr(ev, "context_parent_id", None) is None
+            and ev.entity_id in local_entities
+        ):
+            n_physical += 1
     if n_total == 0:
         return (False, "buffer empty")
-    pct = n_manual / n_total * 100
-    return (n_manual >= 20, f"{n_manual}/{n_total} manual events ({pct:.0f}%)")
+    combined = n_manual + n_physical
+    pct = combined / n_total * 100
+    detail = (
+        f"{combined}/{n_total} manual events ({pct:.0f}%) — "
+        f"{n_manual} UI + {n_physical} likely physical"
+    )
+    return (combined >= 20, detail)
 
 
 # Per-feature setup recipes. Order matters — checks evaluate top→bottom;
@@ -234,9 +262,11 @@ _RECIPES: list[dict[str, Any]] = [
     {
         "name": "Manual habits & routines",
         "feature_key": "manual_habit",
-        "next_step": "toggle entities from the dashboard / app for a week so HA records the user context",
-        # No URL — the remedy is behavioural ("use HA for a week").
-        # Frontend renders next_step as plain text in this case.
+        # v1.5.18: physical switches count too now (no user_id + no
+        # parent_id + local integration = likely wall-switch press).
+        # Update the user-facing text to reflect that.
+        "next_step": "use your home for a week — press wall switches, tap dashboard, use the mobile app; anything user-initiated rather than scheduled gets recorded as a manual habit",
+        # No URL — the remedy is behavioural.
         "setup_url": None,
         "setup_url_label": None,
         "setup_url_external": False,
@@ -247,7 +277,7 @@ _RECIPES: list[dict[str, Any]] = [
             "Distinguish your habits from automation noise in the timeline",
         ],
         "tiers": [
-            ("USELESS", [_has_user_context_events], "No recent manual UI / app interactions detected in the 14-day buffer. Either you automate everything (great problem to have), or HA hasn't seen enough activity yet. Toggle entities from the dashboard / app for a week."),
+            ("USELESS", [_has_user_context_events], "No recent manual events detected in the 14-day buffer. Manual events are HA UI clicks, mobile-app toggles, AND physical switch presses (when the entity is from a local integration like Zigbee, Z-Wave, ESPHome, MQTT, or Hue's local bridge). Either you automate everything (great problem to have), or HA hasn't seen enough activity yet."),
             ("LIMITED", [_has_user_context_events], "Some manual events present — ManualHabit and Routine detectors will fire on the clearest patterns."),
             ("GOOD", [_has_user_context_events, _has_area_coverage], "Manual events + area tagging — both detectors will surface high-quality suggestions with room context."),
             ("GREAT", [_has_user_context_events, _has_area_coverage, _has_recorder_retention], "All signals + 30d recorder retention — pattern detection benefits from longer history."),

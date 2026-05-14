@@ -1,15 +1,52 @@
 # HA Insights for Home Assistant
 
-> *Proactive pattern detection + AI-assisted automation auditing for Home Assistant. Watches your home, finds bugs in the automations you've already written, and suggests fixes.*
+> **Automation suggestions from what your home actually does — not what it could do.**
+>
+> HA Insights mines the last 14 days of your event history and surfaces patterns
+> worth automating: routines you keep doing manually, schedules that match real
+> behaviour, anomalies that mean something just broke, and automations that
+> have started silently failing.
+>
+> Every suggestion is grounded in **observed events**, not a guess from your entity
+> list. The 10+ deterministic detectors run locally with zero tokens spent.
+> LLM is the **fallback for polish** — never the foundation.
 
-![status: v1.2.0](https://img.shields.io/badge/status-v1.2.0-green)
+![status: v1.5](https://img.shields.io/badge/status-v1.5-green)
 ![python: 3.13](https://img.shields.io/badge/python-3.13-blue)
 ![home assistant: 2025.6+](https://img.shields.io/badge/home%20assistant-2025.6+-blue)
 ![license: MIT](https://img.shields.io/badge/license-MIT-lightgrey)
 
 ---
 
-## What it does
+## What HA Insights finds
+
+| If your home shows... | HA Insights surfaces |
+|---|---|
+| `light.kitchen` ON 11/14 days clustering at ~17:27 (±8 min spread) | **Streak**: "Build automation? 11 days at ~17:27" — windowed match, not exact-minute |
+| Door sensor that fired 38× its 14-day baseline today | **Frequency anomaly**: stuck loop, manual override, or genuine event burst |
+| 3 entities in an automation are currently `unavailable` | **Audit**: "automation will silently fail until X comes back" |
+| Inverter switch ON ~10 hrs/day, 11/14 days | **Long-tail**: "Auto-off after 120 min?" |
+| Tuya entity + ESPHome entity in one automation | **Reliability**: "cloud outage will fire local side silently" |
+| Phone charging that never finishes before bedtime | **Predictive**: "you'll be at 9% by your usual bedtime" |
+| Light schedule that drifts with sunset across the year | **Seasonality**: "tracks sunset within ~8 min" |
+
+Detectors emit **windowed** matches, not exact-minute claims — a streak at "~17:27"
+means a cluster within a tolerance band, and the title shows the cluster spread
+on hover. The integration is honest about uncertainty.
+
+## Privacy floor — table stakes, not features
+
+- **Local-first**: every detector runs on-device. No internet required for the core experience.
+- **LLM is opt-in and optional**: pick local (Ollama, HA Assist) or cloud (Anthropic, OpenAI). Off by default.
+- **"What gets sent?" modal**: see the exact redacted payload before any cloud call. Entity IDs, area names, and your custom labels are redacted by default.
+- **Audit log viewer**: every LLM call recorded with prompt + token cost + redacted payload. Reviewable in the panel any time.
+- **Entity-level blocklist**: opt-out specific entities from any analysis.
+- **Three-tier maturity**: STABLE / BETA / EXPERIMENTAL detectors; experimental gated off by default.
+- **Opt-in community analytics**: off by default; aggregated detector performance only, never per-event data.
+
+---
+
+## What it does (full)
 
 **Two modes**, both work without any LLM:
 

@@ -2044,6 +2044,34 @@ def _():
     assert "iot_class_by_integration=iot_class_by_integration" in src_det
 
 
+@t("v1.5.18: manual_habit + setup_quality count physical switches as manual")
+def _():
+    """Wall-switch presses don't carry context.user_id (no HA user
+    triggered them) — pre-v1.5.18 they looked indistinguishable from
+    automation-triggered events and were skipped. ManualHabitDetector +
+    setup_quality._has_user_context_events now ALSO accept events with
+    no user_id AND no parent_id AND entity from a local integration
+    (Zigbee, Z-Wave, ESPHome, MQTT, Hue local-bridge, etc.) as manual.
+    Cloud-app-managed entities stay excluded — their no-context signal
+    is indistinguishable from a vendor schedule."""
+    buf = _read("custom_components/ha_insights/observers/state_event_buffer.py")
+    # parent_id captured on StateEvent
+    assert "context_parent_id: str | None = None" in buf
+    init = _read("custom_components/ha_insights/__init__.py")
+    # Parent_id resolved from HA's Context object
+    assert 'getattr(new_state.context, "parent_id", None)' in init
+    assert "context_parent_id=ctx_parent" in init
+    # ManualHabitDetector accepts physical switches
+    mh = _read("custom_components/ha_insights/detectors/manual_habit.py")
+    assert "local_integration_entities" in mh
+    assert "ev.context_parent_id is None" in mh
+    assert "_build_local_integration_set" in mh
+    # setup_quality counts physical events
+    sq = _read("custom_components/ha_insights/detectors/setup_quality.py")
+    assert "n_physical" in sq
+    assert "_LOCAL_INTEGRATION_PLATFORMS" in sq
+
+
 @t("v1.5.16: HA-semantic filters live in lib/event_filters.py")
 def _():
     """Filters that used to be inlined in each daily-pattern detector

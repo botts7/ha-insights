@@ -155,6 +155,7 @@ async def _setup_entry_body(
         # this to filter manual events vs system events.
         ctx_user = None
         ctx_id: str | None = None
+        ctx_parent: str | None = None
         try:
             if getattr(new_state, "context", None) is not None:
                 ctx_user = new_state.context.user_id
@@ -163,9 +164,17 @@ async def _setup_entry_body(
                 # scene activations, and script runs produce N
                 # state_changed events with the SAME context.id.
                 ctx_id = getattr(new_state.context, "id", None)
+                # v1.5.18: parent_id distinguishes automation-chain
+                # events (parent set) from no-context events (both
+                # user_id AND parent_id None — physical switch press
+                # or external integration). ManualHabit uses this
+                # to count physical-switch events as manual when
+                # they originate from local integrations.
+                ctx_parent = getattr(new_state.context, "parent_id", None)
         except Exception:  # noqa: BLE001
             ctx_user = None
             ctx_id = None
+            ctx_parent = None
 
         # Mark events that fired within the bootstrap window WITH
         # old_state=None. HA's automation state trigger has this same
@@ -197,6 +206,7 @@ async def _setup_entry_body(
                 context_user_id=ctx_user,
                 from_bootstrap=from_bootstrap,
                 context_id=ctx_id,
+                context_parent_id=ctx_parent,
             )
         )
 

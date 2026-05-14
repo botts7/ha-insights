@@ -1,4 +1,5 @@
 {
   "name": "HA Insights",
+  "description": "Evidence-based automation suggestions from your actual HA event history. 10+ deterministic detectors (streak, schedule, anomaly, correlation, audit) work locally with no LLM required. Optional LLM 'Refine' for polish - suggestions are always grounded in observed behaviour.",
   "render_readme": true
 }
