@@ -195,6 +195,23 @@ async def _setup_entry_body(
                 if event_ts <= bs_until:
                     from_bootstrap = True
 
+        # v1.6: capture event_type attribute for HA event.* entities.
+        # The Event platform (https://developers.home-assistant.io/docs/
+        # core/entity/event) is HA's native way to surface button presses
+        # and similar discrete user signals. The state string is just a
+        # timestamp (unique per fire, useless for grouping); the
+        # `event_type` attribute is what we actually need.
+        event_type: str | None = None
+        if domain == "event":
+            try:
+                attrs = new_state.attributes
+                if isinstance(attrs, dict):
+                    val = attrs.get("event_type")
+                    if isinstance(val, str):
+                        event_type = val
+            except Exception:  # noqa: BLE001
+                event_type = None
+
         buffer_.add(
             StateEvent(
                 timestamp=new_state.last_changed or datetime.now(tz=UTC),
@@ -207,6 +224,7 @@ async def _setup_entry_body(
                 from_bootstrap=from_bootstrap,
                 context_id=ctx_id,
                 context_parent_id=ctx_parent,
+                event_type=event_type,
             )
         )
 

@@ -67,6 +67,15 @@ class StateEvent:
     # stay excluded because their no-context signal is indistinguishable
     # from a real physical press to us.
     context_parent_id: str | None = None
+    # v1.6: button-press attribution via HA's native `event` platform.
+    # For domain == "event", `new_state` is a timestamp string (which
+    # is unique per fire, useless for pattern matching). The MEANINGFUL
+    # value is the `event_type` attribute — "single_press", "long_press",
+    # "rotate_clockwise_step_3", etc. Captured here so detectors can
+    # group by it instead of by the unique-per-fire timestamp state.
+    # Populated only when domain == "event"; None for everything else.
+    # See https://developers.home-assistant.io/docs/core/entity/event
+    event_type: str | None = None
     # v1.5 (Gotcha 8): provenance — "live" (captured from the HA
     # event bus in real time) vs "recorder" (backfilled from
     # HA's recorder history). The two have different completeness:
@@ -223,6 +232,7 @@ class StateEventBuffer:
                         from_bootstrap=ev.from_bootstrap,
                         context_id=ev.context_id,
                         context_parent_id=ev.context_parent_id,
+                        event_type=ev.event_type,
                         source=ev.source,
                     )
                 )

@@ -129,6 +129,22 @@ async def backfill(
                 continue
             if ts.tzinfo is None:
                 ts = ts.replace(tzinfo=UTC)
+            # v1.6: recorder preserves attributes — capture event_type
+            # for backfilled `event.*` entities so historical button
+            # presses can participate in streak / cooccurrence
+            # detection. Recorder may store attributes per state row
+            # OR drop them depending on `recorder.exclude_attributes`
+            # config; we tolerate either silently.
+            ev_type: str | None = None
+            if domain == "event":
+                try:
+                    attrs = getattr(state, "attributes", None)
+                    if isinstance(attrs, dict):
+                        val = attrs.get("event_type")
+                        if isinstance(val, str):
+                            ev_type = val
+                except Exception:  # noqa: BLE001
+                    ev_type = None
             event = StateEvent(
                 timestamp=ts,
                 entity_id=entity_id,
@@ -136,6 +152,7 @@ async def backfill(
                 area_id=area_id,
                 old_state=prior_state,
                 new_state=new_state,
+                event_type=ev_type,
                 # v1.5 (Gotcha 8): tag provenance so detectors that
                 # care about event-count parity can compensate for
                 # recorder's significance filtering.

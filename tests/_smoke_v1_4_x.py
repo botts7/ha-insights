@@ -2044,6 +2044,34 @@ def _():
     assert "iot_class_by_integration=iot_class_by_integration" in src_det
 
 
+@t("v1.6 Phase 1: StateEvent captures event_type for HA event.* entities")
+def _():
+    """HA's native `event` platform exposes button presses as entities
+    whose state is a timestamp (unique per fire — useless for grouping)
+    and whose `event_type` attribute carries the meaningful value
+    ("single_press", "long_press", etc.). Phase 1 captures that
+    attribute so streak/cooccurrence/manual_habit can group by it
+    in Phase 2. Field is None for every non-event entity — additive,
+    no behaviour change for existing detectors."""
+    buf = _read("custom_components/ha_insights/observers/state_event_buffer.py")
+    # Dataclass field
+    assert "event_type: str | None = None" in buf
+    # Native-HA reference in the comment so readers find the platform doc
+    assert "developers.home-assistant.io/docs/core/entity/event" in buf
+    # Rename helper preserves the field
+    assert "event_type=ev.event_type" in buf
+    # Live capture path
+    init = _read("custom_components/ha_insights/__init__.py")
+    assert 'if domain == "event":' in init
+    assert 'attrs.get("event_type")' in init
+    assert "event_type=event_type" in init
+    # Recorder backfill captures it too — historical button presses
+    # need to participate in pattern detection
+    bf = _read("custom_components/ha_insights/observers/history_backfill.py")
+    assert 'if domain == "event":' in bf
+    assert "event_type=ev_type" in bf
+
+
 @t("v1.5.18: manual_habit + setup_quality count physical switches as manual")
 def _():
     """Wall-switch presses don't carry context.user_id (no HA user
