@@ -2044,6 +2044,39 @@ def _():
     assert "iot_class_by_integration=iot_class_by_integration" in src_det
 
 
+@t("v1.6 Phase 3: ButtonPressHabitDetector pairs press → consequent into automation YAML")
+def _():
+    """The cross-link detector. For each event.* firing, find state
+    changes within 30s on OTHER entities. Stable patterns (5+ occurrences,
+    60%+ consistency) emit AUTOMATION_PROPOSAL with apply-able YAML.
+    Skips patterns already covered by existing automations. Native HA
+    primitives only — no event-bus subscription, no per-integration
+    normalizer; reads the existing state_event_buffer which captures
+    event_type since v1.5.19."""
+    src = _read(
+        "custom_components/ha_insights/detectors/button_press_habit.py"
+    )
+    # Detector exists + registered + correct kind
+    assert "class ButtonPressHabitDetector" in src
+    assert "@register_detector" in src
+    assert 'name = "button_press_habit"' in src
+    assert "kind = InsightKind.AUTOMATION_PROPOSAL" in src
+    # BETA gate — untested in the field yet
+    assert "maturity = Maturity.BETA" in src
+    # Cross-link window + thresholds
+    assert "_CONSEQUENT_WINDOW_SEC" in src
+    assert "_MIN_OCCURRENCES" in src
+    assert "_MIN_CONSISTENCY" in src
+    # Only event.* firings drive the pattern
+    assert 'ev.domain != "event"' in src or 'if ev.domain != "event"' in src
+    # Existing-automation dedup
+    assert "_already_automated" in src
+    # YAML builder emits a real automation block
+    assert '"platform": "state"' in src
+    assert '"condition": "template"' in src
+    assert "trigger.to_state.attributes.event_type" in src
+
+
 @t("v1.6 Phase 2: detectors group event.* entities by event_type")
 def _():
     """Phase 1 captured event_type on StateEvent. Phase 2 makes
