@@ -207,6 +207,52 @@ def is_recorder_sourced(ev: Any) -> bool:
     return getattr(ev, "source", "live") == "recorder"
 
 
+# ---------- Long-silence detection -----------------------------------------
+
+#: Default gap that signals a virtual "unavailable" period — an entity
+#: hasn't reported anything for this long, then suddenly fires, the
+#: fire is almost certainly a poll-cycle wake-up rather than a real
+#: behavioural transition. Tuned conservatively (8h) to avoid filtering
+#: real overnight schedules (a light off at 22:00 then on at 07:00 is
+#: 9h, but the entity itself usually has SOME interim activity from
+#: HA's regular state polling). Vehicle / BLE / cloud-poll integrations
+#: typically have full overnight silence with no interim updates.
+LONG_SILENCE_GAP_HOURS: float = 8.0
+
+
+def is_after_long_silence(
+    event_time: datetime,
+    prior_event_time: datetime | None,
+    gap_hours: float = LONG_SILENCE_GAP_HOURS,
+) -> bool:
+    """True iff this event followed a >`gap_hours` silence from the
+    same entity. Treat such events like an `unavailable → X` transition —
+    a poll-cycle wake-up rather than real behaviour.
+
+    Why this matters: some integrations (BYD, Tesla, sleepy BLE,
+    cloud-polled APIs) do NOT report `unavailable` when they go idle.
+    They just stop reporting. From HA's perspective the entity's state
+    looks frozen at its last-known value until the next poll lands.
+    The poll then produces a `state_changed` event that looks like a
+    real transition but is just "we finally heard back from the device."
+
+    Caller threads through the previous timestamp from the same entity
+    in the time-ordered event scan. `prior_event_time=None` means "no
+    prior observation in window" — the event is INDETERMINATE (could
+    be first event after buffer cutoff, could be a real first-of-day
+    transition). Return False in that case; we don't have evidence
+    of silence.
+
+    Gotcha 6 covers the explicit `unavailable` case via
+    `is_from_unavailable_state`. This helper covers the implicit case
+    where the integration reports stale state instead of `unavailable`.
+    """
+    if prior_event_time is None:
+        return False
+    gap_seconds = (event_time - prior_event_time).total_seconds()
+    return gap_seconds >= gap_hours * 3600.0
+
+
 # ---------- Pattern-value extraction ---------------------------------------
 
 

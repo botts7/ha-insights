@@ -24,12 +24,23 @@ def find_conflicts(
     existing_automations: list[dict[str, Any]],
     *,
     time_window_min: int = DEFAULT_TIME_WINDOW_MIN,
+    members_of: dict[str, frozenset[str]] | None = None,
 ) -> list[str]:
     """Return identifiers of existing automations that overlap with this insight.
 
     Identifier preference: 'id' field, then 'alias', then 'unknown'. Caller
     can use the returned list to attach `conflicts_with` on the Insight or
     to suppress emission entirely.
+
+    v1.5.24: if `members_of` is supplied (HA's group → members map +
+    scene → entity-list map from hierarchy), we expand group/scene
+    entity_ids to their members before set-comparing action targets.
+    This catches the case where the insight proposes targeting a group
+    (`light.backyard_garden_lights`) but the existing automation
+    targets the individual members (`light.deck_01, light.deck_02, …`)
+    OR a scene (`scene.evening_garden`) that contains those entities.
+    Previously these went undetected — same intent, different target
+    surface.
     """
     if insight.payload_format != "automation":
         return []
@@ -37,7 +48,9 @@ def find_conflicts(
     candidate = insight.payload
     conflicts: list[str] = []
     for existing in existing_automations:
-        if _automations_overlap(candidate, existing, time_window_min):
+        if _automations_overlap(
+            candidate, existing, time_window_min, members_of=members_of
+        ):
             ident = (
                 existing.get("id")
                 or existing.get("alias")
@@ -47,8 +60,32 @@ def find_conflicts(
     return conflicts
 
 
+def _expand_groups_and_scenes(
+    entities: set[str],
+    members_of: dict[str, frozenset[str]] | None,
+) -> set[str]:
+    """Expand each entity_id to include its members if it's a container
+    (group / scene / group_light). The container itself stays in the
+    set — both forms count as "this automation targets X."
+
+    With no `members_of` map, returns the set unchanged (legacy behavior).
+    """
+    if not members_of:
+        return entities
+    out = set(entities)
+    for eid in list(entities):
+        members = members_of.get(eid)
+        if members:
+            out.update(members)
+    return out
+
+
 def _automations_overlap(
-    a: dict[str, Any], b: dict[str, Any], time_window_min: int
+    a: dict[str, Any],
+    b: dict[str, Any],
+    time_window_min: int,
+    *,
+    members_of: dict[str, frozenset[str]] | None = None,
 ) -> bool:
     """Detect overlap between two automations: target + trigger pattern.
 
@@ -72,7 +109,14 @@ def _automations_overlap(
     b_triggers = _as_list(b.get("trigger"))
     a_entities = _extract_target_entities(a.get("action", []))
     b_entities = _extract_target_entities(b.get("action", []))
-    target_overlap = bool(a_entities & b_entities)
+    # v1.5.24: expand both sides to include group / scene members.
+    # `light.backyard_garden_lights` (a group) intersects with an
+    # automation that targets any of its 6 members. Same intent —
+    # different target surface. With no members_of map, this is a
+    # no-op (legacy literal-set behavior).
+    a_expanded = _expand_groups_and_scenes(a_entities, members_of)
+    b_expanded = _expand_groups_and_scenes(b_entities, members_of)
+    target_overlap = bool(a_expanded & b_expanded)
     if not target_overlap:
         # Different action targets = different intent. No conflict.
         return False

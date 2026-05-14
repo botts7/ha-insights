@@ -487,7 +487,17 @@ async def run_all_detectors(
             if existing_automations:
                 from ..apply.conflict_scanner import find_conflicts
 
-                conflicts = find_conflicts(insight, existing_automations)
+                # v1.5.24: pass hierarchy.members_of so the scanner
+                # can expand group/scene entity_ids to their members.
+                # Without this, `light.backyard_garden_lights` (a group)
+                # never matched an existing automation that targeted
+                # individual lights — both meant "same intent" but the
+                # literal set-intersection missed it.
+                conflicts = find_conflicts(
+                    insight,
+                    existing_automations,
+                    members_of=container_to_members,
+                )
                 if conflicts:
                     suppressed_as_duplicate += 1
                     insight = replace(

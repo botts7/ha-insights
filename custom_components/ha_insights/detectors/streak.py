@@ -21,7 +21,11 @@ from typing import TYPE_CHECKING
 from homeassistant.util import dt as dt_util
 
 from ..insight import Insight, InsightKind
-from ..lib.event_filters import is_from_unavailable_state, pattern_value
+from ..lib.event_filters import (
+    is_after_long_silence,
+    is_from_unavailable_state,
+    pattern_value,
+)
 from .base import Detector, DetectorContext, register_detector
 
 if TYPE_CHECKING:
@@ -53,7 +57,23 @@ class StreakDetector(Detector):
 
         cutoff = datetime.now(tz=UTC) - timedelta(days=_LOOKBACK_DAYS)
         groups: dict[tuple[str, str], list[StateEvent]] = defaultdict(list)
+        # v1.5.25: track the previous event timestamp per entity so we
+        # can drop "post-long-silence" events — implicit poll wake-ups
+        # that look like real transitions but are just the integration
+        # finally reporting state after going dark for hours. BYD car,
+        # sleepy BLE devices, cloud-polled APIs.
+        last_seen_at: dict[str, datetime] = {}
         for ev in ctx.event_buffer.query(since=cutoff):
+            prior_ts = last_seen_at.get(ev.entity_id)
+            last_seen_at[ev.entity_id] = ev.timestamp
+            if (
+                ev.domain != "event"
+                and is_after_long_silence(ev.timestamp, prior_ts)
+            ):
+                # Post-silence wake-up: skip. Don't update last_seen
+                # AGAIN — already set above so the NEXT event still
+                # has the right anchor for gap detection.
+                continue
             if not self._is_candidate_event(ev):
                 continue
             # v1.6: pattern_value() returns event_type for event.*

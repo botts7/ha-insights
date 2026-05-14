@@ -16,7 +16,11 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 from ..insight import Insight, InsightKind
-from ..lib.event_filters import is_from_unavailable_state, pattern_value
+from ..lib.event_filters import (
+    is_after_long_silence,
+    is_from_unavailable_state,
+    pattern_value,
+)
 from .base import Detector, DetectorContext, Maturity, register_detector
 
 if TYPE_CHECKING:
@@ -82,6 +86,25 @@ class CooccurrenceDetector(Detector):
 
         cutoff = datetime.now(tz=UTC) - timedelta(days=self.LOOKBACK_DAYS)
         events = sorted(ctx.event_buffer.query(since=cutoff), key=lambda e: e.timestamp)
+        # v1.5.25: drop post-long-silence events (poll wake-ups) up
+        # front. Cooccurrence is especially vulnerable — when a sleepy
+        # device wakes up, ALL its entities fire ~simultaneously, which
+        # manufactures "B follows A within 1s" pairs across every
+        # sibling. The long-silence filter catches this without the
+        # entity having to literally report `unavailable`.
+        if events:
+            filtered: list[StateEvent] = []
+            last_seen_at: dict[str, datetime] = {}
+            for ev in events:
+                prior_ts = last_seen_at.get(ev.entity_id)
+                last_seen_at[ev.entity_id] = ev.timestamp
+                if (
+                    ev.domain != "event"
+                    and is_after_long_silence(ev.timestamp, prior_ts)
+                ):
+                    continue
+                filtered.append(ev)
+            events = filtered
         if len(events) < self.MIN_OCCURRENCES * 2:
             return []
 

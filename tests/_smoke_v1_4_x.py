@@ -2055,6 +2055,51 @@ def _():
     assert "_DELETED_load_iot_classes_v15_22" in src_det
 
 
+@t("v1.5.24: conflict scanner expands groups + scenes via members_of")
+def _():
+    """User report: light.backyard_garden_lights (a group) wasn't being
+    marked 🔁 already automated even though they have a real 23:27
+    automation. Cause: literal set-intersection of action entity_ids.
+    Insight proposed targeting the group; automation targeted the
+    individual members. Different surface, same intent — no match
+    under literal comparison. Fix: pass hierarchy.members_of, expand
+    both sides to include group/scene members before set-intersect."""
+    src = _read("custom_components/ha_insights/apply/conflict_scanner.py")
+    assert "members_of: dict[str, frozenset[str]] | None = None" in src
+    assert "def _expand_groups_and_scenes(" in src
+    assert "_expand_groups_and_scenes(a_entities, members_of)" in src
+    assert "_expand_groups_and_scenes(b_entities, members_of)" in src
+    # Caller threads the hierarchy map through
+    caller = _read("custom_components/ha_insights/detectors/__init__.py")
+    assert "members_of=container_to_members" in caller
+
+
+@t("v1.5.25: long-silence filter — implicit poll wake-ups don't count as transitions")
+def _():
+    """BYD car / sleepy BLE / cloud-polled integrations go idle without
+    reporting `unavailable` — they just stop reporting. When the next
+    poll fires hours later, the state change looks real but is just
+    "we finally heard back." Filter: any event that comes after >=8h
+    of silence from the same entity is treated like
+    unavailable→X (Gotcha 6's implicit case).
+
+    Applied to streak / schedule / cooccurrence / seasonality — every
+    daily-pattern detector. Exempted for event.* entities (their
+    last-fire timestamp is the state, so silence is structural, not
+    sleepy)."""
+    lib = _read("custom_components/ha_insights/lib/event_filters.py")
+    assert "def is_after_long_silence(" in lib
+    assert "LONG_SILENCE_GAP_HOURS" in lib
+    for module in ("streak", "schedule", "cooccurrence", "seasonality"):
+        src = _read(f"custom_components/ha_insights/detectors/{module}.py")
+        assert (
+            "is_after_long_silence" in src
+        ), f"{module}.py doesn't import the long-silence filter"
+        assert (
+            "is_after_long_silence(ev.timestamp, prior_ts)" in src
+        ), f"{module}.py doesn't call the filter in scan()"
+
+
 @t("v1.5.23: cohort dedup requires ALL entities to share a device — None absorbs no longer")
 def _():
     """User report: a Tuya pet feeder binary_sensor got false-merged
@@ -2273,9 +2318,16 @@ def _():
     # Each daily-pattern detector imports from the shared module
     for module in ("streak", "schedule", "seasonality", "cooccurrence"):
         src = _read(f"custom_components/ha_insights/detectors/{module}.py")
-        assert (
-            "from ..lib.event_filters import is_from_unavailable_state" in src
-        ), f"{module}.py doesn't import the shared filter"
+        # v1.5.16 introduced the shared filter; v1.5.25 expanded the
+        # import (added is_after_long_silence) so it's now a multi-line
+        # tuple. Tolerant check: just look for the function name being
+        # imported from the shared module.
+        assert "from ..lib.event_filters import" in src, (
+            f"{module}.py doesn't import from lib.event_filters at all"
+        )
+        assert "is_from_unavailable_state" in src, (
+            f"{module}.py doesn't reference the shared filter"
+        )
     # frequency_anomaly uses the both-sides variant
     src = _read("custom_components/ha_insights/detectors/frequency_anomaly.py")
     assert (

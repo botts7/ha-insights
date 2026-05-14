@@ -25,7 +25,10 @@ from typing import TYPE_CHECKING
 from homeassistant.util import dt as dt_util
 
 from ..insight import Insight, InsightKind
-from ..lib.event_filters import is_from_unavailable_state
+from ..lib.event_filters import (
+    is_after_long_silence,
+    is_from_unavailable_state,
+)
 from .base import Detector, DetectorContext, register_detector
 
 if TYPE_CHECKING:
@@ -71,7 +74,16 @@ class SeasonalityDetector(Detector):
 
         cutoff = datetime.now(tz=UTC) - timedelta(days=self.LOOKBACK_DAYS)
         groups: dict[tuple[str, str], list[StateEvent]] = defaultdict(list)
+        # v1.5.25: drop post-long-silence events (poll wake-ups).
+        last_seen_at: dict[str, datetime] = {}
         for ev in ctx.event_buffer.query(since=cutoff):
+            prior_ts = last_seen_at.get(ev.entity_id)
+            last_seen_at[ev.entity_id] = ev.timestamp
+            if (
+                ev.domain != "event"
+                and is_after_long_silence(ev.timestamp, prior_ts)
+            ):
+                continue
             if not self._is_candidate_event(ev):
                 continue
             # Skip transient device-passing-through states (media_player
