@@ -170,18 +170,36 @@ def _has_schedule_like_trigger(triggers: list[Any]) -> bool:
 
 def _state_trigger_signatures(
     triggers: list[Any],
-) -> set[tuple[str, str | None]]:
-    """Extract (entity_id, to_state) signatures from state triggers.
+) -> set[tuple[str, str | None, int | None]]:
+    """Extract (entity_id, to_state, for_seconds) signatures from state
+    triggers.
 
     `to` is normalized to None when missing so triggers without a
     specific value (the "any change" form) match each other.
+
+    v1.5.27: `for:` duration is now part of the signature. Two
+    automations that trigger on `light.x → on` but with very
+    different `for:` durations have materially different firing
+    semantics — one fires immediately, the other fires N minutes
+    after the state stays. Treating them as conflicts produced
+    annoying false-positive duplicate flags. With for_seconds in
+    the signature, only matched-or-both-missing `for:` count as
+    conflicts.
+
+    `for_seconds` is None when no `for:` is set (the "fire
+    immediately" form). When both triggers omit `for:`, both sigs
+    have None and match — preserves legacy behavior for the common
+    case. When one has `for:` and the other doesn't, sigs differ —
+    no match — no conflict flagged. That's the intended semantics
+    refinement.
     """
-    sigs: set[tuple[str, str | None]] = set()
+    sigs: set[tuple[str, str | None, int | None]] = set()
     for t in triggers:
         if not isinstance(t, dict) or t.get("platform") != "state":
             continue
         eid = t.get("entity_id")
         to_val = t.get("to")
+        for_seconds = _normalize_duration(t.get("for"))
         # entity_id can be a string or list of strings
         if isinstance(eid, str):
             entity_ids = [eid]
@@ -200,8 +218,59 @@ def _state_trigger_signatures(
             to_values = [None]
         for e in entity_ids:
             for v in to_values:
-                sigs.add((e, v))
+                sigs.add((e, v, for_seconds))
     return sigs
+
+
+def _normalize_duration(value: Any) -> int | None:
+    """Convert HA's varied `for:` formats into seconds.
+
+    Accepts:
+      - None / missing                  → None (no `for:` set)
+      - int / float / numeric str       → integer seconds
+      - "HH:MM:SS" or "MM:SS" or "SS"   → parsed seconds
+      - {"hours": 1, "minutes": 30, …}  → summed seconds
+      - anything else (template?)       → None (can't compare safely)
+
+    Templates land on None because comparing templated durations
+    requires runtime evaluation — out of scope for a static
+    conflict scanner. Two automations with template `for:` won't
+    falsely match by signature; they'll get the v1.5.27 "for is
+    unknown, don't compare" treatment.
+    """
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return None  # filter booleans out before int check below
+    if isinstance(value, (int, float)):
+        return int(value)
+    if isinstance(value, str):
+        # Could be "300" (seconds), "5:00", "00:05:00", etc.
+        try:
+            return int(value)
+        except ValueError:
+            pass
+        parts = value.split(":")
+        try:
+            if len(parts) == 3:
+                h, m, s = (int(p) for p in parts)
+                return h * 3600 + m * 60 + s
+            if len(parts) == 2:
+                m, s = (int(p) for p in parts)
+                return m * 60 + s
+        except ValueError:
+            return None
+        return None
+    if isinstance(value, dict):
+        try:
+            return (
+                int(value.get("hours", 0)) * 3600
+                + int(value.get("minutes", 0)) * 60
+                + int(value.get("seconds", 0))
+            )
+        except (TypeError, ValueError):
+            return None
+    return None
 
 
 def _as_list(value: Any) -> list[Any]:

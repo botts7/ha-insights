@@ -2079,6 +2079,24 @@ def _():
         )
 
 
+@t("v1.5.27: conflict scanner factors `for:` duration into state-trigger signatures")
+def _():
+    """Two state triggers with the same entity + to_state but materially
+    different `for:` durations have different firing semantics — one
+    fires immediately, the other fires N min after the state stays.
+    Pre-v1.5.27 we flagged them as conflicts; user-visible noise.
+    The fix adds for_seconds to the signature tuple. Both-missing
+    still match (legacy case). Mismatched `for:` no longer matches."""
+    src = _read("custom_components/ha_insights/apply/conflict_scanner.py")
+    # Signature includes for_seconds
+    assert "set[tuple[str, str | None, int | None]]" in src
+    assert "for_seconds = _normalize_duration(t.get(\"for\"))" in src
+    # Helper handles HA's varied duration formats
+    assert "def _normalize_duration(" in src
+    # Tuple uses the new triple
+    assert "sigs.add((e, v, for_seconds))" in src
+
+
 @t("v1.5.24: conflict scanner expands groups + scenes via members_of")
 def _():
     """User report: light.backyard_garden_lights (a group) wasn't being
