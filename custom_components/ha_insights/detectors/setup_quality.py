@@ -180,6 +180,15 @@ _RECIPES: list[dict[str, Any]] = [
         # One-line action the user can act on without opening the
         # insight payload. Surfaced in the insight title.
         "next_step": "install the Home Assistant Companion App on your phone",
+        # Deep-link the user lands on when they click the "Set this
+        # up" button on the setup-guide card. Two flavours:
+        #   - internal HA path → opens in same tab via <a href>
+        #   - external URL     → external_url=True opens in new tab
+        # Use `None` for features whose remedy is behavioural (no URL
+        # is meaningful — e.g. "use HA for a week").
+        "setup_url": "https://companion.home-assistant.io/",
+        "setup_url_label": "Get the Companion App",
+        "setup_url_external": True,
         # Concrete scenarios this feature would unlock at GOOD tier.
         # The user sees these in the insight explanation so they
         # know WHY it's worth fixing.
@@ -200,6 +209,9 @@ _RECIPES: list[dict[str, Any]] = [
         "name": "Room presence inference",
         "feature_key": "presence_inference",
         "next_step": "assign rooms to your entities in Settings → Areas & Zones",
+        "setup_url": "/config/areas/dashboard",
+        "setup_url_label": "Open Areas & Zones",
+        "setup_url_external": False,
         "scenarios": [
             "Detect 'you're usually in the kitchen at 07:15 on weekdays'",
             "Flag rooms that haven't been used in the lookback window",
@@ -217,6 +229,11 @@ _RECIPES: list[dict[str, Any]] = [
         "name": "Manual habits & routines",
         "feature_key": "manual_habit",
         "next_step": "toggle entities from the dashboard / app for a week so HA records the user context",
+        # No URL — the remedy is behavioural ("use HA for a week").
+        # Frontend renders next_step as plain text in this case.
+        "setup_url": None,
+        "setup_url_label": None,
+        "setup_url_external": False,
         "scenarios": [
             "Spot 'you toggle the lounge lamp manually at 18:42 on weeknights'",
             "Bundle related actions into a multi-entity 'evening routine'",
@@ -234,6 +251,12 @@ _RECIPES: list[dict[str, Any]] = [
         "name": "Goal tracking",
         "feature_key": "goal_tracker",
         "next_step": 'add goals JSON in Configure → Advanced (e.g. {"bedtime_by": "22:30"})',
+        # Lands on the integration's config-entry page; user clicks
+        # Configure to reach the OptionsFlow wizard. HA core doesn't
+        # expose a deeper URL for individual options-flow steps.
+        "setup_url": "/config/integrations/integration/ha_insights",
+        "setup_url_label": "Open HA Insights Options",
+        "setup_url_external": False,
         "scenarios": [
             "Track 'you make it to bedtime by 22:30 on 4 of 7 nights'",
             "Score how often you leave for work on time",
@@ -374,6 +397,12 @@ class SetupQualityDetector(Detector):
             "advice": advice,
             "next_step": next_step,
             "scenarios_unlocked": scenarios,
+            # v1.5.11: structured deep-link so the setup-guide card
+            # can render a real button instead of leaving the user
+            # to navigate by prose.
+            "setup_url": recipe.get("setup_url"),
+            "setup_url_label": recipe.get("setup_url_label"),
+            "setup_url_external": bool(recipe.get("setup_url_external")),
         }
         return Insight(
             id=Insight.compute_id(InsightKind.PATTERN_OBSERVATION, fingerprint),
@@ -417,54 +446,89 @@ class SetupQualityDetector(Detector):
         # INLINE in the rollup so the user sees the actionable
         # next-steps in one place.
         useless_items: list[tuple[str, str]] = []  # (feature, next_step)
+        # v1.5.11: structured per-feature data for the setup-guide
+        # frontend body. The dialog renders each entry as a card
+        # with tier badge, scenarios, next-step text + deeplink
+        # button. Includes ALL features (not just USELESS) so the
+        # user sees what's already wired AND what to add.
+        setup_steps: list[dict[str, Any]] = []
         if per_feature_full:
-            for recipe, tier, _advice in per_feature_full:
+            for recipe, tier, advice in per_feature_full:
                 if tier == "USELESS":
                     useless_items.append(
                         (recipe["name"], recipe.get("next_step", ""))
                     )
+                setup_steps.append(
+                    {
+                        "feature": recipe["name"],
+                        "feature_key": recipe["feature_key"],
+                        "tier": tier,
+                        "advice": advice,
+                        "next_step": recipe.get("next_step", ""),
+                        "scenarios": list(recipe.get("scenarios", [])),
+                        "setup_url": recipe.get("setup_url"),
+                        "setup_url_label": recipe.get("setup_url_label"),
+                        "setup_url_external": bool(
+                            recipe.get("setup_url_external")
+                        ),
+                    }
+                )
 
         # Title leads with the count of fixable gaps — most actionable
         # framing. Falls back to the old score-only title when nothing
         # is fixable (LIMITED-only setups).
+        #
+        # Wording note: "Setup completeness" not "Setup health".
+        # USELESS in this detector means "optional integration not
+        # wired", not "your install is broken". A user with 1 GREAT
+        # feature and 3 USELESS sees 25% — labelling that "health"
+        # made the install look unwell when it was actually fine and
+        # just missing optional add-ons. followup.
+        wired = counts["GOOD"] + counts["GREAT"]
+        partial = counts["LIMITED"]
         if useless_items:
             title = (
-                f"⚙️ Setup health {score*100:.0f}%: "
-                f"{len(useless_items)} thing"
-                f"{'s' if len(useless_items) > 1 else ''} would unlock "
-                "high-impact detectors. Tap for next steps."
+                f"⚙️ Setup completeness {score*100:.0f}% — "
+                f"{wired} of {n} wired, {len(useless_items)} setup step"
+                f"{'s' if len(useless_items) > 1 else ''} would unlock more."
             )
         else:
             title = (
-                f"⚙️ Setup health {score*100:.0f}%: "
-                f"{counts['LIMITED']} feature"
-                f"{'s' if counts['LIMITED'] > 1 else ''} could be improved."
+                f"⚙️ Setup completeness {score*100:.0f}% — "
+                f"{wired} of {n} wired, {partial} could be improved."
             )
 
-        # Explanation lists each USELESS gap + its one-line action,
-        # then notes the LIMITED + GOOD progress. The user sees this
-        # under the title without expanding the payload.
+        # Explanation leads with WHAT'S WORKING (so the user doesn't
+        # read "25%" and assume their install is broken), then lists
+        # the unlock steps for unconfigured features.
         lines: list[str] = []
-        if useless_items:
-            lines.append("Not yet unlocked (tap each to learn more):")
-            for feature, step in useless_items:
-                if step:
-                    lines.append(f"  • {feature} — {step}")
-                else:
-                    lines.append(f"  • {feature}")
+        wired_count = counts["GOOD"] + counts["GREAT"]
+        if wired_count:
+            lines.append(
+                f"Working: {wired_count} feature"
+                f"{'s' if wired_count > 1 else ''} wired and producing "
+                "insights."
+            )
         if counts["LIMITED"]:
-            lines.append("")
+            if lines:
+                lines.append("")
             lines.append(
                 f"In progress: {counts['LIMITED']} feature"
                 f"{'s' if counts['LIMITED'] > 1 else ''} "
                 "(see the per-feature card below for next step)."
             )
-        if counts["GREAT"]:
-            lines.append("")
+        if useless_items:
+            if lines:
+                lines.append("")
             lines.append(
-                f"Working great: {counts['GREAT']} feature"
-                f"{'s' if counts['GREAT'] > 1 else ''}."
+                "Optional add-ons not yet configured "
+                "(each is one setup step):"
             )
+            for feature, step in useless_items:
+                if step:
+                    lines.append(f"  • {feature} — {step}")
+                else:
+                    lines.append(f"  • {feature}")
         explanation = "\n".join(lines)
 
         fingerprint = {"kind": "setup_quality_summary"}
@@ -478,10 +542,17 @@ class SetupQualityDetector(Detector):
             "useless_next_steps": [
                 {"feature": f, "next_step": s} for f, s in useless_items
             ],
+            # v1.5.11: full per-feature setup-guide data. The
+            # frontend's setup_quality-specific dialog body renders
+            # this as a guided checklist with deeplink buttons.
+            "setup_steps": setup_steps,
             "advice": (
-                "Address the 'Not yet unlocked' items first — each is a "
-                "one-step setup change that activates a detector you "
-                "don't have right now."
+                "Setup completeness scores the OPTIONAL add-ons that "
+                "unlock additional detectors — not the health of your "
+                "current install. Your wired features are producing "
+                "insights normally; each 'Optional add-ons' item below "
+                "is a one-step change that would activate another "
+                "detector family."
             ),
         }
         return Insight(

@@ -1929,8 +1929,80 @@ def _():
     )
     # Bullet-style listing in the explanation so the user sees the
     # next steps under the title without expanding the payload.
-    assert "Not yet unlocked (tap each to learn more):" in src
+    # v1.5.11 reworded: "Setup health" → "Setup completeness" and
+    # "Not yet unlocked" → "Optional add-ons not yet configured" so
+    # the 25% score doesn't read as "your install is broken".
+    assert "Optional add-ons not yet configured" in src
     assert 'lines.append(f"  • {feature} — {step}")' in src
+
+
+@t("setup_quality: title says 'Setup completeness', not 'Setup health'")
+def _():
+    """The original 'Setup health 25%' framing made a perfectly working
+    install with one wired feature and three unconfigured optional
+    add-ons look critically unwell. v1.5.11 reframes the metric as
+    completeness (% of optional integrations wired), with a 'Working:
+    N features wired and producing insights' line leading the
+    explanation. If this test fails, the misleading 'health' label is
+    back and users with healthy installs will see a scary 25% score."""
+    src = _read(
+        "custom_components/ha_insights/detectors/setup_quality.py"
+    )
+    assert "Setup completeness" in src
+    # Title-construction f-strings must not contain the old wording.
+    # (Comments and docstrings explaining the rename are allowed.)
+    assert 'f"⚙️ Setup health' not in src
+    # Explanation must lead with positive framing
+    assert "Working: " in src or "wired and producing" in src
+
+
+@t("setup_quality: payload carries setup_url for deep-link buttons")
+def _():
+    """Recipes must declare a setup_url + label so the frontend can
+    render a real button ('Open Areas & Zones') instead of leaving the
+    user to read prose and navigate manually."""
+    src = _read(
+        "custom_components/ha_insights/detectors/setup_quality.py"
+    )
+    # All four well-known feature_keys must appear with their URL
+    # field. URL value is checked loosely — exact path may shift.
+    assert "presence_inference" in src
+    assert "/config/areas/dashboard" in src
+    assert "/config/integrations/integration/ha_insights" in src
+    assert "companion.home-assistant.io" in src
+    # The summary payload must expose setup_steps for the frontend
+    assert '"setup_steps": setup_steps' in src
+    # Per-feature payload must expose setup_url
+    assert '"setup_url": recipe.get("setup_url")' in src
+
+
+@t("panel: setup_quality dialog uses setup-guide body (not YAML refine)")
+def _():
+    """The generic dialog body assumes there's YAML to refine. setup_quality
+    insights are observational — they tell the user 'wire X to unlock
+    detector Y'. The dialog must branch on detector === 'setup_quality'
+    to show a guided checklist with deeplink buttons, hiding the
+    payload editor, Customize rename, Refine/Test actions, and Apply
+    button (none of which make sense for an observational insight)."""
+    src = _read("dev/config/www/ha-insights-panel.js")
+    assert "_renderSetupGuideBody" in src
+    assert "_renderSetupStep" in src
+    # Dialog must branch on the detector name
+    assert 'insight.detector === "setup_quality"' in src
+    # Setup-guide body must include explicit Dismiss + Snooze footer
+    # (no Apply — observational insights aren't applyable).
+    assert "setup-guide-body" in src
+
+
+@t("card: setup_quality dialog uses setup-guide body (not YAML refine)")
+def _():
+    """Same fix as panel.js but in the Lovelace card variant. Users on
+    a custom dashboard see the card's dialog, not the panel's."""
+    src = _read("dev/config/www/ha-insights-card.js")
+    assert "_renderSetupGuideBody" in src
+    assert "_renderSetupStep" in src
+    assert 'insight.detector === "setup_quality"' in src
+    assert "setup-guide-body" in src
 
 
 @t("OptionsFlow: __init__ initializes audit fields defensively")
