@@ -1998,6 +1998,22 @@ def _():
     assert "setup-guide-body" in src
 
 
+@t("ws_api: cohort payload carries per-member integration + external_source")
+def _():
+    """When a cohort row aggregates entities from multiple integrations,
+    the row-level 🏷️ external-app badge is suppressed (cohort-safety
+    rule — don't tag a non-Tuya entity as Tuya). The UX cost: user sees
+    the same entity_id in two rows with different badges. Fix: include
+    per-member metadata in the cohort payload so the expanded dropdown
+    can render the badge next to each entity individually."""
+    src = _read("custom_components/ha_insights/ws_api.py")
+    assert "cohort_member_info" in src
+    # Per-member external check must respect the same suppression rule
+    # used at row level: if HA has an automation referencing this
+    # entity, the schedule lives in HA — don't tag it as external.
+    assert "entity_to_automations.get(member_eid)" in src
+
+
 @t("card: setup_quality dialog uses setup-guide body (not YAML refine)")
 def _():
     """Same fix as panel.js but in the Lovelace card variant. Users on

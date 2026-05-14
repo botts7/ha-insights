@@ -657,6 +657,33 @@ async def ws_list(
             else []
         )
         d["cohort_label"] = ins.fingerprint.get("_grouped_under")
+        # v1.5.13: per-member metadata so the expanded cohort dropdown
+        # can render a 🔌 integration + 🏷️ external-app badge next to
+        # each entity_id. The row-level external_source pill (set above)
+        # is suppressed for MIXED-vendor cohorts — but the user expects
+        # to see the badge next to the entity that actually IS Tuya
+        # even when a sibling isn't. Per-entity check: if HA already
+        # has an automation referencing this entity, don't tag it as
+        # externally managed (the user is driving it from HA).
+        cohort_member_info: list[dict[str, Any]] = []
+        if isinstance(cohort, (list, tuple)) and hierarchy is not None:
+            for member_eid in cohort:
+                if not isinstance(member_eid, str):
+                    continue
+                m_integration = hierarchy.integration_of.get(member_eid)
+                m_external = (
+                    None
+                    if entity_to_automations.get(member_eid)
+                    else hierarchy.is_externally_managed(member_eid)
+                )
+                cohort_member_info.append(
+                    {
+                        "entity_id": member_eid,
+                        "integration": m_integration,
+                        "external_source": m_external,
+                    }
+                )
+        d["cohort_member_info"] = cohort_member_info
         # Carry the entity_id list of the entities involved (for dedup
         # at the end of this function — strips per-entity bits from
         # the title to group rows that should display together even
