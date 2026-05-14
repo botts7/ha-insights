@@ -1966,8 +1966,12 @@ def _():
     )
     # All four well-known feature_keys must appear with their URL
     # field. URL value is checked loosely — exact path may shift.
+    # v1.5.12: presence_inference URL moved from /config/areas/dashboard
+    # to /config/devices/dashboard because the Areas dashboard only
+    # lists areas; setting an Area on a DEVICE cascades to all its
+    # entities (the actual assignment workflow).
     assert "presence_inference" in src
-    assert "/config/areas/dashboard" in src
+    assert "/config/devices/dashboard" in src
     assert "/config/integrations/integration/ha_insights" in src
     assert "companion.home-assistant.io" in src
     # The summary payload must expose setup_steps for the frontend

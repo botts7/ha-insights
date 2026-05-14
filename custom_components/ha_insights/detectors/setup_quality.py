@@ -208,9 +208,15 @@ _RECIPES: list[dict[str, Any]] = [
     {
         "name": "Room presence inference",
         "feature_key": "presence_inference",
-        "next_step": "assign rooms to your entities in Settings → Areas & Zones",
-        "setup_url": "/config/areas/dashboard",
-        "setup_url_label": "Open Areas & Zones",
+        # NOTE: /config/areas/dashboard only LISTS areas — there's
+        # no entity-assignment workflow from that page. The correct
+        # path is /config/devices: setting an Area on a device
+        # cascades to every entity that device owns, so a few
+        # clicks covers dozens of entities. Per-entity assignment
+        # exists at /config/entities but is slower.
+        "next_step": "set an Area on each device under Settings → Devices & Services → Devices (it cascades to all that device's entities)",
+        "setup_url": "/config/devices/dashboard",
+        "setup_url_label": "Assign devices to areas",
         "setup_url_external": False,
         "scenarios": [
             "Detect 'you're usually in the kitchen at 07:15 on weekdays'",
@@ -219,7 +225,7 @@ _RECIPES: list[dict[str, Any]] = [
             "Power room-by-room energy and activity dashboards",
         ],
         "tiers": [
-            ("USELESS", [_has_area_coverage], "Most entities aren't tagged with an Area. Open Settings → Areas & Zones, assign rooms to lights / sensors / switches. Without area tags the detector can't infer where the user is."),
+            ("USELESS", [_has_area_coverage], "Most entities aren't tagged with an Area. Open Settings → Devices & Services → Devices and set an Area on each device — every entity that device owns inherits it, so this is the fastest path. Per-entity overrides live under Settings → Entities. Without area tags the detector can't infer where the user is."),
             ("LIMITED", [_has_area_coverage], "Some areas covered — presence inference will fire but only for tagged rooms. Tag the rest for full-house coverage."),
             ("GOOD", [_has_area_coverage, _has_many_areas], "Healthy area + entity coverage — presence inference will produce reliable room-level insights."),
             ("GREAT", [_has_area_coverage, _has_many_areas, _has_recorder_retention], "Area coverage + 30d+ recorder = stable seasonal-pattern detection at room granularity."),
