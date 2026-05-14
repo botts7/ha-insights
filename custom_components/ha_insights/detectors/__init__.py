@@ -641,9 +641,12 @@ def _find_common_container(
     # device with 3 mode switches). Use the longest common entity-id
     # prefix as a human-readable hint instead of a UUID.
     if device_id_by_entity:
+        # v1.5.23 bugfix: don't discard None from the set — see
+        # hierarchy.find_common_parent for the rationale. Tuya pet
+        # feeder + two group lights got merged because the groups
+        # have no device, and the previous code absorbed them.
         device_ids = {device_id_by_entity.get(eid) for eid in entity_ids}
-        device_ids.discard(None)
-        if len(device_ids) == 1:
+        if None not in device_ids and len(device_ids) == 1:
             shared = next(iter(device_ids))
             if shared:
                 prefix_label = _common_entity_prefix(entity_ids)

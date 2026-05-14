@@ -174,10 +174,16 @@ class EntityHierarchy:
         if len(entity_ids) < 2:
             return None
 
-        # Case 1: same device_id
+        # Case 1: same device_id.
+        # v1.5.23 bugfix: previous code did `device_ids.discard(None)`
+        # BEFORE checking len==1, which absorbed entities-with-no-device
+        # into a cohort claiming shared-device. {Tuya-pet-feeder,
+        # group-light, group-light} got merged as "device:<feeder>"
+        # because the two groups have device_id=None. The fix:
+        # entities must ALL have a device_id AND it must be the same.
+        # If any entity has no device, they don't share a device.
         device_ids = {self.device_of.get(eid) for eid in entity_ids}
-        device_ids.discard(None)
-        if len(device_ids) == 1:
+        if None not in device_ids and len(device_ids) == 1:
             shared = next(iter(device_ids))
             if shared:
                 return f"device:{shared}"

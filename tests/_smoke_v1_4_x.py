@@ -2055,6 +2055,51 @@ def _():
     assert "_DELETED_load_iot_classes_v15_22" in src_det
 
 
+@t("v1.5.23: cohort dedup requires ALL entities to share a device — None absorbs no longer")
+def _():
+    """User report: a Tuya pet feeder binary_sensor got false-merged
+    with two HA group light entities into one cohort labeled
+    "device:507893…". The two group entities have NO device_id
+    (groups are synthetic), but the previous code did
+    `device_ids.discard(None)` BEFORE the `len == 1` check —
+    absorbing entities-with-no-device into whichever real device
+    happened to be present. Fix: require `None not in device_ids`
+    AND `len(device_ids) == 1` — entities can only share a device
+    if they ALL have one and it matches."""
+    def _strip_comments_and_strings(src: str) -> str:
+        """Return source with all comments and string literals removed
+        so we can assert against ACTIVE code only. Naive but sufficient
+        for these specific assertions (no comments-in-strings or
+        f-string side-effects we care about)."""
+        import re
+        out_lines = []
+        for line in src.split("\n"):
+            # Strip inline / full-line # comments
+            no_comment = re.sub(r"\s*#.*$", "", line)
+            # Strip triple-quoted blocks: not strictly handled per-line,
+            # but for our purposes (a single short block) good enough —
+            # if a `"""` appears we drop the rest of the line.
+            no_comment = re.sub(r'""".*', "", no_comment)
+            no_comment = re.sub(r"'''.*", "", no_comment)
+            out_lines.append(no_comment)
+        return "\n".join(out_lines)
+
+    h_code = _strip_comments_and_strings(
+        _read("custom_components/ha_insights/detectors/hierarchy.py")
+    )
+    # The old buggy pattern is gone from EXECUTABLE code (comments
+    # can still reference it for documentation purposes)
+    assert "device_ids.discard(None)" not in h_code
+    # The fix is in place
+    assert "None not in device_ids and len(device_ids) == 1" in h_code
+    # Sibling fix in conflict-scanner / dedup helper
+    d_code = _strip_comments_and_strings(
+        _read("custom_components/ha_insights/detectors/__init__.py")
+    )
+    assert "device_ids.discard(None)" not in d_code
+    assert "None not in device_ids and len(device_ids) == 1" in d_code
+
+
 @t("v1.6 Phase 3: ButtonPressHabitDetector pairs press → consequent into automation YAML")
 def _():
     """The cross-link detector. For each event.* firing, find state
