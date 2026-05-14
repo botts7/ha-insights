@@ -92,7 +92,7 @@ class ScheduleDetector(Detector):
 
         insights: list[Insight] = []
         for (entity_id, new_state), events in groups.items():
-            insight = self._evaluate_group(entity_id, new_state, events)
+            insight = self._evaluate_group(entity_id, new_state, events, ctx)
             if insight is not None:
                 insights.append(insight)
         return insights
@@ -126,7 +126,11 @@ class ScheduleDetector(Detector):
         return True
 
     def _evaluate_group(
-        self, entity_id: str, new_state: str, events: list[StateEvent]
+        self,
+        entity_id: str,
+        new_state: str,
+        events: list[StateEvent],
+        ctx: DetectorContext,
     ) -> Insight | None:
         if len(events) < self.MIN_OCCURRENCES:
             return None
@@ -191,10 +195,45 @@ class ScheduleDetector(Detector):
         service = self._domain_to_service(domain, new_state)
         weekdays_yaml = [_WEEKDAY_NAMES[d] for d in sorted(weekday_set)]
 
+        # v1.5.26: sun-relative trigger detection. Same rationale as
+        # streak — a "weekdays at 17:23" schedule that's really tied
+        # to sunset will drift across the year and generate
+        # automations that no longer match the user's actual behaviour
+        # by summer. detect_sun_relative_trigger picks sun-relative
+        # only when it's a meaningfully tighter fit than wall clock.
+        sun_trigger_data: tuple[str, int] | None = None
+        try:
+            from .sun_relative import (
+                build_sun_trigger,
+                detect_sun_relative_trigger,
+            )
+
+            in_set_times_local = [
+                dt_util.as_local(ev.timestamp)
+                for ev in events
+                if dt_util.as_local(ev.timestamp).weekday() in weekday_set
+            ]
+            sun_trigger_data = detect_sun_relative_trigger(
+                in_set_times_local, ctx.hass
+            )
+        except Exception:  # noqa: BLE001
+            sun_trigger_data = None
+
+        description = f"Auto-detected routine: {weekday_label} at {time_str}"
+        if sun_trigger_data is not None:
+            trigger_block = [build_sun_trigger(*sun_trigger_data)]
+            description += (
+                f" — actually tracks {sun_trigger_data[0]} "
+                f"({sun_trigger_data[1]:+d}min); using sun trigger so the "
+                "schedule shifts with the seasons."
+            )
+        else:
+            trigger_block = [{"platform": "time", "at": f"{time_str}:00"}]
+
         payload = {
             "alias": f"HA Insights: {weekday_label.lower()} {entity_id} {new_state}",
-            "description": f"Auto-detected routine: {weekday_label} at {time_str}",
-            "trigger": [{"platform": "time", "at": f"{time_str}:00"}],
+            "description": description,
+            "trigger": trigger_block,
             "condition": [{"condition": "time", "weekday": weekdays_yaml}],
             "action": [{"service": service, "target": {"entity_id": entity_id}}],
             "mode": "single",

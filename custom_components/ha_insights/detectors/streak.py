@@ -88,7 +88,9 @@ class StreakDetector(Detector):
 
         insights: list[Insight] = []
         for (entity_id, new_state), events in groups.items():
-            insight = self._evaluate_group(entity_id, new_state, events)
+            # v1.5.26: pass ctx through so the per-group evaluator can
+            # query HA's astral data for sun-relative trigger detection.
+            insight = self._evaluate_group(entity_id, new_state, events, ctx)
             if insight is not None:
                 insights.append(insight)
         return insights
@@ -130,6 +132,7 @@ class StreakDetector(Detector):
         entity_id: str,
         new_state: str,
         events: list[StateEvent],
+        ctx: DetectorContext,
     ) -> Insight | None:
         # All time-of-day arithmetic happens in HA-LOCAL time. Buffer
         # timestamps are UTC; using .date()/.hour/.minute on them
@@ -229,6 +232,40 @@ class StreakDetector(Detector):
         domain = entity_id.split(".", 1)[0] if "." in entity_id else "homeassistant"
         service = self._domain_to_service(domain, new_state)
 
+        # v1.5.26: check if the pattern correlates better with sunset
+        # or sunrise than with the wall clock. A streak that fires at
+        # ~17:30 in December and ~21:30 in June would have huge
+        # clock-time stddev but a tight offset from sunset. Generating
+        # a `platform: time, at: '17:30'` automation for it would be
+        # season-broken — drifts away from the user's actual pattern
+        # as the year progresses. Sun-relative trigger fixes that.
+        # Returns None if clock is the better fit OR fewer than 3
+        # observations OR offset > ±2 hours. See sun_relative.py.
+        sun_trigger_data: tuple[str, int] | None = None
+        try:
+            from .sun_relative import (
+                build_sun_trigger,
+                detect_sun_relative_trigger,
+            )
+
+            sun_trigger_data = detect_sun_relative_trigger(
+                streak_times_local, ctx.hass
+            )
+        except Exception:  # noqa: BLE001
+            sun_trigger_data = None
+
+        if sun_trigger_data is not None:
+            trigger_block = [build_sun_trigger(*sun_trigger_data)]
+            description_extra = (
+                f" Trigger uses HA's sun platform "
+                f"({sun_trigger_data[0]} offset {sun_trigger_data[1]:+d}min) "
+                "so the automation tracks the user's real pattern across "
+                "the year instead of drifting with the seasons."
+            )
+        else:
+            trigger_block = [{"platform": "time", "at": avg_time}]
+            description_extra = ""
+
         payload = {
             "alias": (
                 f"HA Insights: streak {entity_id} -> {new_state} at "
@@ -238,8 +275,9 @@ class StreakDetector(Detector):
                 f"Auto-detected streak: {entity_id} entered '{new_state}' "
                 f"on {len(longest_run)} consecutive days at ~{avg_time[:5]}. "
                 "Confidence is moderate — verify before applying."
+                f"{description_extra}"
             ),
-            "trigger": [{"platform": "time", "at": avg_time}],
+            "trigger": trigger_block,
             "action": [
                 {"service": service, "target": {"entity_id": entity_id}}
             ],

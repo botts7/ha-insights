@@ -2055,6 +2055,30 @@ def _():
     assert "_DELETED_load_iot_classes_v15_22" in src_det
 
 
+@t("v1.5.26: streak + schedule detect sun-relative triggers")
+def _():
+    """A streak / schedule that fires at "17:30" might actually be
+    tied to sunset — and the clock-time triggers we generated would
+    drift away from the user's actual behaviour across the seasons
+    (17:30 in December → 21:30 in June). The sun_relative.py helper
+    already existed (used by manual_habit); v1.5.26 wires it into
+    streak + schedule so their generated YAML uses platform: sun
+    with an offset when sun fits better than the wall clock."""
+    for module in ("streak", "schedule"):
+        src = _read(f"custom_components/ha_insights/detectors/{module}.py")
+        # Imports from sun_relative
+        assert "detect_sun_relative_trigger" in src, (
+            f"{module}.py doesn't import detect_sun_relative_trigger"
+        )
+        assert "build_sun_trigger" in src, (
+            f"{module}.py doesn't import build_sun_trigger"
+        )
+        # Conditional swap of the trigger block
+        assert "if sun_trigger_data is not None:" in src, (
+            f"{module}.py doesn't branch on sun-relative fit"
+        )
+
+
 @t("v1.5.24: conflict scanner expands groups + scenes via members_of")
 def _():
     """User report: light.backyard_garden_lights (a group) wasn't being
