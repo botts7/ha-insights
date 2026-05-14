@@ -1998,6 +1998,39 @@ def _():
     assert "setup-guide-body" in src
 
 
+@t("v1.5.15: audit detector flags cloud + local integration coupling")
+def _():
+    """Automations that mix cloud-dependent integrations with local
+    integrations carry silent-partial-fail risk: cloud outage breaks
+    the cloud side while the local side fires normally, leaving the
+    automation in a half-completed state.
+
+    Classification is DETECTED — pulled from each integration's
+    manifest.json `iot_class` field (HA's official mechanism, same
+    one Settings → Integrations uses for its cloud/local pills).
+    A tiny override map handles cases where the declared iot_class
+    is misleading; the override list is intentionally short because
+    we don't want to maintain a curated allow-list."""
+    src_pkt = _read("custom_components/ha_insights/audit/packet.py")
+    src_det = _read(
+        "custom_components/ha_insights/detectors/automation_audit.py"
+    )
+    assert "OBS_CROSS_INTEGRATION" in src_pkt
+    # iot_class-based classification, not hardcoded list of vendors
+    assert "_IOT_CLASS_TO_BUCKET" in src_pkt
+    assert '"cloud_polling": "cloud"' in src_pkt
+    assert '"local_polling": "local"' in src_pkt
+    assert "_INTEGRATION_BUCKET_OVERRIDES" in src_pkt
+    assert "_classify_integration" in src_pkt
+    assert "_observe_cross_integration_coupling" in src_pkt
+    # Both buckets must be non-empty to trigger
+    assert "if not (cloud_entities and local_entities):" in src_pkt
+    # Detector must actually fetch iot_class from HA's loader
+    assert "_load_iot_classes" in src_det
+    assert "async_get_integration" in src_det
+    assert "iot_class_by_integration=iot_class_by_integration" in src_det
+
+
 @t("v1.5.14: streak/schedule/seasonality/cooccurrence drop FROM-unavailable transitions")
 def _():
     """Vehicle integrations (BYD, Tesla), Bluetooth devices, and any

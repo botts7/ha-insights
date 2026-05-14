@@ -45,6 +45,42 @@ OBS_REDUNDANT_TARGET = "redundant_target"
 OBS_HAS_RECENT_INSIGHTS = "has_recent_insights"
 OBS_NEVER_FIRED = "never_fired_in_buffer"
 OBS_INSUFFICIENT_DATA = "insufficient_data"
+OBS_CROSS_INTEGRATION = "cross_integration_coupling"
+
+# Locality classification of an integration. PRIMARY signal is HA's
+# own `iot_class` field from each integration's manifest.json, which
+# every HA integration declares (values: local_polling, local_push,
+# cloud_polling, cloud_push, assumed_state, calculated). We map those
+# to {cloud, local, synthetic} buckets. The hardcoded overrides below
+# only kick in when iot_class is missing or wrong (rare — legacy
+# integrations that pre-date the schema).
+#
+# Why we don't rely on hardcoded lists alone: new integrations land in
+# HA core monthly; maintaining a curated list is a treadmill we'd lose.
+# iot_class is updated by the integration author and the HA core team
+# during PR review, so it's the source of truth that scales.
+_IOT_CLASS_TO_BUCKET: dict[str, str] = {
+    "cloud_polling": "cloud",
+    "cloud_push": "cloud",
+    "local_polling": "local",
+    "local_push": "local",
+    "local_push_polling": "local",
+    "assumed_state": "synthetic",
+    "calculated": "synthetic",
+}
+# Overrides for integrations whose declared iot_class is misleading or
+# missing. Empty by default — only add entries here when a real-world
+# install shows iot_class doesn't match the user-visible behavior.
+# Maintenance philosophy: keep this list TINY. The point of using
+# iot_class is to avoid maintaining a curated list.
+_INTEGRATION_BUCKET_OVERRIDES: dict[str, str] = {
+    # HA core declares "group" as iot_class=calculated. That's fine —
+    # synthetic buckets are dropped from the analysis. Listed here for
+    # documentation; the override has no effect since it matches the
+    # iot_class derivation.
+    "group": "synthetic",
+    "template": "synthetic",
+}
 
 # When an entity reports a non-broken state but `last_changed` is older
 # than this, flag as "stale state" — integrations sometimes cache the
@@ -117,6 +153,7 @@ def build_audit_packet(
     rollup_window_days: int | None = None,
     live_states: dict[str, str] | None = None,
     live_state_last_changed: dict[str, datetime] | None = None,
+    iot_class_by_integration: dict[str, str] | None = None,
     now: datetime | None = None,
 ) -> AuditPacket:
     """Build an AuditPacket for one automation. Pure function.
@@ -200,6 +237,18 @@ def build_audit_packet(
             _observe_redundant_targets(
                 target_entities=target_entities,
                 hierarchy=hierarchy,
+            )
+        )
+
+    # ---- Reliability observation: cloud + local integration mixing ----
+    # v1.5.15 — silent-partial-fail risk. See docstring on
+    # _observe_cross_integration_coupling for the rationale.
+    if hierarchy is not None and all_entities:
+        observations.extend(
+            _observe_cross_integration_coupling(
+                all_entities=all_entities,
+                hierarchy=hierarchy,
+                iot_class_by_integration=iot_class_by_integration or {},
             )
         )
 
@@ -655,6 +704,119 @@ def _observe_redundant_targets(
             )
         )
     return out
+
+
+def _classify_integration(
+    integration: str,
+    iot_class_by_integration: dict[str, str],
+) -> str | None:
+    """Return one of 'cloud', 'local', 'synthetic', or None (unknown).
+
+    Resolution order:
+      1. Hardcoded override (e.g. integrations whose iot_class lies).
+      2. iot_class from the integration's manifest.json.
+      3. None — caller treats as "can't classify, exclude from analysis".
+    """
+    override = _INTEGRATION_BUCKET_OVERRIDES.get(integration)
+    if override is not None:
+        return override
+    iot_class = iot_class_by_integration.get(integration)
+    if iot_class is None:
+        return None
+    return _IOT_CLASS_TO_BUCKET.get(iot_class)
+
+
+def _observe_cross_integration_coupling(
+    *,
+    all_entities: set[str],
+    hierarchy: "EntityHierarchy",
+    iot_class_by_integration: dict[str, str],
+) -> list[Observation]:
+    """v1.5.15 — Flag automations that mix cloud-dependent integrations
+    with local integrations. Cloud outage breaks the cloud side
+    silently while the local side fires normally — silent partial-fail
+    is the worst kind of automation bug because it doesn't surface in
+    HA's own logbook.
+
+    Classification is DETECTED from each integration's manifest
+    `iot_class` field (HA's official mechanism), not from a hardcoded
+    list. A small override map handles the rare cases where the
+    declared iot_class is misleading. See _classify_integration.
+
+    Strategy:
+      1. Bucket every entity into {cloud, local, synthetic, unknown}
+         by its source integration's iot_class.
+      2. If BOTH cloud and local buckets have at least one entity,
+         emit the observation. Pure-cloud is fine (whole thing breaks
+         at once, no silent partial fail). Pure-local is fine. Mixed
+         is the risky case. Synthetic (group, template) is dropped
+         from the analysis entirely.
+      3. Confidence stays modest (0.65) — this is reliability advice,
+         not a definite bug.
+    """
+    if not all_entities:
+        return []
+    cloud_entities: dict[str, list[str]] = {}  # integration → entities
+    local_entities: dict[str, list[str]] = {}
+    for eid in all_entities:
+        platform = hierarchy.integration_of.get(eid)
+        if not platform:
+            continue  # entity has no resolved integration — skip
+        bucket = _classify_integration(platform, iot_class_by_integration)
+        if bucket == "cloud":
+            cloud_entities.setdefault(platform, []).append(eid)
+        elif bucket == "local":
+            local_entities.setdefault(platform, []).append(eid)
+        # synthetic + unknown contribute nothing
+    if not (cloud_entities and local_entities):
+        return []
+    # Build a human-readable text. Lead with the cloud integrations
+    # since those are the failure mode; locals are the "stays up" side.
+    cloud_names = sorted(cloud_entities)
+    local_names = sorted(local_entities)
+    cloud_label = (
+        cloud_names[0]
+        if len(cloud_names) == 1
+        else f"{cloud_names[0]} + {len(cloud_names) - 1} other cloud"
+    )
+    local_label = (
+        local_names[0]
+        if len(local_names) == 1
+        else f"{local_names[0]} + {len(local_names) - 1} other local"
+    )
+    sample_cloud_entity = sorted(
+        eid for ents in cloud_entities.values() for eid in ents
+    )[0]
+    sample_local_entity = sorted(
+        eid for ents in local_entities.values() for eid in ents
+    )[0]
+    text = (
+        f"Mixed cloud + local integrations: this automation depends on "
+        f"{cloud_label} (cloud — e.g. {sample_cloud_entity}) AND "
+        f"{local_label} (local — e.g. {sample_local_entity}). "
+        "If the cloud side outages, the local side will still fire, "
+        "leaving the automation in a half-completed state. Consider a "
+        "fallback condition or split the cloud + local actions."
+    )
+    return [
+        Observation(
+            kind=OBS_CROSS_INTEGRATION,
+            text=text,
+            confidence=0.65,
+            metrics={
+                "cloud_integrations": cloud_names,
+                "local_integrations": local_names,
+                "cloud_entity_sample": sample_cloud_entity,
+                "local_entity_sample": sample_local_entity,
+                "cloud_entity_count": sum(
+                    len(v) for v in cloud_entities.values()
+                ),
+                "local_entity_count": sum(
+                    len(v) for v in local_entities.values()
+                ),
+            },
+        )
+    ]
 
 
 def _format_min_of_day(minute_of_day: int) -> str:
