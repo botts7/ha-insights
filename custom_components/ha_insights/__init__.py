@@ -1460,15 +1460,42 @@ async def _async_register_panel(hass: HomeAssistant) -> None:
         _resolve_panel
     )
 
+    # v1.5.41: include the integration version in the cache-bust query.
+    # Previously cache-bust was just mtime+size — if HACS landed a new
+    # bundle whose bytes happened to identical-or-similar to the
+    # previous one, browsers would happily keep the cached copy and
+    # the user would see stale UI even though they "updated". Tying
+    # cache-bust to the manifest version means every HACS version bump
+    # forces a refetch, regardless of file-byte changes.
+    try:
+        from .const import DOMAIN as _D  # noqa: F401  (kept for clarity)
+
+        manifest = await hass.async_add_executor_job(
+            lambda: __import__("json").load(
+                open(
+                    os.path.join(
+                        os.path.dirname(__file__), "manifest.json"
+                    ),
+                    encoding="utf-8",
+                )
+            )
+        )
+        integration_version = str(manifest.get("version", "unknown"))
+    except Exception:  # noqa: BLE001
+        integration_version = "unknown"
+
     def _read_signature() -> str:
-        """Composite signature: mtime + size. Size catches edits that
-        happen within a 1-second mtime window, which fast `npm run build
-        && cp` cycles produce on local dev."""
+        """Composite signature: version + mtime + size. Size catches
+        edits that happen within a 1-second mtime window, which fast
+        `npm run build && cp` cycles produce on local dev. Version
+        catches HACS-side updates where the bundle bytes might be
+        bit-identical to a previously-cached one (rare but possible
+        for content-stable releases)."""
         try:
             st = os.stat(panel_path)
-            return f"{int(st.st_mtime)}-{st.st_size}"
+            return f"{integration_version}-{int(st.st_mtime)}-{st.st_size}"
         except OSError:
-            return str(int(time.time()))
+            return f"{integration_version}-{int(time.time())}"
 
     cache_bust = await hass.async_add_executor_job(_read_signature)
 
