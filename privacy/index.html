@@ -1,0 +1,1076 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Proactive routine detection and AI-assisted automation suggestions for Home Assistant.">
+      
+      
+      
+        <link rel="canonical" href="https://botts7.github.io/ha-insights/privacy/">
+      
+      
+        <link rel="prev" href="../ARCHITECTURE/">
+      
+      
+        <link rel="next" href="../writing-a-detector/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Privacy - HA Insights</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#ha-insights-privacy" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="HA Insights" class="md-header__button md-logo" aria-label="HA Insights" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            HA Insights
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Privacy
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m17.75 4.09-2.53 1.94.91 3.06-2.63-1.81-2.63 1.81.91-3.06-2.53-1.94L12.44 4l1.06-3 1.06 3zm3.5 6.91-1.64 1.25.59 1.98-1.7-1.17-1.7 1.17.59-1.98L15.75 11l2.06-.05L18.5 9l.69 1.95zm-2.28 4.95c.83-.08 1.72 1.1 1.19 1.85-.32.45-.66.87-1.08 1.27C15.17 23 8.84 23 4.94 19.07c-3.91-3.9-3.91-10.24 0-14.14.4-.4.82-.76 1.27-1.08.75-.53 1.93.36 1.85 1.19-.27 2.86.69 5.83 2.89 8.02a9.96 9.96 0 0 0 8.02 2.89m-1.64 2.02a12.08 12.08 0 0 1-7.8-3.47c-2.17-2.19-3.33-5-3.49-7.82-2.81 3.14-2.7 7.96.31 10.98 3.02 3.01 7.84 3.12 10.98.31"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3m0-7 2.39 3.42C13.65 5.15 12.84 5 12 5s-1.65.15-2.39.42zM3.34 7l4.16-.35A7.2 7.2 0 0 0 5.94 8.5c-.44.74-.69 1.5-.83 2.29zm.02 10 1.76-3.77a7.131 7.131 0 0 0 2.38 4.14zM20.65 7l-1.77 3.79a7.02 7.02 0 0 0-2.38-4.15zm-.01 10-4.14.36c.59-.51 1.12-1.14 1.54-1.86.42-.73.69-1.5.83-2.29zM12 22l-2.41-3.44c.74.27 1.55.44 2.41.44.82 0 1.63-.17 2.37-.44z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/botts7/ha-insights" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    botts7/ha-insights
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="HA Insights" class="md-nav__button md-logo" aria-label="HA Insights" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    HA Insights
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/botts7/ha-insights" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    botts7/ha-insights
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ARCHITECTURE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Privacy
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Privacy
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#tldr" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        TL;DR
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#privacy-modes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Privacy modes
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-ha-insights-observes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What HA Insights observes
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#where-data-lives" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Where data lives
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#default-blocked-domains" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Default-blocked domains
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#per-entity-opt-out-v06" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Per-entity opt-out (v0.6)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#redactor-cloud-local-mode" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Redactor (Cloud + Local mode)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#audit-log" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Audit log
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#how-to-wipe-everything" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How to wipe everything
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#inspecting-whats-stored" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Inspecting what's stored
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-ha-insights-cannot-do-hard-guarantees" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What HA Insights cannot do (hard guarantees)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#authorization-on-the-websocket-surface" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Authorization on the WebSocket surface
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#per-attempt-audit-log" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Per-attempt audit log
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#user-supplied-detectors-sandbox" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        User-supplied detectors (sandbox)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#reporting-privacy-concerns" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reporting privacy concerns
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../writing-a-detector/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Writing a detector
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ws-api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    WebSocket API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#tldr" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        TL;DR
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#privacy-modes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Privacy modes
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-ha-insights-observes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What HA Insights observes
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#where-data-lives" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Where data lives
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#default-blocked-domains" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Default-blocked domains
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#per-entity-opt-out-v06" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Per-entity opt-out (v0.6)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#redactor-cloud-local-mode" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Redactor (Cloud + Local mode)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#audit-log" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Audit log
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#how-to-wipe-everything" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How to wipe everything
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#inspecting-whats-stored" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Inspecting what's stored
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-ha-insights-cannot-do-hard-guarantees" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What HA Insights cannot do (hard guarantees)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#authorization-on-the-websocket-surface" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Authorization on the WebSocket surface
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#per-attempt-audit-log" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Per-attempt audit log
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#user-supplied-detectors-sandbox" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        User-supplied detectors (sandbox)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#reporting-privacy-concerns" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reporting privacy concerns
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+    <a href="https://github.com/botts7/ha-insights/edit/main/docs/privacy.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4zm10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1z"/></svg>
+    </a>
+  
+  
+
+
+<h1 id="ha-insights-privacy">HA Insights — Privacy<a class="headerlink" href="#ha-insights-privacy" title="Permanent link">&para;</a></h1>
+<p>Privacy is the central invariant of this project. This document spells out exactly what gets observed, where it's stored, what does and doesn't cross your network boundary, and how to delete everything.</p>
+<p><strong>If anything in this document differs from what you observe in practice, that's a bug — please open an issue.</strong></p>
+<h2 id="tldr">TL;DR<a class="headerlink" href="#tldr" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Three privacy modes</strong> (Off / Local / Cloud) selected at install + switchable in-place via the OptionsFlow.</li>
+<li><strong>Off</strong> ships zero outbound network calls. All detection is local.</li>
+<li><strong>Local</strong> + <strong>Cloud</strong> both run all data through a redactor before any LLM call: entity_ids become stable pseudonyms (<code>light.entity_a3f1b2</code>), sensitive attributes (GPS / MAC / tokens / passwords / serial) are stripped, per-entity opt-out lets you blocklist specific entities entirely.</li>
+<li><strong>Audit log + previewer</strong>: the panel surfaces every outbound LLM call, and a 🛡️ "What gets sent?" button shows the exact redacted payload before any LLM call.</li>
+<li><strong>One-shot escape hatch</strong>: the <code>ha_insights.purge_observations</code> service wipes observed state, insights, and the outbound-call audit log.</li>
+</ul>
+<h2 id="privacy-modes">Privacy modes<a class="headerlink" href="#privacy-modes" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Mode</th>
+<th>LLM enabled?</th>
+<th>What leaves the host?</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Off</strong></td>
+<td>No</td>
+<td>Nothing. Pattern detection is local-only.</td>
+</tr>
+<tr>
+<td><strong>Local</strong></td>
+<td>Yes — local Conversation agent (Ollama, Piper)</td>
+<td>Pseudonymized payload + redacted text. Stays on your network.</td>
+</tr>
+<tr>
+<td><strong>Cloud</strong></td>
+<td>Yes — cloud Conversation agent (Anthropic, OpenAI, Google AI, Nabu Casa)</td>
+<td>Same pseudonymized payload + redacted text. Real entity_ids never leave. Requires explicit consent in the wizard.</td>
+</tr>
+</tbody>
+</table>
+<p>Mode is changeable in-place via <strong>Settings → Devices &amp; Services → HA Insights → Configure</strong>. Switching INTO Cloud re-prompts the consent dialog.</p>
+<h2 id="what-ha-insights-observes">What HA Insights observes<a class="headerlink" href="#what-ha-insights-observes" title="Permanent link">&para;</a></h2>
+<p>After install + setup, the integration subscribes to <strong>two</strong> HA event-bus events:</p>
+<ol>
+<li><strong><code>state_changed</code></strong> — every state transition for entities in your selected Areas. Default-blocked domains (<code>camera</code>, <code>person</code>, <code>device_tracker</code>, <code>lock</code>) are filtered before they ever enter the buffer.</li>
+<li><strong><code>entity_registry_updated</code></strong> — so a HA-side rename atomically migrates the buffer entries and pseudonym map. Avoids breaking detector history when you rename <code>light.kitchen</code> to <code>light.galley</code>.</li>
+</ol>
+<p>Each accepted state change is appended to an in-memory rolling buffer (default 14-day window, matching the configured <code>lookback_days</code>). On first install, HA's recorder is queried to backfill historical events into the buffer (configurable 0-30 days — 0 disables backfill entirely).</p>
+<h2 id="where-data-lives">Where data lives<a class="headerlink" href="#where-data-lives" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>What</th>
+<th>Where</th>
+<th>Persists across restart?</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>State events (live + backfilled)</td>
+<td>In-memory rolling buffer</td>
+<td>No (recorder backfill repopulates on next setup)</td>
+</tr>
+<tr>
+<td>Insights</td>
+<td><code>&lt;config&gt;/ha_insights_&lt;entry_id&gt;.db</code> (SQLite)</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td>Pseudonym map</td>
+<td>Same SQLite</td>
+<td>Yes (so the LLM sees stable identifiers across calls)</td>
+</tr>
+<tr>
+<td>Applied-history snapshots</td>
+<td>Same SQLite</td>
+<td>Yes (used for future undo)</td>
+</tr>
+<tr>
+<td>Outbound-call audit log</td>
+<td>Same SQLite</td>
+<td>Yes</td>
+</tr>
+</tbody>
+</table>
+<p>The <code>.db</code> filename includes the config-entry id so removing and re-adding the integration creates a fresh database.</p>
+<h2 id="default-blocked-domains">Default-blocked domains<a class="headerlink" href="#default-blocked-domains" title="Permanent link">&para;</a></h2>
+<p>HA Insights ignores all events on:</p>
+<ul>
+<li><code>camera</code> — privacy (image / motion data)</li>
+<li><code>person</code> — privacy (presence / location)</li>
+<li><code>device_tracker</code> — privacy (location)</li>
+<li><code>lock</code> — safety (LLMs never suggest unlock automations, even with explicit user prompting)</li>
+</ul>
+<p>The privacy three (camera / person / device_tracker) are recoverable via custom config in future releases. The safety block on <code>lock</code> stays in every mode regardless — that's a hard rule, not a preference.</p>
+<h2 id="per-entity-opt-out-v06">Per-entity opt-out (v0.6)<a class="headerlink" href="#per-entity-opt-out-v06" title="Permanent link">&para;</a></h2>
+<p>Beyond mode-driven redaction, you can blocklist specific entity_ids that should NEVER reach an LLM in any form. The <code>llm_block_entities</code> config option (set via <code>data</code> or <code>options</code> on the config entry):</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nt">llm_block_entities</span><span class="p">:</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">lock.front_door</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">device_tracker.kids_phone</span>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">sensor.specific_secret_metric</span>
+</span></code></pre></div>
+<p>Behaviour at the redactor layer:
+- Listed entity_ids in payload values become <code>[blocked]</code>
+- Listed entity_ids inside list values are filtered out
+- Free-text mentions of listed entity_ids are masked to <code>[blocked]</code>
+- The <code>🛡️ What gets sent?</code> modal shows a "blocked" count when any opt-out hit</p>
+<h2 id="redactor-cloud-local-mode">Redactor (Cloud + Local mode)<a class="headerlink" href="#redactor-cloud-local-mode" title="Permanent link">&para;</a></h2>
+<p>Every LLM-bound payload runs through:</p>
+<ol>
+<li><strong>Always-redact attribute floor</strong> — these keys are stripped regardless of mode:</li>
+<li><code>gps_lat</code>, <code>gps_lon</code>, <code>latitude</code>, <code>longitude</code>, <code>altitude</code></li>
+<li><code>mac</code>, <code>ip</code>, <code>bssid</code>, <code>ssid</code></li>
+<li><code>password</code>, <code>token</code>, <code>access_token</code>, <code>auth</code>, <code>api_key</code>, <code>secret</code></li>
+<li><code>serial_number</code>, <code>device_id</code></li>
+<li><strong>Per-entity opt-out</strong> (above)</li>
+<li><strong>Pseudonymization</strong> — entity_ids replaced with stable per-call pseudonyms via the local <code>pseudonym_map</code> table. The LLM sees <code>light.entity_a3f1b2</code>; the response is dereferenced back to <code>light.kitchen</code> before display.</li>
+<li><strong>Title + payload deep-walk</strong> — every string value is scanned for entity-id-shaped substrings; matches are replaced.</li>
+</ol>
+<p>The redactor is the same module called by Refine, Explain, and the <code>home_insights/redaction_preview</code> WS endpoint, so the previewer shows the <em>actual</em> output of the same pipeline that gets sent to the LLM.</p>
+<h2 id="audit-log">Audit log<a class="headerlink" href="#audit-log" title="Permanent link">&para;</a></h2>
+<p>Every LLM call (Refine + Explain) writes one row to <code>outbound_calls</code>:
+- Timestamp + insight_id + agent + agent_locality (local / cloud) + redaction_mode
+- Bytes sent + bytes received
+- Success / failure
+- Optional: full redacted payload JSON (off by default; toggle for forensics only)</p>
+<p>The panel's <strong>🛡️ LLM activity</strong> section displays the most recent 25 calls. The full table is queryable via the existing <code>home_insights/audit_log</code> WS command (limit configurable 1-500).</p>
+<h2 id="how-to-wipe-everything">How to wipe everything<a class="headerlink" href="#how-to-wipe-everything" title="Permanent link">&para;</a></h2>
+<p>Fastest path — call the service from Developer Tools → Services, or from any automation:</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nt">service</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ha_insights.purge_observations</span>
+</span></code></pre></div>
+<p>This deletes:</p>
+<ul>
+<li>All in-memory state events</li>
+<li>All insights in the SQLite store</li>
+<li>All outbound-call audit entries</li>
+</ul>
+<p>It <strong>preserves</strong>:</p>
+<ul>
+<li>The pseudonym map — so cross-restart references stay stable</li>
+<li>Applied-history snapshots — so future undo still works for previously-applied automations</li>
+</ul>
+<p>For a complete wipe including pseudonyms and applied-history, remove the integration entirely via <strong>Settings → Devices &amp; Services → HA Insights → Delete</strong>. The next install creates a fresh per-entry SQLite database with no historical state at all.</p>
+<h2 id="inspecting-whats-stored">Inspecting what's stored<a class="headerlink" href="#inspecting-whats-stored" title="Permanent link">&para;</a></h2>
+<p>The SQLite database is plain text-readable from inside the HA container:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>docker<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>-it<span class="w"> </span>homeassistant<span class="w"> </span>sqlite3<span class="w"> </span>/config/ha_insights_&lt;entry_id&gt;.db
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>sqlite&gt;<span class="w"> </span>.tables
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>sqlite&gt;<span class="w"> </span>SELECT<span class="w"> </span>*<span class="w"> </span>FROM<span class="w"> </span>insights<span class="p">;</span>
+</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>sqlite&gt;<span class="w"> </span>SELECT<span class="w"> </span>*<span class="w"> </span>FROM<span class="w"> </span>outbound_calls<span class="p">;</span>
+</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>sqlite&gt;<span class="w"> </span>SELECT<span class="w"> </span>*<span class="w"> </span>FROM<span class="w"> </span>pseudonym_map<span class="p">;</span>
+</span></code></pre></div>
+<p>Or copy the file out of the container (<code>docker cp ...</code>) for offline inspection.</p>
+<h2 id="what-ha-insights-cannot-do-hard-guarantees">What HA Insights <em>cannot</em> do (hard guarantees)<a class="headerlink" href="#what-ha-insights-cannot-do-hard-guarantees" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Two event-bus listeners only: <code>state_changed</code> and <code>entity_registry_updated</code>. No others.</li>
+<li>Does not write to entities outside the automation it creates on Apply.</li>
+<li>Does not call HA services other than <code>automation.reload</code> after writing the automation file (and the action you click Test on, which is by definition explicit).</li>
+<li>In <strong>Off</strong> mode: makes no outbound network connection. (Verified by absence of <code>aiohttp.ClientSession</code> usage in non-LLM code paths.)</li>
+<li>In <strong>Local / Cloud</strong> modes: every outbound call passes through the redactor; the audit log captures the final sent payload size; the previewer can show the exact JSON before sending.</li>
+<li>Sensitive attributes (GPS / MAC / tokens / passwords / serials) are stripped from every insight payload regardless of mode — they never reach the redactor's pseudonymization pass to begin with.</li>
+</ul>
+<h2 id="authorization-on-the-websocket-surface">Authorization on the WebSocket surface<a class="headerlink" href="#authorization-on-the-websocket-surface" title="Permanent link">&para;</a></h2>
+<p>Mutating + cost-incurring WS endpoints require <code>connection.user.is_admin</code>:</p>
+<ul>
+<li><code>home_insights/apply</code> (writes <code>automations.yaml</code>)</li>
+<li><code>home_insights/undo</code></li>
+<li><code>home_insights/purge_all</code> (wipes audit log)</li>
+<li><code>home_insights/test_actions</code> (fires arbitrary services)</li>
+<li><code>home_insights/explain</code>, <code>home_insights/refine</code>, <code>home_insights/hypothesize</code> (cost-incurring LLM calls against the admin's API key)</li>
+<li><code>home_insights/_dev/inject_event</code> (debug-only state injection)</li>
+</ul>
+<p>Read-only and per-user-state endpoints stay open: <code>list</code>, <code>dismiss</code>, <code>snooze</code>, <code>scan_now</code>, <code>subscribe</code>, <code>audit_log</code>, <code>redaction_preview</code>, <code>refine_cost_estimate</code>, <code>hello</code>, <code>list_entries</code>, <code>backfill_status</code>. A non-admin frontend user can review insights and dismiss/snooze them, but can't mutate shared state or burn LLM tokens.</p>
+<h2 id="per-attempt-audit-log">Per-attempt audit log<a class="headerlink" href="#per-attempt-audit-log" title="Permanent link">&para;</a></h2>
+<p>When LLM agent failover walks more than one candidate (e.g. Anthropic times out, integration falls over to Ollama), each round-trip lands in <code>outbound_calls</code> as its own row — not just the successful attempt. The privacy-log sensor's <code>bytes_sent_today</code> reflects total cumulative network egress including failed attempts.</p>
+<p>Each row records the actual responding agent (<code>agent</code>), the locality classification (<code>local</code> / <code>cloud</code> / <code>unknown</code>), the redaction mode at the time, and the byte counts. The <code>est_cost_usd</code> per row uses our pricing table (Anthropic Opus/Sonnet/Haiku, OpenAI 4o/4o-mini, Google Gemini 2.5 Pro/Flash, vendor fallback). Local agents always cost $0.</p>
+<h2 id="user-supplied-detectors-sandbox">User-supplied detectors (sandbox)<a class="headerlink" href="#user-supplied-detectors-sandbox" title="Permanent link">&para;</a></h2>
+<p>Off by default. When a user opts in via OptionsFlow (<code>allow_user_detectors=True</code>), <code>&lt;config&gt;/ha_insights_detectors/*.py</code> files are AST-scanned and rejected if they import network modules (<code>socket</code>, <code>urllib</code>, <code>requests</code>, <code>httpx</code>, <code>aiohttp</code>, <code>ssl</code>, <code>http</code>, <code>ftplib</code>, <code>smtplib</code>, etc.), filesystem-write modules (<code>os</code>, <code>shutil</code>, <code>tempfile</code>, <code>subprocess</code>), code-execution helpers (<code>pickle</code>, <code>marshal</code>, <code>code</code>, <code>ctypes</code>), or use <code>__import__</code>, <code>__builtins__</code>, <code>eval</code>, <code>exec</code>, <code>compile</code>. Modules clearing the scan run with full HA process privileges; the AST check is a best-effort sandbox, not actual subprocess isolation.</p>
+<h2 id="reporting-privacy-concerns">Reporting privacy concerns<a class="headerlink" href="#reporting-privacy-concerns" title="Permanent link">&para;</a></h2>
+<p>If you find HA Insights doing something this document says it doesn't — please open a <a href="https://github.com/botts7/ha-insights/issues">GitHub issue</a> with a reproduction. Privacy bugs are top priority.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+        
+<div class="md-social">
+  
+    
+    
+    
+    
+      
+      
+    
+    <a href="https://github.com/botts7/ha-insights" target="_blank" rel="noopener" title="github.com" class="md-social__link">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.instant", "navigation.tracking", "navigation.sections", "navigation.top", "search.suggest", "search.highlight", "content.code.copy", "content.action.edit"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>

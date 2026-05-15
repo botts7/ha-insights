@@ -1,0 +1,2569 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Proactive routine detection and AI-assisted automation suggestions for Home Assistant.">
+      
+      
+      
+        <link rel="canonical" href="https://botts7.github.io/ha-insights/ARCHITECTURE/">
+      
+      
+        <link rel="prev" href="..">
+      
+      
+        <link rel="next" href="../privacy/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Architecture - HA Insights</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#ha-insights-architecture" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="HA Insights" class="md-header__button md-logo" aria-label="HA Insights" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            HA Insights
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Architecture
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m17.75 4.09-2.53 1.94.91 3.06-2.63-1.81-2.63 1.81.91-3.06-2.53-1.94L12.44 4l1.06-3 1.06 3zm3.5 6.91-1.64 1.25.59 1.98-1.7-1.17-1.7 1.17.59-1.98L15.75 11l2.06-.05L18.5 9l.69 1.95zm-2.28 4.95c.83-.08 1.72 1.1 1.19 1.85-.32.45-.66.87-1.08 1.27C15.17 23 8.84 23 4.94 19.07c-3.91-3.9-3.91-10.24 0-14.14.4-.4.82-.76 1.27-1.08.75-.53 1.93.36 1.85 1.19-.27 2.86.69 5.83 2.89 8.02a9.96 9.96 0 0 0 8.02 2.89m-1.64 2.02a12.08 12.08 0 0 1-7.8-3.47c-2.17-2.19-3.33-5-3.49-7.82-2.81 3.14-2.7 7.96.31 10.98 3.02 3.01 7.84 3.12 10.98.31"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3m0-7 2.39 3.42C13.65 5.15 12.84 5 12 5s-1.65.15-2.39.42zM3.34 7l4.16-.35A7.2 7.2 0 0 0 5.94 8.5c-.44.74-.69 1.5-.83 2.29zm.02 10 1.76-3.77a7.131 7.131 0 0 0 2.38 4.14zM20.65 7l-1.77 3.79a7.02 7.02 0 0 0-2.38-4.15zm-.01 10-4.14.36c.59-.51 1.12-1.14 1.54-1.86.42-.73.69-1.5.83-2.29zM12 22l-2.41-3.44c.74.27 1.55.44 2.41.44.82 0 1.63-.17 2.37-.44z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/botts7/ha-insights" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    botts7/ha-insights
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="HA Insights" class="md-nav__button md-logo" aria-label="HA Insights" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    HA Insights
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/botts7/ha-insights" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    botts7/ha-insights
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#project-frame" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Project frame
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#locked-decisions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Locked decisions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#architecture-7-layers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Architecture (7 layers)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#repo-1-ha-insights-file-tree" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Repo 1: ha-insights file tree
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#load-bearing-contracts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Load-bearing contracts
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Load-bearing contracts">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#insight-insightpy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Insight (insight.py)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#detector-abc-detectorsbasepy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Detector ABC (detectors/base.py)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#websocket-api-semver-stable-from-v01" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WebSocket API (semver-stable from v0.1)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#services" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Services
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v01-hero-scheduledetector" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v0.1 hero: ScheduleDetector
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#privacy-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Privacy model
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Privacy model">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#three-modes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Three modes
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#local-vs-cloud-automatic-behavior-differences" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Local vs Cloud — automatic behavior differences
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#trust-badges-visible-everywhere" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Trust badges — visible everywhere
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-gets-sent-one-tap-from-anywhere" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        "What gets sent?" — one tap from anywhere
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#always-redacted-attributes-built-in-not-user-editable" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Always-redacted attributes (built-in, not user-editable)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#setup-wizard-single-page" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Setup wizard — single page
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#advanced-controls-gated-behind-disclosure" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Advanced controls (gated behind disclosure)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#llm-context-injection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        LLM context injection
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#yaml-validation-pipeline" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        YAML validation pipeline
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="YAML validation pipeline">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#failure-ux" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Failure UX
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#apply-pipeline" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Apply pipeline
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Apply pipeline">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#drift-detection-on-applied-automations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Drift detection on applied automations
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#upgrade-resilience-v02" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Upgrade resilience (v0.2+)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#conflict-detection-with-existing-automations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Conflict detection with existing automations
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#entity-id-rename-handling" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Entity-id rename handling
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#repo-2-ha-insights-card-file-tree" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Repo 2: ha-insights-card file tree
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#data-model-sqlite" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Data model (SQLite)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#operational-policies" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Operational policies
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Operational policies">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#data-lifecycle-retention-defaults-user-tunable" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Data lifecycle &amp; retention (defaults; user-tunable)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#rate-limiting-cost-circuit-breakers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Rate limiting &amp; cost circuit-breakers
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#performance-budget-raspberry-pi-4-reality" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Performance budget (Raspberry Pi 4 reality)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#behavior-on-uninstall" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Behavior on uninstall
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ha-internals-dependency-policy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        HA-internals dependency policy
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ha-version-maintenance-window" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        HA version maintenance window
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#testing-harness-autonomous-dev-loop" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Testing harness &amp; autonomous dev loop
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Testing harness &amp; autonomous dev loop">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#why-this-exists-at-v01" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why this exists at v0.1
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#devdocker-composeyml" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        dev/docker-compose.yml
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#devseedpy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        dev/seed.py
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#devprobepy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        dev/probe.py
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#autonomy-gates-for-ultraplan" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Autonomy gates for /ultraplan
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-the-agent-cannot-do-autonomously" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What the agent cannot do autonomously
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tooling-preconditions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tooling preconditions
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#critical-path-v01" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Critical path (v0.1)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#release-history-actual" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Release history (actual)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#future-roadmap-planned" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Future roadmap (planned)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#risks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Risks
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#success-criteria-for-v01" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Success criteria for v0.1
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#why-no-vector-db-rag-recorded-for-posterity" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why no vector DB / RAG (recorded for posterity)
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../privacy/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Privacy
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../writing-a-detector/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Writing a detector
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ws-api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    WebSocket API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#project-frame" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Project frame
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#locked-decisions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Locked decisions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#architecture-7-layers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Architecture (7 layers)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#repo-1-ha-insights-file-tree" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Repo 1: ha-insights file tree
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#load-bearing-contracts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Load-bearing contracts
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Load-bearing contracts">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#insight-insightpy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Insight (insight.py)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#detector-abc-detectorsbasepy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Detector ABC (detectors/base.py)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#websocket-api-semver-stable-from-v01" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WebSocket API (semver-stable from v0.1)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#services" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Services
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v01-hero-scheduledetector" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v0.1 hero: ScheduleDetector
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#privacy-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Privacy model
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Privacy model">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#three-modes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Three modes
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#local-vs-cloud-automatic-behavior-differences" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Local vs Cloud — automatic behavior differences
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#trust-badges-visible-everywhere" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Trust badges — visible everywhere
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-gets-sent-one-tap-from-anywhere" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        "What gets sent?" — one tap from anywhere
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#always-redacted-attributes-built-in-not-user-editable" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Always-redacted attributes (built-in, not user-editable)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#setup-wizard-single-page" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Setup wizard — single page
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#advanced-controls-gated-behind-disclosure" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Advanced controls (gated behind disclosure)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#llm-context-injection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        LLM context injection
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#yaml-validation-pipeline" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        YAML validation pipeline
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="YAML validation pipeline">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#failure-ux" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Failure UX
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#apply-pipeline" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Apply pipeline
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Apply pipeline">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#drift-detection-on-applied-automations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Drift detection on applied automations
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#upgrade-resilience-v02" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Upgrade resilience (v0.2+)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#conflict-detection-with-existing-automations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Conflict detection with existing automations
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#entity-id-rename-handling" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Entity-id rename handling
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#repo-2-ha-insights-card-file-tree" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Repo 2: ha-insights-card file tree
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#data-model-sqlite" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Data model (SQLite)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#operational-policies" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Operational policies
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Operational policies">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#data-lifecycle-retention-defaults-user-tunable" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Data lifecycle &amp; retention (defaults; user-tunable)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#rate-limiting-cost-circuit-breakers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Rate limiting &amp; cost circuit-breakers
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#performance-budget-raspberry-pi-4-reality" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Performance budget (Raspberry Pi 4 reality)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#behavior-on-uninstall" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Behavior on uninstall
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ha-internals-dependency-policy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        HA-internals dependency policy
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ha-version-maintenance-window" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        HA version maintenance window
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#testing-harness-autonomous-dev-loop" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Testing harness &amp; autonomous dev loop
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Testing harness &amp; autonomous dev loop">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#why-this-exists-at-v01" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why this exists at v0.1
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#devdocker-composeyml" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        dev/docker-compose.yml
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#devseedpy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        dev/seed.py
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#devprobepy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        dev/probe.py
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#autonomy-gates-for-ultraplan" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Autonomy gates for /ultraplan
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-the-agent-cannot-do-autonomously" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What the agent cannot do autonomously
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tooling-preconditions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tooling preconditions
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#critical-path-v01" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Critical path (v0.1)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#release-history-actual" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Release history (actual)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#future-roadmap-planned" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Future roadmap (planned)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#risks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Risks
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#success-criteria-for-v01" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Success criteria for v0.1
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#why-no-vector-db-rag-recorded-for-posterity" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why no vector DB / RAG (recorded for posterity)
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+    <a href="https://github.com/botts7/ha-insights/edit/main/docs/ARCHITECTURE.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4zm10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1z"/></svg>
+    </a>
+  
+  
+
+
+<h1 id="ha-insights-architecture">HA Insights — Architecture<a class="headerlink" href="#ha-insights-architecture" title="Permanent link">&para;</a></h1>
+<blockquote>
+<p><strong>Status:</strong> Drafted 2026-05-08 as the v0.1 implementation charter. The architectural invariants below remain authoritative across releases; phase callouts ("v0.1 ships X", "deferred to v0.2") describe the original roadmap and don't always match what actually shipped. The <a href="https://github.com/botts7/ha-insights/blob/main/README.md">README</a> and <a href="https://github.com/botts7/ha-insights/blob/main/CHANGELOG.md">CHANGELOG</a> reflect the current state (currently <strong>v0.9.0</strong>); a release-history table at the bottom of this doc covers actual ship versus plan.</p>
+</blockquote>
+<h2 id="project-frame">Project frame<a class="headerlink" href="#project-frame" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th></th>
+<th></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Name (long form)</strong></td>
+<td>HA Insights for Home Assistant</td>
+</tr>
+<tr>
+<td><strong>Name (short form)</strong></td>
+<td>HA Insights</td>
+</tr>
+<tr>
+<td><strong>Repos</strong></td>
+<td><code>ha-insights</code> (Python integration) + <code>ha-insights-card</code> (TS Lovelace card)</td>
+</tr>
+<tr>
+<td><strong>Distribution</strong></td>
+<td>HACS — custom repo at first, default after community trust</td>
+</tr>
+<tr>
+<td><strong>License</strong></td>
+<td>MIT</td>
+</tr>
+<tr>
+<td><strong>HA version target</strong></td>
+<td>2025.4+ (stable Conversation Agents API)</td>
+</tr>
+<tr>
+<td><strong>Sibling project</strong></td>
+<td>ESP32-P4 tablet — separate, not coupled</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Branding:</strong> "HA Insights" (short) / "HA Insights for Home Assistant" (long). The <code>ha-</code> prefix follows established HACS community-integration naming convention. We don't claim Nabu Casa affiliation, don't use HA-branded logos/images (per HACS docs), and the "for Home Assistant" qualifier in the long-form name signals third-party status. "Home Assistant" remains a Nabu Casa trademark — Apache 2.0 doesn't grant trademark rights to the exact mark, but we don't use the exact mark either, so this is not a concern.</p>
+<p><strong>Position vs HA's built-in LLM features:</strong> HA's Assist (Conversation + LLM) is <em>reactive</em> — user asks, LLM answers and can act. HA Insights is <em>proactive</em> — observes patterns over time, surfaces suggestions. Same agents, complementary surfaces.</p>
+<p><strong>Coupling rule:</strong> card depends on integration's WebSocket API only. Integration ships zero JS. WS API is semver-stable from v0.1.</p>
+<hr />
+<h2 id="locked-decisions">Locked decisions<a class="headerlink" href="#locked-decisions" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Two repos</strong> — separate release cadence, HACS hygiene.</li>
+<li><strong>Hero (v0.1):</strong> ScheduleDetector — <em>"you do X every weekday at ~T, automate this?"</em></li>
+<li><strong>Privacy is the pillar:</strong> three-mode UX (Off / Local / Cloud), advanced controls gated behind disclosure, trust badges everywhere, "what gets sent?" always one tap away.</li>
+<li><strong>Local LLMs treated differently:</strong> real names, no preview-by-default, privacy domains unblocked (safety domains stay blocked).</li>
+<li><strong>Heuristic builds YAML; LLM writes prose only.</strong> LLM never emits config that gets applied.</li>
+<li><strong>Apply via HA WS config API</strong> + <strong>HA Blueprints by default</strong> (raw automations as advanced fallback).</li>
+<li><strong>Two-layer YAML validation</strong> before apply — <code>cv</code> schema + WS <code>automation/validate</code>.</li>
+<li><strong>HA Conversation agents</strong> wrap the LLM. No provider auth in our code.</li>
+<li><strong>No vector DB / RAG.</strong> SQLite + Python statistics. <code>sqlite-vss</code> is the upgrade path if conversational queries land in v2.x.</li>
+<li><strong>Recorder optional.</strong> ScheduleDetector works on in-memory ring buffer alone.</li>
+<li><strong>Default-blocked domains split:</strong> privacy (camera/person/device_tracker — unblocked locally) vs safety (lock — always blocked).</li>
+<li><strong>Always-redacted attributes:</strong> GPS, MAC, IP, password/token/key, BSSID, serial — regardless of mode.</li>
+</ul>
+<hr />
+<h2 id="architecture-7-layers">Architecture (7 layers)<a class="headerlink" href="#architecture-7-layers" title="Permanent link">&para;</a></h2>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>L7  Surface       WS API · services · privacy_log sensor
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>L6  Apply         WS config-API client · snapshots · undo · drift detection
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>L5  LLM Gateway   redactor · agent_client · privacy log · context injection
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>L4  Insight Store SQLite · dedupe by fingerprint
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>L3  Detection    detector registry · scheduler · conflict detection
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>L2  Entity Graph in-memory: area→entities, fast lookups
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>L1  Ingest       event bus · ring buffer · recorder ro
+</span></code></pre></div>
+<p>L1–L4 are statistical / structural. L5 is opt-in and stateless — each Explain call is one-shot.</p>
+<hr />
+<h2 id="repo-1-ha-insights-file-tree">Repo 1: <code>ha-insights</code> file tree<a class="headerlink" href="#repo-1-ha-insights-file-tree" title="Permanent link">&para;</a></h2>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>ha-insights/
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>├── README.md, LICENSE, hacs.json, pyproject.toml
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>├── .github/workflows/{validate,tests,release}.yml
+</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>├── docs/
+</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>│   ├── installation.md
+</span><span id="__span-1-6"><a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>│   ├── privacy.md                          # THE document
+</span><span id="__span-1-7"><a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>│   ├── writing-a-detector.md               # community on-ramp
+</span><span id="__span-1-8"><a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>│   ├── ws-api.md                           # stable contract
+</span><span id="__span-1-9"><a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>│   ├── ARCHITECTURE.md                     # this file
+</span><span id="__span-1-10"><a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>│   └── data-flow-diagrams/
+</span><span id="__span-1-11"><a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a>├── dev/                                    # autonomous dev + test harness
+</span><span id="__span-1-12"><a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a>│   ├── docker-compose.yml                  # HA core image + integration mounted as volume
+</span><span id="__span-1-13"><a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a>│   ├── up.sh, down.sh, reset.sh            # spin / tear down / wipe state
+</span><span id="__span-1-14"><a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a>│   ├── seed.py                             # synthetic state history (backdated to recorder)
+</span><span id="__span-1-15"><a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a>│   ├── probe.py                            # end-to-end pipeline assertion
+</span><span id="__span-1-16"><a id="__codelineno-1-16" name="__codelineno-1-16" href="#__codelineno-1-16"></a>│   └── README.md
+</span><span id="__span-1-17"><a id="__codelineno-1-17" name="__codelineno-1-17" href="#__codelineno-1-17"></a>├── tests/
+</span><span id="__span-1-18"><a id="__codelineno-1-18" name="__codelineno-1-18" href="#__codelineno-1-18"></a>│   ├── conftest.py
+</span><span id="__span-1-19"><a id="__codelineno-1-19" name="__codelineno-1-19" href="#__codelineno-1-19"></a>│   ├── test_schedule_detector.py
+</span><span id="__span-1-20"><a id="__codelineno-1-20" name="__codelineno-1-20" href="#__codelineno-1-20"></a>│   ├── test_apply_pipeline.py
+</span><span id="__span-1-21"><a id="__codelineno-1-21" name="__codelineno-1-21" href="#__codelineno-1-21"></a>│   ├── test_privacy_redactor.py
+</span><span id="__span-1-22"><a id="__codelineno-1-22" name="__codelineno-1-22" href="#__codelineno-1-22"></a>│   ├── test_drift_detection.py
+</span><span id="__span-1-23"><a id="__codelineno-1-23" name="__codelineno-1-23" href="#__codelineno-1-23"></a>│   ├── test_entity_rename.py
+</span><span id="__span-1-24"><a id="__codelineno-1-24" name="__codelineno-1-24" href="#__codelineno-1-24"></a>│   └── test_ws_api.py
+</span><span id="__span-1-25"><a id="__codelineno-1-25" name="__codelineno-1-25" href="#__codelineno-1-25"></a>└── custom_components/ha_insights/
+</span><span id="__span-1-26"><a id="__codelineno-1-26" name="__codelineno-1-26" href="#__codelineno-1-26"></a>    ├── __init__.py                         # async_setup_entry
+</span><span id="__span-1-27"><a id="__codelineno-1-27" name="__codelineno-1-27" href="#__codelineno-1-27"></a>    ├── manifest.json
+</span><span id="__span-1-28"><a id="__codelineno-1-28" name="__codelineno-1-28" href="#__codelineno-1-28"></a>    ├── const.py
+</span><span id="__span-1-29"><a id="__codelineno-1-29" name="__codelineno-1-29" href="#__codelineno-1-29"></a>    ├── config_flow.py                      # privacy-first wizard
+</span><span id="__span-1-30"><a id="__codelineno-1-30" name="__codelineno-1-30" href="#__codelineno-1-30"></a>    ├── options_flow.py
+</span><span id="__span-1-31"><a id="__codelineno-1-31" name="__codelineno-1-31" href="#__codelineno-1-31"></a>    ├── strings.json + translations/en.json
+</span><span id="__span-1-32"><a id="__codelineno-1-32" name="__codelineno-1-32" href="#__codelineno-1-32"></a>    ├── services.yaml
+</span><span id="__span-1-33"><a id="__codelineno-1-33" name="__codelineno-1-33" href="#__codelineno-1-33"></a>    ├── insight.py                          # Insight + InsightKind
+</span><span id="__span-1-34"><a id="__codelineno-1-34" name="__codelineno-1-34" href="#__codelineno-1-34"></a>    ├── detectors/
+</span><span id="__span-1-35"><a id="__codelineno-1-35" name="__codelineno-1-35" href="#__codelineno-1-35"></a>    │   ├── __init__.py                     # registry + auto-import
+</span><span id="__span-1-36"><a id="__codelineno-1-36" name="__codelineno-1-36" href="#__codelineno-1-36"></a>    │   ├── base.py                         # Detector ABC
+</span><span id="__span-1-37"><a id="__codelineno-1-37" name="__codelineno-1-37" href="#__codelineno-1-37"></a>    │   └── schedule_detector.py            # the hero
+</span><span id="__span-1-38"><a id="__codelineno-1-38" name="__codelineno-1-38" href="#__codelineno-1-38"></a>    ├── observers/state_event_buffer.py
+</span><span id="__span-1-39"><a id="__codelineno-1-39" name="__codelineno-1-39" href="#__codelineno-1-39"></a>    ├── store/{schema,store,migrations/}.py
+</span><span id="__span-1-40"><a id="__codelineno-1-40" name="__codelineno-1-40" href="#__codelineno-1-40"></a>    ├── llm/
+</span><span id="__span-1-41"><a id="__codelineno-1-41" name="__codelineno-1-41" href="#__codelineno-1-41"></a>    │   ├── redactor.py                     # entity-id pseudonyms + sensitive-attr blocklist
+</span><span id="__span-1-42"><a id="__codelineno-1-42" name="__codelineno-1-42" href="#__codelineno-1-42"></a>    │   ├── context.py                      # tiered context injection
+</span><span id="__span-1-43"><a id="__codelineno-1-43" name="__codelineno-1-43" href="#__codelineno-1-43"></a>    │   ├── agent_client.py                 # wraps conversation.process
+</span><span id="__span-1-44"><a id="__codelineno-1-44" name="__codelineno-1-44" href="#__codelineno-1-44"></a>    │   └── privacy_log.py                  # outbound-call ledger
+</span><span id="__span-1-45"><a id="__codelineno-1-45" name="__codelineno-1-45" href="#__codelineno-1-45"></a>    ├── apply/
+</span><span id="__span-1-46"><a id="__codelineno-1-46" name="__codelineno-1-46" href="#__codelineno-1-46"></a>    │   ├── automation_writer.py            # WS config API
+</span><span id="__span-1-47"><a id="__codelineno-1-47" name="__codelineno-1-47" href="#__codelineno-1-47"></a>    │   ├── blueprint_writer.py             # HA Blueprint emission (default)
+</span><span id="__span-1-48"><a id="__codelineno-1-48" name="__codelineno-1-48" href="#__codelineno-1-48"></a>    │   ├── validator.py                    # two-layer schema + live validate
+</span><span id="__span-1-49"><a id="__codelineno-1-49" name="__codelineno-1-49" href="#__codelineno-1-49"></a>    │   ├── drift_detector.py               # detect user edits before undo
+</span><span id="__span-1-50"><a id="__codelineno-1-50" name="__codelineno-1-50" href="#__codelineno-1-50"></a>    │   ├── conflict_scanner.py             # detect existing automations
+</span><span id="__span-1-51"><a id="__codelineno-1-51" name="__codelineno-1-51" href="#__codelineno-1-51"></a>    │   └── _ha_internals.py                # adapter for non-stable HA APIs
+</span><span id="__span-1-52"><a id="__codelineno-1-52" name="__codelineno-1-52" href="#__codelineno-1-52"></a>    ├── ws_api.py                           # subscribe/list/apply/dismiss/explain/hello
+</span><span id="__span-1-53"><a id="__codelineno-1-53" name="__codelineno-1-53" href="#__codelineno-1-53"></a>    ├── services.py
+</span><span id="__span-1-54"><a id="__codelineno-1-54" name="__codelineno-1-54" href="#__codelineno-1-54"></a>    └── entities/privacy_log_sensor.py
+</span></code></pre></div>
+<hr />
+<h2 id="load-bearing-contracts">Load-bearing contracts<a class="headerlink" href="#load-bearing-contracts" title="Permanent link">&para;</a></h2>
+<h3 id="insight-insightpy">Insight (<code>insight.py</code>)<a class="headerlink" href="#insight-insightpy" title="Permanent link">&para;</a></h3>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="k">class</span><span class="w"> </span><span class="nc">InsightKind</span><span class="p">(</span><span class="n">StrEnum</span><span class="p">):</span>
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>    <span class="n">AUTOMATION_PROPOSAL</span> <span class="o">=</span> <span class="s2">&quot;automation_proposal&quot;</span>
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>    <span class="n">CARD_PROPOSAL</span>       <span class="o">=</span> <span class="s2">&quot;card_proposal&quot;</span>          <span class="c1"># v0.2</span>
+</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>    <span class="n">GROUP_PROPOSAL</span>      <span class="o">=</span> <span class="s2">&quot;group_proposal&quot;</span>         <span class="c1"># v0.3</span>
+</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>    <span class="n">ANOMALY</span>             <span class="o">=</span> <span class="s2">&quot;anomaly&quot;</span>                <span class="c1"># v0.4</span>
+</span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>    <span class="n">DASHBOARD_CLEANUP</span>   <span class="o">=</span> <span class="s2">&quot;dashboard_cleanup&quot;</span>      <span class="c1"># v0.3</span>
+</span><span id="__span-2-7"><a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>    <span class="n">SCENE_PROPOSAL</span>      <span class="o">=</span> <span class="s2">&quot;scene_proposal&quot;</span>         <span class="c1"># v0.3+</span>
+</span><span id="__span-2-8"><a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>
+</span><span id="__span-2-9"><a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="nd">@dataclass</span><span class="p">(</span><span class="n">frozen</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+</span><span id="__span-2-10"><a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="k">class</span><span class="w"> </span><span class="nc">Insight</span><span class="p">:</span>
+</span><span id="__span-2-11"><a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a>    <span class="nb">id</span><span class="p">:</span> <span class="nb">str</span>                          <span class="c1"># stable hash of (kind, fingerprint)</span>
+</span><span id="__span-2-12"><a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a>    <span class="n">kind</span><span class="p">:</span> <span class="n">InsightKind</span>
+</span><span id="__span-2-13"><a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a>    <span class="n">detector</span><span class="p">:</span> <span class="nb">str</span>
+</span><span id="__span-2-14"><a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a>    <span class="n">area_id</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span>
+</span><span id="__span-2-15"><a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a>    <span class="n">title</span><span class="p">:</span> <span class="nb">str</span>                       <span class="c1"># heuristic-generated, no LLM</span>
+</span><span id="__span-2-16"><a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a>    <span class="n">confidence</span><span class="p">:</span> <span class="nb">float</span>                <span class="c1"># 0.0-1.0</span>
+</span><span id="__span-2-17"><a id="__codelineno-2-17" name="__codelineno-2-17" href="#__codelineno-2-17"></a>    <span class="n">fingerprint</span><span class="p">:</span> <span class="nb">dict</span>                <span class="c1"># detector-specific dedup key</span>
+</span><span id="__span-2-18"><a id="__codelineno-2-18" name="__codelineno-2-18" href="#__codelineno-2-18"></a>    <span class="n">payload</span><span class="p">:</span> <span class="nb">dict</span>                    <span class="c1"># the YAML/blueprint to apply (heuristic-built)</span>
+</span><span id="__span-2-19"><a id="__codelineno-2-19" name="__codelineno-2-19" href="#__codelineno-2-19"></a>    <span class="n">payload_format</span><span class="p">:</span> <span class="nb">str</span>              <span class="c1"># &quot;blueprint&quot; (default) or &quot;automation&quot;</span>
+</span><span id="__span-2-20"><a id="__codelineno-2-20" name="__codelineno-2-20" href="#__codelineno-2-20"></a>    <span class="n">created_at</span><span class="p">:</span> <span class="n">datetime</span>
+</span><span id="__span-2-21"><a id="__codelineno-2-21" name="__codelineno-2-21" href="#__codelineno-2-21"></a>    <span class="n">snoozed_until</span><span class="p">:</span> <span class="n">datetime</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span>
+</span><span id="__span-2-22"><a id="__codelineno-2-22" name="__codelineno-2-22" href="#__codelineno-2-22"></a>    <span class="n">explanation</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span>   <span class="c1"># populated by LLM only on user request</span>
+</span><span id="__span-2-23"><a id="__codelineno-2-23" name="__codelineno-2-23" href="#__codelineno-2-23"></a>    <span class="n">conflicts_with</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="n">field</span><span class="p">(</span><span class="n">default_factory</span><span class="o">=</span><span class="nb">list</span><span class="p">)</span>  <span class="c1"># existing automation_ids</span>
+</span></code></pre></div>
+<h3 id="detector-abc-detectorsbasepy">Detector ABC (<code>detectors/base.py</code>)<a class="headerlink" href="#detector-abc-detectorsbasepy" title="Permanent link">&para;</a></h3>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="k">class</span><span class="w"> </span><span class="nc">Detector</span><span class="p">(</span><span class="n">ABC</span><span class="p">):</span>
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>    <span class="n">name</span><span class="p">:</span> <span class="nb">str</span>
+</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>    <span class="n">kind</span><span class="p">:</span> <span class="n">InsightKind</span>
+</span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>    <span class="n">requires_recorder</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span>
+</span><span id="__span-3-5"><a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>    <span class="n">domains_default_blocked</span><span class="p">:</span> <span class="n">ClassVar</span><span class="p">[</span><span class="nb">set</span><span class="p">[</span><span class="nb">str</span><span class="p">]]</span> <span class="o">=</span> <span class="p">{</span>
+</span><span id="__span-3-6"><a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>        <span class="s2">&quot;camera&quot;</span><span class="p">,</span> <span class="s2">&quot;person&quot;</span><span class="p">,</span> <span class="s2">&quot;device_tracker&quot;</span><span class="p">,</span> <span class="s2">&quot;lock&quot;</span>
+</span><span id="__span-3-7"><a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a>    <span class="p">}</span>
+</span><span id="__span-3-8"><a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a>
+</span><span id="__span-3-9"><a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a>    <span class="nd">@abstractmethod</span>
+</span><span id="__span-3-10"><a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a>    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">scan</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">ctx</span><span class="p">:</span> <span class="n">DetectorContext</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="n">Insight</span><span class="p">]:</span> <span class="o">...</span>
+</span><span id="__span-3-11"><a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a>
+</span><span id="__span-3-12"><a id="__codelineno-3-12" name="__codelineno-3-12" href="#__codelineno-3-12"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">applies_to_event</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">event</span><span class="p">:</span> <span class="n">Event</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+</span><span id="__span-3-13"><a id="__codelineno-3-13" name="__codelineno-3-13" href="#__codelineno-3-13"></a>        <span class="k">return</span> <span class="kc">True</span>
+</span></code></pre></div>
+<p><code>DetectorContext</code> carries: HA instance, scoped event-buffer slice, recorder query helper, detector config, area filter, redactor.</p>
+<h3 id="websocket-api-semver-stable-from-v01">WebSocket API (semver-stable from v0.1)<a class="headerlink" href="#websocket-api-semver-stable-from-v01" title="Permanent link">&para;</a></h3>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>ha_insights/hello           → handshake: returns { integration_version, ws_protocol_version, supported_methods }
+</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>ha_insights/list            → list of insights, filterable
+</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>ha_insights/subscribe       → live stream of new/updated/dismissed
+</span><span id="__span-4-4"><a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>ha_insights/explain         → triggers LLM enrichment (user-initiated only)
+</span><span id="__span-4-5"><a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>ha_insights/preview         → returns YAML diff that would apply
+</span><span id="__span-4-6"><a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>ha_insights/apply           → apply one insight (with conflict + validation pre-flight)
+</span><span id="__span-4-7"><a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a>ha_insights/dismiss         → permanent dismiss + fingerprint blacklist
+</span><span id="__span-4-8"><a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a>ha_insights/snooze          → snooze N days
+</span><span id="__span-4-9"><a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a>ha_insights/purge_all       → privacy nuke button
+</span><span id="__span-4-10"><a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a>ha_insights/whatgetssent    → returns example payload at current settings
+</span></code></pre></div>
+<p><strong>Version handshake:</strong> card opens every connection with <code>ha_insights/hello { card_version }</code>. Integration replies with its version + supported methods. Card downgrades gracefully — disables UI for unsupported methods, shows "Update HA Insights integration to v0.X for {feature}." Same banner on inverse skew.</p>
+<h3 id="services">Services<a class="headerlink" href="#services" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>ha_insights.scan_now</code></li>
+<li><code>ha_insights.dismiss { id }</code></li>
+<li><code>ha_insights.apply { id }</code></li>
+<li><code>ha_insights.purge_observations</code></li>
+</ul>
+<hr />
+<h2 id="v01-hero-scheduledetector">v0.1 hero: ScheduleDetector<a class="headerlink" href="#v01-hero-scheduledetector" title="Permanent link">&para;</a></h2>
+<p>Detects "user does X every weekday at ~T."</p>
+<ol>
+<li>Pull state-change events for selected areas from recorder (≥7d) or buffer.</li>
+<li>Group by <code>(entity_id, new_state)</code> for enum-like states.</li>
+<li>Bucket by ISO weekday + time-of-day in 5-min slots.</li>
+<li>Routine requires: ≥10 occurrences in 14d, time-of-day stddev ≤ 8 min, weekday consistency ≥ 80%.</li>
+<li><code>confidence = min(1, occurrences/14) × weekday_consistency × (1 − stddev_min/15)</code>.</li>
+<li>Heuristic builds <strong>HA Blueprint instance</strong> (default) with parameters: <code>time</code>, <code>days</code>, <code>target_entity</code>, <code>action</code>. Or raw automation if user prefers (advanced).</li>
+<li>Title: template ("On weekdays at 6:47 AM, light.kitchen turns on (12/12 days)").</li>
+<li>Explanation: empty until user clicks Explain → LLM call with redaction.</li>
+</ol>
+<p><strong>Edge cases:</strong> manual override during routine (confidence decays), DST boundaries (clock-time grouping + DST notice), entities without friendly_name (fall back to entity_id), multi-state entities (any short non-dotted enum state is supported — <code>on</code>/<code>off</code>, <code>playing</code>/<code>paused</code>, <code>home</code>/<code>away</code>, <code>armed_home</code>, etc; only <code>unavailable</code>/<code>unknown</code>/<code>none</code> are excluded).</p>
+<hr />
+<h2 id="privacy-model">Privacy model<a class="headerlink" href="#privacy-model" title="Permanent link">&para;</a></h2>
+<h3 id="three-modes">Three modes<a class="headerlink" href="#three-modes" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Mode</th>
+<th>What it does</th>
+<th>What leaves your network</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>🚫 Off</strong></td>
+<td>LLM disabled. Detectors still run, plain-English titles only, no Explain button.</td>
+<td><strong>Nothing.</strong></td>
+</tr>
+<tr>
+<td><strong>🟢 Local</strong></td>
+<td>Auto-applied for Ollama or any agent declared local. Real names, real values, no friction.</td>
+<td><strong>Nothing leaves the network.</strong></td>
+</tr>
+<tr>
+<td><strong>🟡 Cloud</strong></td>
+<td>Default for Anthropic/OpenAI/Google. Names + areas pseudonymized, numerics bucketed, sensitive domains blocked.</td>
+<td><strong>Pseudonymized payloads only.</strong></td>
+</tr>
+</tbody>
+</table>
+<h3 id="local-vs-cloud-automatic-behavior-differences">Local vs Cloud — automatic behavior differences<a class="headerlink" href="#local-vs-cloud-automatic-behavior-differences" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Behavior</th>
+<th>Local 🟢</th>
+<th>Cloud 🟡</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Default redaction</td>
+<td>None</td>
+<td>Names + areas pseudonymized, numerics bucketed</td>
+</tr>
+<tr>
+<td>Preview-before-send</td>
+<td>Off by default</td>
+<td><strong>On by default</strong> (mandatory until user opts out)</td>
+</tr>
+<tr>
+<td>Default-blocked <strong>privacy</strong> domains (camera, person, device_tracker)</td>
+<td>Unblocked</td>
+<td>Blocked — explicit opt-in per domain</td>
+</tr>
+<tr>
+<td>Default-blocked <strong>safety</strong> domains (lock)</td>
+<td>Still blocked</td>
+<td>Still blocked</td>
+</tr>
+<tr>
+<td>Auto-explain insights on detection</td>
+<td>Allowed (free, fast)</td>
+<td>Never — always user-initiated</td>
+</tr>
+<tr>
+<td>Bandwidth/cost tracking</td>
+<td>Off</td>
+<td>On — daily budget cap configurable</td>
+</tr>
+<tr>
+<td>UI badge</td>
+<td>🟢 LOCAL</td>
+<td>🟡 CLOUD</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Local detection:</strong> Ollama integration and HA's built-in intent agent are auto-trusted as local (hardcoded list, maintained per HA release). OpenAI-compatible (LocalAI, vllm, llama.cpp) is ambiguous — wizard asks once, editable later. Privacy log records the agent name and bytes regardless of declaration.</p>
+<h3 id="trust-badges-visible-everywhere">Trust badges — visible everywhere<a class="headerlink" href="#trust-badges-visible-everywhere" title="Permanent link">&para;</a></h3>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>🟢  LOCAL — Ollama @ homeassistant.local
+</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>    Your data did not leave your network.
+</span><span id="__span-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>
+</span><span id="__span-5-4"><a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>🟡  CLOUD — Anthropic — pseudonymized
+</span><span id="__span-5-5"><a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>    Real names replaced. Tap to see payload.
+</span><span id="__span-5-6"><a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>
+</span><span id="__span-5-7"><a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a>🔴  CLOUD — Anthropic — REAL NAMES (you opted in)
+</span><span id="__span-5-8"><a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a>    Real names sent. Tap to see payload.
+</span></code></pre></div>
+<p>Every Explain click, every insight detail, every privacy-log row carries the same badge. Same colors, same sentence pattern.</p>
+<h3 id="what-gets-sent-one-tap-from-anywhere">"What gets sent?" — one tap from anywhere<a class="headerlink" href="#what-gets-sent-one-tap-from-anywhere" title="Permanent link">&para;</a></h3>
+<p>Any badge → tap → opens a modal showing: current mode, list of fields sent (pseudonymized), list of fields never sent, <strong>example payload at current settings</strong>, and a "Change settings" link. Source of truth for "what will I expose?"</p>
+<h3 id="always-redacted-attributes-built-in-not-user-editable">Always-redacted attributes (built-in, not user-editable)<a class="headerlink" href="#always-redacted-attributes-built-in-not-user-editable" title="Permanent link">&para;</a></h3>
+<p>Regardless of mode, these attributes are stripped from any LLM payload:
+- <code>gps_lat</code>, <code>gps_lon</code>, <code>gps_accuracy</code>, <code>latitude</code>, <code>longitude</code>, <code>altitude</code>
+- <code>mac</code>, <code>ip</code>, <code>ip_address</code>, <code>bssid</code>, <code>ssid</code>
+- <code>password</code>, <code>token</code>, <code>access_token</code>, <code>auth</code>, <code>api_key</code>
+- <code>serial_number</code>, <code>device_id</code> (when not the primary identifier)</p>
+<p>User-editable sensitive list on top via advanced regex blocklist.</p>
+<h3 id="setup-wizard-single-page">Setup wizard — single page<a class="headerlink" href="#setup-wizard-single-page" title="Permanent link">&para;</a></h3>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>LLM Enrichment
+</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>
+</span><span id="__span-6-3"><a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>⦿ Off — I just want pattern detection
+</span><span id="__span-6-4"><a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>○ Use a local LLM (recommended for privacy)
+</span><span id="__span-6-5"><a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a>    🟢 Ollama detected at homeassistant.local
+</span><span id="__span-6-6"><a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a>○ Use a cloud LLM
+</span><span id="__span-6-7"><a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a>    ○ Anthropic   ○ OpenAI   ○ Google
+</span><span id="__span-6-8"><a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a>
+</span><span id="__span-6-9"><a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a>▸ Advanced privacy options                        ← collapsed
+</span></code></pre></div>
+<h3 id="advanced-controls-gated-behind-disclosure">Advanced controls (gated behind disclosure)<a class="headerlink" href="#advanced-controls-gated-behind-disclosure" title="Permanent link">&para;</a></h3>
+<p>For power users only:
+- 4 redaction levels (Paranoid / Balanced / Permissive / Custom)
+- Per-entity allow/block/never-send
+- Per-attribute toggles (<code>temperature</code> yes, <code>battery_level</code> no)
+- Regex blocklist (additive to always-redacted)
+- Numeric bucket fine-tuning (energy / temp / time granularity)
+- Preview-on-send override per level
+- Daily/monthly token budget caps</p>
+<hr />
+<h2 id="llm-context-injection">LLM context injection<a class="headerlink" href="#llm-context-injection" title="Permanent link">&para;</a></h2>
+<p>The LLM gets a small structured context per Explain call. <strong>What it sees depends on the privacy mode</strong> — same gradient as redaction:</p>
+<table>
+<thead>
+<tr>
+<th>Context field</th>
+<th>🟢 Local</th>
+<th>🟡 Cloud (default)</th>
+<th>🔴 Cloud permissive</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>HA version (major.minor)</td>
+<td>✅ full (<code>2025.4.2</code>)</td>
+<td>✅ truncated (<code>2025.4</code>)</td>
+<td>✅ full</td>
+</tr>
+<tr>
+<td>Installation type (OS / Container / Core)</td>
+<td>✅</td>
+<td>❌</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>Conversation agent + model</td>
+<td>✅</td>
+<td>❌</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>Insight-relevant domains</td>
+<td>✅</td>
+<td>✅</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>Specific integrations installed</td>
+<td>✅</td>
+<td>❌</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>Total entity / area counts</td>
+<td>✅</td>
+<td>❌</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>Specific area / entity names</td>
+<td>✅</td>
+<td>❌ (pseudonyms)</td>
+<td>✅</td>
+</tr>
+</tbody>
+</table>
+<p>HA version (major.minor) is <strong>always sent</strong> — public on release day, low sensitivity, lets the LLM phrase against the right feature set. Specific integrations/counts/names are gated.</p>
+<p>The same redactor handles both insight payload and context fields → <strong>one privacy boundary, not two.</strong></p>
+<p>Cloud-default system prompt:
+<div class="language-text highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>You are explaining a detected routine to a Home Assistant user.
+</span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>Home Assistant version: 2025.4
+</span><span id="__span-7-3"><a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>Insight involves: domain `light`
+</span><span id="__span-7-4"><a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>Use only documented HA core features that exist in 2025.4+.
+</span><span id="__span-7-5"><a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a>Do not reference specific integrations not present in the payload below.
+</span></code></pre></div></p>
+<hr />
+<h2 id="yaml-validation-pipeline">YAML validation pipeline<a class="headerlink" href="#yaml-validation-pipeline" title="Permanent link">&para;</a></h2>
+<p><strong>Reminder:</strong> the LLM doesn't produce YAML — the heuristic does. So validation is about heuristic output and resilience against HA upgrades.</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>Heuristic generates dict (Blueprint instance or raw automation)
+</span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>        ↓
+</span><span id="__span-8-3"><a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>Layer 1: cv.AUTOMATION_SCHEMA / cv.BLUEPRINT_SCHEMA  (offline, same validator HA uses)
+</span><span id="__span-8-4"><a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>        ↓
+</span><span id="__span-8-5"><a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>Layer 2: WS automation/validate or blueprints/validate  (online — entities exist? services exist? valid for this HA version?)
+</span><span id="__span-8-6"><a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a>        ↓
+</span><span id="__span-8-7"><a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a>Layer 3 (v0.2+): WS check_config / template-evaluate for complex flows
+</span><span id="__span-8-8"><a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a>        ↓
+</span><span id="__span-8-9"><a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a>WS automation/config POST or blueprints/import  (apply)
+</span></code></pre></div>
+<p>Nothing reaches apply without passing both Layers 1 and 2.</p>
+<h3 id="failure-ux">Failure UX<a class="headerlink" href="#failure-ux" title="Permanent link">&para;</a></h3>
+<p>Three named states surfaced in the card:
+- <strong>Schema rejection</strong>: <em>"Couldn't apply — automation schema rejected. [Show details]"</em>
+- <strong>Live validation failure</strong>: <em>"<code>light.kitchen_old</code> no longer exists. [Update to current entity] [Dismiss]"</em>
+- <strong>HA reload failure</strong>: <em>"Applied but reload failed. [Manual reload] [Undo]"</em>
+- <strong>LLM timeout (Explain)</strong>: <em>"LLM didn't respond. [Retry] [Send to a different agent]"</em></p>
+<p>Each is a defined state, not a silent exception.</p>
+<hr />
+<h2 id="apply-pipeline">Apply pipeline<a class="headerlink" href="#apply-pipeline" title="Permanent link">&para;</a></h2>
+<p>For <code>automation_proposal</code>:
+1. Heuristic builds <strong>Blueprint instance</strong> (default) or raw automation config.
+2. Conflict scanner: check existing automations for trigger overlap → suppress or label.
+3. Layer 1+2 validation (above).
+4. WS POST to <code>automation/config/{auto-id}</code> or <code>blueprints/import</code>.
+5. HA reloads automatically.
+6. Insight marked <code>applied</code>; artifact_id + snapshot stored for undo.</p>
+<h3 id="drift-detection-on-applied-automations">Drift detection on applied automations<a class="headerlink" href="#drift-detection-on-applied-automations" title="Permanent link">&para;</a></h3>
+<p>Before any undo:
+1. Fetch current automation, compare hash to <code>applied_history</code> snapshot.
+2. Three states:
+   - <strong>Unchanged</strong>: undo silently
+   - <strong>User-edited</strong>: confirm dialog: <em>"You've modified this automation since we created it. Undo will revert your edits. [Show diff] [Undo anyway] [Cancel]"</em>
+   - <strong>Deleted</strong>: clean up our record, no-op the undo button</p>
+<p>Same drift check before re-running upgrade-resilience re-validation.</p>
+<h3 id="upgrade-resilience-v02">Upgrade resilience (v0.2+)<a class="headerlink" href="#upgrade-resilience-v02" title="Permanent link">&para;</a></h3>
+<p>Subscribe to <code>automation_reloaded</code>, re-validate our applied automations on HA upgrade. If any now fail validation, surface as a special insight: <em>"Your auto-generated automation no longer validates after HA upgrade — review."</em></p>
+<h3 id="conflict-detection-with-existing-automations">Conflict detection with existing automations<a class="headerlink" href="#conflict-detection-with-existing-automations" title="Permanent link">&para;</a></h3>
+<p>At insight-generation time:
+- Scan existing automations for trigger overlap on the same entity/time window
+- If overlap: either suppress the insight or attach <code>conflicts_with: [automation_id]</code> and label <em>"You already have an automation covering this — review?"</em></p>
+<h3 id="entity-id-rename-handling">Entity-id rename handling<a class="headerlink" href="#entity-id-rename-handling" title="Permanent link">&para;</a></h3>
+<p>Subscribe to <code>entity_registry_updated</code>. On rename:
+- Migrate pseudonym map atomically
+- Recompute affected fingerprints
+- Update <code>applied_history</code> snapshots so drift detection doesn't false-positive</p>
+<hr />
+<h2 id="repo-2-ha-insights-card-file-tree">Repo 2: <code>ha-insights-card</code> file tree<a class="headerlink" href="#repo-2-ha-insights-card-file-tree" title="Permanent link">&para;</a></h2>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>ha-insights-card/
+</span><span id="__span-9-2"><a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>├── README.md, LICENSE, hacs.json
+</span><span id="__span-9-3"><a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>├── package.json, rollup.config.mjs, tsconfig.json
+</span><span id="__span-9-4"><a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a>├── .github/workflows/release.yml          # publishes built JS to release
+</span><span id="__span-9-5"><a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a>├── src/
+</span><span id="__span-9-6"><a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a>│   ├── ha-insights-card.ts              # main custom element
+</span><span id="__span-9-7"><a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a>│   ├── insight-row.ts
+</span><span id="__span-9-8"><a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a>│   ├── insight-detail-modal.ts            # explain/preview/apply
+</span><span id="__span-9-9"><a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a>│   ├── what-gets-sent-modal.ts            # the trust modal
+</span><span id="__span-9-10"><a id="__codelineno-9-10" name="__codelineno-9-10" href="#__codelineno-9-10"></a>│   ├── editor.ts                          # GUI card editor
+</span><span id="__span-9-11"><a id="__codelineno-9-11" name="__codelineno-9-11" href="#__codelineno-9-11"></a>│   ├── ws/{client,types,handshake}.ts
+</span><span id="__span-9-12"><a id="__codelineno-9-12" name="__codelineno-9-12" href="#__codelineno-9-12"></a>│   └── styles.ts
+</span><span id="__span-9-13"><a id="__codelineno-9-13" name="__codelineno-9-13" href="#__codelineno-9-13"></a>└── dist/ha-insights-card.js             # built artifact, committed for HACS
+</span></code></pre></div>
+<p>Stack: Lit 3 + TypeScript strict + Rollup. Mirrors HA's official card stack.</p>
+<hr />
+<h2 id="data-model-sqlite">Data model (SQLite)<a class="headerlink" href="#data-model-sqlite" title="Permanent link">&para;</a></h2>
+<div class="language-sql highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="k">CREATE</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="n">state_events</span><span class="w"> </span><span class="p">(</span>
+</span><span id="__span-10-2"><a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="w">    </span><span class="n">id</span><span class="w"> </span><span class="nb">INTEGER</span><span class="w"> </span><span class="k">PRIMARY</span><span class="w"> </span><span class="k">KEY</span><span class="p">,</span>
+</span><span id="__span-10-3"><a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="w">    </span><span class="k">timestamp</span><span class="w"> </span><span class="nb">REAL</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">NULL</span><span class="p">,</span>
+</span><span id="__span-10-4"><a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="w">    </span><span class="n">entity_id</span><span class="w"> </span><span class="nb">TEXT</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">NULL</span><span class="p">,</span>
+</span><span id="__span-10-5"><a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="w">    </span><span class="k">domain</span><span class="w"> </span><span class="nb">TEXT</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">NULL</span><span class="p">,</span>
+</span><span id="__span-10-6"><a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a><span class="w">    </span><span class="n">area_id</span><span class="w"> </span><span class="nb">TEXT</span><span class="p">,</span>
+</span><span id="__span-10-7"><a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a><span class="w">    </span><span class="n">old_state</span><span class="w"> </span><span class="nb">TEXT</span><span class="p">,</span>
+</span><span id="__span-10-8"><a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a><span class="w">    </span><span class="n">new_state</span><span class="w"> </span><span class="nb">TEXT</span>
+</span><span id="__span-10-9"><a id="__codelineno-10-9" name="__codelineno-10-9" href="#__codelineno-10-9"></a><span class="p">);</span>
+</span><span id="__span-10-10"><a id="__codelineno-10-10" name="__codelineno-10-10" href="#__codelineno-10-10"></a><span class="k">CREATE</span><span class="w"> </span><span class="k">INDEX</span><span class="w"> </span><span class="n">ix_state_events_ts</span><span class="w"> </span><span class="k">ON</span><span class="w"> </span><span class="n">state_events</span><span class="p">(</span><span class="k">timestamp</span><span class="p">);</span>
+</span><span id="__span-10-11"><a id="__codelineno-10-11" name="__codelineno-10-11" href="#__codelineno-10-11"></a><span class="k">CREATE</span><span class="w"> </span><span class="k">INDEX</span><span class="w"> </span><span class="n">ix_state_events_eid</span><span class="w"> </span><span class="k">ON</span><span class="w"> </span><span class="n">state_events</span><span class="p">(</span><span class="n">entity_id</span><span class="p">);</span>
+</span><span id="__span-10-12"><a id="__codelineno-10-12" name="__codelineno-10-12" href="#__codelineno-10-12"></a>
+</span><span id="__span-10-13"><a id="__codelineno-10-13" name="__codelineno-10-13" href="#__codelineno-10-13"></a><span class="k">CREATE</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="n">insights</span><span class="w"> </span><span class="p">(</span>
+</span><span id="__span-10-14"><a id="__codelineno-10-14" name="__codelineno-10-14" href="#__codelineno-10-14"></a><span class="w">    </span><span class="n">id</span><span class="w"> </span><span class="nb">TEXT</span><span class="w"> </span><span class="k">PRIMARY</span><span class="w"> </span><span class="k">KEY</span><span class="p">,</span>
+</span><span id="__span-10-15"><a id="__codelineno-10-15" name="__codelineno-10-15" href="#__codelineno-10-15"></a><span class="w">    </span><span class="n">kind</span><span class="w"> </span><span class="nb">TEXT</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">NULL</span><span class="p">,</span>
+</span><span id="__span-10-16"><a id="__codelineno-10-16" name="__codelineno-10-16" href="#__codelineno-10-16"></a><span class="w">    </span><span class="n">detector</span><span class="w"> </span><span class="nb">TEXT</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">NULL</span><span class="p">,</span>
+</span><span id="__span-10-17"><a id="__codelineno-10-17" name="__codelineno-10-17" href="#__codelineno-10-17"></a><span class="w">    </span><span class="n">area_id</span><span class="w"> </span><span class="nb">TEXT</span><span class="p">,</span>
+</span><span id="__span-10-18"><a id="__codelineno-10-18" name="__codelineno-10-18" href="#__codelineno-10-18"></a><span class="w">    </span><span class="n">title</span><span class="w"> </span><span class="nb">TEXT</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">NULL</span><span class="p">,</span>
+</span><span id="__span-10-19"><a id="__codelineno-10-19" name="__codelineno-10-19" href="#__codelineno-10-19"></a><span class="w">    </span><span class="n">confidence</span><span class="w"> </span><span class="nb">REAL</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">NULL</span><span class="p">,</span>
+</span><span id="__span-10-20"><a id="__codelineno-10-20" name="__codelineno-10-20" href="#__codelineno-10-20"></a><span class="w">    </span><span class="n">fingerprint_json</span><span class="w"> </span><span class="nb">TEXT</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">NULL</span><span class="p">,</span>
+</span><span id="__span-10-21"><a id="__codelineno-10-21" name="__codelineno-10-21" href="#__codelineno-10-21"></a><span class="w">    </span><span class="n">payload_json</span><span class="w"> </span><span class="nb">TEXT</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">NULL</span><span class="p">,</span>
+</span><span id="__span-10-22"><a id="__codelineno-10-22" name="__codelineno-10-22" href="#__codelineno-10-22"></a><span class="w">    </span><span class="n">payload_format</span><span class="w"> </span><span class="nb">TEXT</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">NULL</span><span class="w"> </span><span class="k">DEFAULT</span><span class="w"> </span><span class="s1">&#39;blueprint&#39;</span><span class="p">,</span>
+</span><span id="__span-10-23"><a id="__codelineno-10-23" name="__codelineno-10-23" href="#__codelineno-10-23"></a><span class="w">    </span><span class="n">explanation</span><span class="w"> </span><span class="nb">TEXT</span><span class="p">,</span>
+</span><span id="__span-10-24"><a id="__codelineno-10-24" name="__codelineno-10-24" href="#__codelineno-10-24"></a><span class="w">    </span><span class="n">conflicts_with_json</span><span class="w"> </span><span class="nb">TEXT</span><span class="p">,</span>
+</span><span id="__span-10-25"><a id="__codelineno-10-25" name="__codelineno-10-25" href="#__codelineno-10-25"></a><span class="w">    </span><span class="n">created_at</span><span class="w"> </span><span class="nb">REAL</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">NULL</span><span class="p">,</span>
+</span><span id="__span-10-26"><a id="__codelineno-10-26" name="__codelineno-10-26" href="#__codelineno-10-26"></a><span class="w">    </span><span class="n">snoozed_until</span><span class="w"> </span><span class="nb">REAL</span><span class="p">,</span>
+</span><span id="__span-10-27"><a id="__codelineno-10-27" name="__codelineno-10-27" href="#__codelineno-10-27"></a><span class="w">    </span><span class="n">dismissed_at</span><span class="w"> </span><span class="nb">REAL</span><span class="p">,</span>
+</span><span id="__span-10-28"><a id="__codelineno-10-28" name="__codelineno-10-28" href="#__codelineno-10-28"></a><span class="w">    </span><span class="n">applied_at</span><span class="w"> </span><span class="nb">REAL</span><span class="p">,</span>
+</span><span id="__span-10-29"><a id="__codelineno-10-29" name="__codelineno-10-29" href="#__codelineno-10-29"></a><span class="w">    </span><span class="n">applied_artifact_id</span><span class="w"> </span><span class="nb">TEXT</span>
+</span><span id="__span-10-30"><a id="__codelineno-10-30" name="__codelineno-10-30" href="#__codelineno-10-30"></a><span class="p">);</span>
+</span><span id="__span-10-31"><a id="__codelineno-10-31" name="__codelineno-10-31" href="#__codelineno-10-31"></a>
+</span><span id="__span-10-32"><a id="__codelineno-10-32" name="__codelineno-10-32" href="#__codelineno-10-32"></a><span class="k">CREATE</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="n">outbound_calls</span><span class="w"> </span><span class="p">(</span>
+</span><span id="__span-10-33"><a id="__codelineno-10-33" name="__codelineno-10-33" href="#__codelineno-10-33"></a><span class="w">    </span><span class="n">id</span><span class="w"> </span><span class="nb">INTEGER</span><span class="w"> </span><span class="k">PRIMARY</span><span class="w"> </span><span class="k">KEY</span><span class="p">,</span>
+</span><span id="__span-10-34"><a id="__codelineno-10-34" name="__codelineno-10-34" href="#__codelineno-10-34"></a><span class="w">    </span><span class="k">timestamp</span><span class="w"> </span><span class="nb">REAL</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">NULL</span><span class="p">,</span>
+</span><span id="__span-10-35"><a id="__codelineno-10-35" name="__codelineno-10-35" href="#__codelineno-10-35"></a><span class="w">    </span><span class="n">insight_id</span><span class="w"> </span><span class="nb">TEXT</span><span class="p">,</span>
+</span><span id="__span-10-36"><a id="__codelineno-10-36" name="__codelineno-10-36" href="#__codelineno-10-36"></a><span class="w">    </span><span class="n">agent</span><span class="w"> </span><span class="nb">TEXT</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">NULL</span><span class="p">,</span>
+</span><span id="__span-10-37"><a id="__codelineno-10-37" name="__codelineno-10-37" href="#__codelineno-10-37"></a><span class="w">    </span><span class="n">agent_locality</span><span class="w"> </span><span class="nb">TEXT</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">NULL</span><span class="p">,</span><span class="w">           </span><span class="c1">-- &#39;local&#39; | &#39;cloud&#39;</span>
+</span><span id="__span-10-38"><a id="__codelineno-10-38" name="__codelineno-10-38" href="#__codelineno-10-38"></a><span class="w">    </span><span class="n">redaction_mode</span><span class="w"> </span><span class="nb">TEXT</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">NULL</span><span class="p">,</span>
+</span><span id="__span-10-39"><a id="__codelineno-10-39" name="__codelineno-10-39" href="#__codelineno-10-39"></a><span class="w">    </span><span class="n">bytes_sent</span><span class="w"> </span><span class="nb">INTEGER</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">NULL</span><span class="p">,</span>
+</span><span id="__span-10-40"><a id="__codelineno-10-40" name="__codelineno-10-40" href="#__codelineno-10-40"></a><span class="w">    </span><span class="n">bytes_received</span><span class="w"> </span><span class="nb">INTEGER</span><span class="p">,</span>
+</span><span id="__span-10-41"><a id="__codelineno-10-41" name="__codelineno-10-41" href="#__codelineno-10-41"></a><span class="w">    </span><span class="n">success</span><span class="w"> </span><span class="nb">BOOLEAN</span><span class="p">,</span>
+</span><span id="__span-10-42"><a id="__codelineno-10-42" name="__codelineno-10-42" href="#__codelineno-10-42"></a><span class="w">    </span><span class="n">redacted_payload_json</span><span class="w"> </span><span class="nb">TEXT</span><span class="w">              </span><span class="c1">-- audit trail, retention-bound</span>
+</span><span id="__span-10-43"><a id="__codelineno-10-43" name="__codelineno-10-43" href="#__codelineno-10-43"></a><span class="p">);</span>
+</span><span id="__span-10-44"><a id="__codelineno-10-44" name="__codelineno-10-44" href="#__codelineno-10-44"></a>
+</span><span id="__span-10-45"><a id="__codelineno-10-45" name="__codelineno-10-45" href="#__codelineno-10-45"></a><span class="k">CREATE</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="n">applied_history</span><span class="w"> </span><span class="p">(</span>
+</span><span id="__span-10-46"><a id="__codelineno-10-46" name="__codelineno-10-46" href="#__codelineno-10-46"></a><span class="w">    </span><span class="n">insight_id</span><span class="w"> </span><span class="nb">TEXT</span><span class="w"> </span><span class="k">PRIMARY</span><span class="w"> </span><span class="k">KEY</span><span class="p">,</span>
+</span><span id="__span-10-47"><a id="__codelineno-10-47" name="__codelineno-10-47" href="#__codelineno-10-47"></a><span class="w">    </span><span class="n">artifact_kind</span><span class="w"> </span><span class="nb">TEXT</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">NULL</span><span class="p">,</span><span class="w">            </span><span class="c1">-- automation, blueprint, card, group</span>
+</span><span id="__span-10-48"><a id="__codelineno-10-48" name="__codelineno-10-48" href="#__codelineno-10-48"></a><span class="w">    </span><span class="n">artifact_id</span><span class="w"> </span><span class="nb">TEXT</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">NULL</span><span class="p">,</span>
+</span><span id="__span-10-49"><a id="__codelineno-10-49" name="__codelineno-10-49" href="#__codelineno-10-49"></a><span class="w">    </span><span class="n">snapshot_json</span><span class="w"> </span><span class="nb">TEXT</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">NULL</span><span class="p">,</span><span class="w">            </span><span class="c1">-- prior state for undo</span>
+</span><span id="__span-10-50"><a id="__codelineno-10-50" name="__codelineno-10-50" href="#__codelineno-10-50"></a><span class="w">    </span><span class="n">snapshot_hash</span><span class="w"> </span><span class="nb">TEXT</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">NULL</span><span class="p">,</span><span class="w">            </span><span class="c1">-- for drift detection</span>
+</span><span id="__span-10-51"><a id="__codelineno-10-51" name="__codelineno-10-51" href="#__codelineno-10-51"></a><span class="w">    </span><span class="n">applied_at</span><span class="w"> </span><span class="nb">REAL</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">NULL</span><span class="p">,</span>
+</span><span id="__span-10-52"><a id="__codelineno-10-52" name="__codelineno-10-52" href="#__codelineno-10-52"></a><span class="w">    </span><span class="n">undo_window_expires_at</span><span class="w"> </span><span class="nb">REAL</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">NULL</span>
+</span><span id="__span-10-53"><a id="__codelineno-10-53" name="__codelineno-10-53" href="#__codelineno-10-53"></a><span class="p">);</span>
+</span><span id="__span-10-54"><a id="__codelineno-10-54" name="__codelineno-10-54" href="#__codelineno-10-54"></a>
+</span><span id="__span-10-55"><a id="__codelineno-10-55" name="__codelineno-10-55" href="#__codelineno-10-55"></a><span class="k">CREATE</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="n">pseudonym_map</span><span class="w"> </span><span class="p">(</span>
+</span><span id="__span-10-56"><a id="__codelineno-10-56" name="__codelineno-10-56" href="#__codelineno-10-56"></a><span class="w">    </span><span class="n">entity_id</span><span class="w"> </span><span class="nb">TEXT</span><span class="w"> </span><span class="k">PRIMARY</span><span class="w"> </span><span class="k">KEY</span><span class="p">,</span>
+</span><span id="__span-10-57"><a id="__codelineno-10-57" name="__codelineno-10-57" href="#__codelineno-10-57"></a><span class="w">    </span><span class="n">pseudonym</span><span class="w"> </span><span class="nb">TEXT</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">NULL</span><span class="w"> </span><span class="k">UNIQUE</span><span class="p">,</span>
+</span><span id="__span-10-58"><a id="__codelineno-10-58" name="__codelineno-10-58" href="#__codelineno-10-58"></a><span class="w">    </span><span class="n">area_id</span><span class="w"> </span><span class="nb">TEXT</span><span class="p">,</span>
+</span><span id="__span-10-59"><a id="__codelineno-10-59" name="__codelineno-10-59" href="#__codelineno-10-59"></a><span class="w">    </span><span class="n">created_at</span><span class="w"> </span><span class="nb">REAL</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">NULL</span>
+</span><span id="__span-10-60"><a id="__codelineno-10-60" name="__codelineno-10-60" href="#__codelineno-10-60"></a><span class="p">);</span>
+</span></code></pre></div>
+<p>State-event buffer is in-memory by default; SQLite persistence is opt-in.</p>
+<hr />
+<h2 id="operational-policies">Operational policies<a class="headerlink" href="#operational-policies" title="Permanent link">&para;</a></h2>
+<h3 id="data-lifecycle-retention-defaults-user-tunable">Data lifecycle &amp; retention (defaults; user-tunable)<a class="headerlink" href="#data-lifecycle-retention-defaults-user-tunable" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Table</th>
+<th>Retention</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>state_events</code></td>
+<td>7d, in-memory only</td>
+<td>Persistence opt-in</td>
+</tr>
+<tr>
+<td><code>insights</code></td>
+<td>until applied / dismissed / purged</td>
+<td>No auto-expiry</td>
+</tr>
+<tr>
+<td><code>outbound_calls</code></td>
+<td>30d</td>
+<td>Redacted payloads bound by same window</td>
+</tr>
+<tr>
+<td><code>applied_history</code></td>
+<td>7d hard / 90d soft</td>
+<td>Snapshot dropped at 90d, record retained</td>
+</tr>
+<tr>
+<td><code>pseudonym_map</code></td>
+<td>persistent</td>
+<td>Never auto-purged (used for stable references)</td>
+</tr>
+</tbody>
+</table>
+<p>All wiped by <code>ha_insights.purge_observations</code> (except pseudonym_map and applied_history — those stay so undo and references work).</p>
+<h3 id="rate-limiting-cost-circuit-breakers">Rate limiting &amp; cost circuit-breakers<a class="headerlink" href="#rate-limiting-cost-circuit-breakers" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Cloud agent token budget:</strong> 50k tokens/day default per agent (configurable)</li>
+<li><strong>Local agent:</strong> unlimited</li>
+<li><strong>Explain calls:</strong> 60/hour ceiling per user</li>
+<li><strong>Detector scan:</strong> 500ms p95 wall-clock budget per detector per scan</li>
+<li><strong>Daily nightly scan job:</strong> ≤ 30s wall-clock total across all detectors</li>
+<li><strong>Failure mode:</strong> when budget exhausted, badge shows "<em>budget exhausted, resets at HH:MM</em>"</li>
+</ul>
+<h3 id="performance-budget-raspberry-pi-4-reality">Performance budget (Raspberry Pi 4 reality)<a class="headerlink" href="#performance-budget-raspberry-pi-4-reality" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Event-bus subscription pre-filtered to selected areas (don't fan out 1500-entity firehose)</li>
+<li>Memory ceiling: 50 MB resident</li>
+<li>Documented in <code>docs/writing-a-detector.md</code> as non-negotiable</li>
+</ul>
+<h3 id="behavior-on-uninstall">Behavior on uninstall<a class="headerlink" href="#behavior-on-uninstall" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Applied automations / blueprints</strong>: stay (now native HA assets, not ours)</li>
+<li><strong>Insights queue, state-event buffer, privacy log, applied-history, pseudonym-map</strong>: wiped</li>
+<li>Documented in <code>privacy.md</code></li>
+</ul>
+<h3 id="ha-internals-dependency-policy">HA-internals dependency policy<a class="headerlink" href="#ha-internals-dependency-policy" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Wrap every non-public HA import in <code>apply/_ha_internals.py</code> (single point of contact)</li>
+<li>CI matrix: integration-test against <strong>last 3 HA minor versions</strong></li>
+<li>Graceful import error: log + show "<em>HA Insights doesn't yet support HA {version}. Upgrade HA Insights or downgrade HA.</em>" — never crash boot</li>
+</ul>
+<h3 id="ha-version-maintenance-window">HA version maintenance window<a class="headerlink" href="#ha-version-maintenance-window" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Support <strong>HA 2025.4</strong> + <strong>last 12 months of major.minor releases</strong> (rolling)</li>
+<li>Deprecation cycle: warn one release, error the next</li>
+<li>Stated in README as a contract</li>
+</ul>
+<hr />
+<h2 id="testing-harness-autonomous-dev-loop">Testing harness &amp; autonomous dev loop<a class="headerlink" href="#testing-harness-autonomous-dev-loop" title="Permanent link">&para;</a></h2>
+<h3 id="why-this-exists-at-v01">Why this exists at v0.1<a class="headerlink" href="#why-this-exists-at-v01" title="Permanent link">&para;</a></h3>
+<p>HA Insights claims to detect routines from observed state — that claim must be <em>demonstrable end-to-end</em> before any insight code is trusted. The <code>dev/</code> harness lets a developer (or an autonomous agent like <code>/ultraplan</code>) seed a fresh HA, run the full pipeline, and assert the result in under 2 minutes.</p>
+<h3 id="devdocker-composeyml"><code>dev/docker-compose.yml</code><a class="headerlink" href="#devdocker-composeyml" title="Permanent link">&para;</a></h3>
+<p>Boots <code>ghcr.io/home-assistant/home-assistant:2025.4</code> with our integration mounted at <code>/config/custom_components/ha_insights</code>. Exposes WS at <code>localhost:8125 (default; override via</code>HA_PORT<code>env var)</code>. Long-lived access token pre-created via <code>configuration.yaml</code> + token file injection. Tear-down wipes state cleanly.</p>
+<h3 id="devseedpy"><code>dev/seed.py</code><a class="headerlink" href="#devseedpy" title="Permanent link">&para;</a></h3>
+<p>Generates synthetic state history. Example:
+<div class="language-text highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>python dev/seed.py --days 14 --pattern weekday-routine \
+</span><span id="__span-11-2"><a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>    --entity light.kitchen --action turn_on --time 06:47
+</span></code></pre></div>
+Connects via WS, backdates entries to recorder. Produces a HA instance that <em>looks like</em> it observed N days of usage.</p>
+<h3 id="devprobepy"><code>dev/probe.py</code><a class="headerlink" href="#devprobepy" title="Permanent link">&para;</a></h3>
+<p>End-to-end assertion script:
+1. Reset HA state
+2. Install integration via WS config entry
+3. Run <code>seed.py</code> for a known pattern
+4. Trigger <code>ha_insights.scan_now</code>
+5. Assert insight appeared with expected fingerprint + confidence
+6. Call <code>ha_insights.apply</code>
+7. Assert automation now exists in HA
+8. Print pass/fail report</p>
+<p>This is the autonomous agent's success criterion at every step: code change → probe pass → commit.</p>
+<h3 id="autonomy-gates-for-ultraplan">Autonomy gates for <code>/ultraplan</code><a class="headerlink" href="#autonomy-gates-for-ultraplan" title="Permanent link">&para;</a></h3>
+<p><code>/ultraplan</code> runs autonomously between gates, pauses at each for human review:</p>
+<table>
+<thead>
+<tr>
+<th>Gate</th>
+<th>When</th>
+<th>What human reviews</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>G0 — Pre-bootstrap</strong></td>
+<td>Before creating repos</td>
+<td>Trademark + name availability, license confirmed</td>
+</tr>
+<tr>
+<td><strong>G1 — Post-bootstrap</strong></td>
+<td>Repos init + dev harness up</td>
+<td>Manifest, hacs.json, CI green, harness reachable</td>
+</tr>
+<tr>
+<td><strong>G2 — Post-demo-path</strong></td>
+<td>End of critical-path step 13</td>
+<td>End-to-end probe passes; manual Explain click</td>
+</tr>
+<tr>
+<td><strong>G3 — Pre-tag</strong></td>
+<td>Before v0.1.0 release</td>
+<td>All tests pass, privacy doc reviewed, success criteria met</td>
+</tr>
+</tbody>
+</table>
+<p>Between gates: agent codes a step → runs <code>dev/probe.py</code> (or unit tests) → on pass commits → next step. On fail: reads error, attempts one fix, retries; if still fails, surfaces to human and pauses.</p>
+<h3 id="what-the-agent-cannot-do-autonomously">What the agent cannot do autonomously<a class="headerlink" href="#what-the-agent-cannot-do-autonomously" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Create GitHub repos (needs auth — human runs <code>gh repo create</code>)</li>
+<li>Push to remotes (needs auth)</li>
+<li>Trademark / branding decisions</li>
+<li>Subjective UX (color, copy beyond functional defaults)</li>
+<li>Touch the user's <em>actual</em> HA install — <strong>only the Dockerized one</strong></li>
+<li>Modify the charter without explicit approval</li>
+</ul>
+<h3 id="tooling-preconditions">Tooling preconditions<a class="headerlink" href="#tooling-preconditions" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Docker Desktop running (user has it for ESP-IDF)</li>
+<li>Python 3.13+ locally</li>
+<li>Node 20+ for card builds</li>
+<li><code>gh</code> CLI authenticated (for repo create + push, when human approves)</li>
+</ul>
+<hr />
+<h2 id="critical-path-v01">Critical path (v0.1)<a class="headerlink" href="#critical-path-v01" title="Permanent link">&para;</a></h2>
+<p>Each step's "verify" is the gate that must pass before commit. Agent advances autonomously; human reviews at G0–G3.</p>
+<ol>
+<li><strong>G0</strong> ← human: trademark + name availability + license confirmed</li>
+<li><strong>Repo bootstrap × 2</strong> (manifests, hacs.json, CI skeletons) → <em>verify:</em> hassfest + HACS validate green</li>
+<li><strong><code>dev/</code> harness up</strong> (docker-compose, seed/probe stubs) → <em>verify:</em> HA reachable at <code>localhost:8125 (default; override via</code>HA_PORT<code>env var)</code>, probe.py runs</li>
+<li><strong>G1</strong> ← human: harness review</li>
+<li><strong><code>Insight</code> + <code>InsightKind</code> + <code>Detector</code> ABC + registry</strong> — <strong>freezes community shape</strong> → <em>verify:</em> import + ABC unit tests</li>
+<li><strong><code>state_event_buffer</code></strong> + entity-rename handler → <em>verify:</em> synthetic event stream test, rename doesn't break fingerprints</li>
+<li><strong><code>store</code> (SQLite + migrations)</strong> + <code>pseudonym_map</code> → <em>verify:</em> roundtrip + migration tests</li>
+<li><strong><code>config_flow</code></strong> (three-mode wizard) → <em>verify:</em> config-flow pytest</li>
+<li><strong><code>ScheduleDetector</code> MVP</strong> + Blueprint emission → <em>verify:</em> <code>probe.py</code> with 14-day synthetic routine produces expected insight + Blueprint</li>
+<li><strong>Conflict scanner + two-layer validator</strong> → <em>verify:</em> <code>probe.py</code> with pre-existing automation suppresses duplicate</li>
+<li><strong>WS API</strong> (hello/list/subscribe + handshake) → <em>verify:</em> <code>probe.py</code> asserts handshake response shape</li>
+<li><strong>Card MVP</strong> (list + handshake + downgrade banner) → <em>verify:</em> vitest + manual smoke at <code>localhost:8125 (default; override via</code>HA_PORT<code>env var)</code></li>
+<li><strong><code>apply/automation_writer</code> + <code>blueprint_writer</code> + drift detector</strong> → <em>verify:</em> <code>probe.py</code> applies, asserts automation exists, edits, asserts drift detected</li>
+<li><strong>Card detail modal</strong> (preview + apply) → <em>verify:</em> manual click-through against probe-seeded HA</li>
+<li><strong>G2</strong> ← human: full demo path works end-to-end</li>
+<li><strong><code>llm/redactor</code> + <code>llm/context</code> + <code>llm/agent_client</code> + <code>llm/privacy_log</code></strong> → <em>verify:</em> redactor unit tests, no-network test, privacy-log sensor test</li>
+<li><strong>Trust badges + "what gets sent?" modal</strong> → <em>verify:</em> vitest snapshot tests</li>
+<li><strong>Card detail modal</strong> (explain + redaction preview) → <em>verify:</em> mock LLM round-trip, payload matches expected redaction</li>
+<li><strong>Snooze + dismiss + purge + budget breaker</strong> → <em>verify:</em> pytest + <code>probe.py</code> budget-exhaustion test</li>
+<li><strong>Docs</strong> (privacy.md, writing-a-detector.md, ws-api.md) → <em>verify:</em> links resolve, examples run</li>
+<li><strong>Test coverage ≥80%</strong> on detector + apply + privacy + drift → <em>verify:</em> coverage report</li>
+<li><strong>G3</strong> ← human: pre-tag review</li>
+<li><strong>Tag v0.1.0</strong> → <em>verify:</em> HACS validate green, release artifact built</li>
+</ol>
+<hr />
+<h2 id="release-history-actual">Release history (actual)<a class="headerlink" href="#release-history-actual" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Version</th>
+<th>Theme</th>
+<th>Highlights</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>v0.1.0</td>
+<td>Foundation</td>
+<td>ScheduleDetector, inbox card, three-mode privacy wizard, apply pipeline</td>
+</tr>
+<tr>
+<td>v0.2.0</td>
+<td>LLM Explain</td>
+<td>Conversation API integration, Redactor, privacy log sensor, OptionsFlow</td>
+</tr>
+<tr>
+<td>v0.3.0</td>
+<td>Refine + co-occur</td>
+<td>CooccurrenceDetector, LLM Refine, Test actions, modal UI, TTS, inline rename</td>
+</tr>
+<tr>
+<td>v0.4.0</td>
+<td>Day-one onboarding</td>
+<td>Recorder backfill (auto on setup + manual service + lookback config)</td>
+</tr>
+<tr>
+<td>v0.5.0</td>
+<td>Surface expansion</td>
+<td>Sidebar panel, visual editor, adaptive sizing, compact tile, search</td>
+</tr>
+<tr>
+<td>v0.5.1</td>
+<td>Refine polish</td>
+<td>INSUFFICIENT_BUDGET self-signal, refusal detection, side-by-side compare, follow-up feedback</td>
+</tr>
+<tr>
+<td>v0.6.0</td>
+<td>Trust &amp; visibility</td>
+<td>Per-entity LLM opt-out, "What gets sent?" preview, audit log viewer, trust pills</td>
+</tr>
+<tr>
+<td>v0.7.0</td>
+<td>Detector library doubles</td>
+<td>LongTailDetector, OrphanDeviceDetector, StreakDetector, confidence colors, age, sort/group</td>
+</tr>
+</tbody>
+</table>
+<h2 id="future-roadmap-planned">Future roadmap (planned)<a class="headerlink" href="#future-roadmap-planned" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Target</th>
+<th>Theme</th>
+<th>Candidate items</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>v0.8</td>
+<td>Apply pipeline polish</td>
+<td>Undo applied, online (Layer 2) validator, edit YAML before apply, bulk apply</td>
+</tr>
+<tr>
+<td>v0.9</td>
+<td>Smart features</td>
+<td>Notifications, LLM cost estimator, agent failover, AnomalyDetector, SeasonalityDetector, CorrelationDetector</td>
+</tr>
+<tr>
+<td>v1.0</td>
+<td>Release candidate</td>
+<td>Multi-config-entry, custom detector loading, multi-turn refine, i18n, docs site, HACS default-store PR</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p>The original v0.1 charter envisioned a different shape (vision-LLM, anomaly, cleanup as separate releases). Actual cadence has prioritized refining the hero loop and the privacy story before broadening detector kinds. See git tags for the canonical record.</p>
+</blockquote>
+<hr />
+<h2 id="risks">Risks<a class="headerlink" href="#risks" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Risk</th>
+<th>Mitigation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>HA WS config API changes between minor versions</td>
+<td>Pin to documented endpoints; CI matrix against last 3 HA versions</td>
+</tr>
+<tr>
+<td>Recorder unavailable</td>
+<td>Heuristic works on rolling buffer; recorder is enhancement</td>
+</tr>
+<tr>
+<td>User has no Conversation agent set up</td>
+<td>Wizard detects, links to docs, falls back to LLM-disabled</td>
+</tr>
+<tr>
+<td>Detector false positives erode trust</td>
+<td>Confidence threshold + dismiss → fingerprint blacklist; never re-suggest</td>
+</tr>
+<tr>
+<td>YAML-mode Lovelace can't apply card-proposals</td>
+<td>Detect mode, degrade to copy-YAML UX</td>
+</tr>
+<tr>
+<td>Big installs (1500+ entities) overwhelm scan</td>
+<td>Area-scoped, scan budget, pre-filtered subscription</td>
+</tr>
+<tr>
+<td>Community detectors do unsafe things</td>
+<td>Detector ABC restricts file/network; in-tree contributions get code review</td>
+</tr>
+<tr>
+<td>WS protocol drift between card and integration</td>
+<td>Handshake on every connect; UI downgrades; banner prompts</td>
+</tr>
+<tr>
+<td>User edits applied automation, then undoes</td>
+<td>Drift detection → confirm dialog with diff</td>
+</tr>
+<tr>
+<td>Sensitive attributes leak via LLM context</td>
+<td>Always-redacted attribute list, enforced at redactor; CI tests</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="success-criteria-for-v01">Success criteria for v0.1<a class="headerlink" href="#success-criteria-for-v01" title="Permanent link">&para;</a></h2>
+<ul>
+<li>HACS custom-repo install in &lt;5 min</li>
+<li>First insight within 24h on a typical home</li>
+<li><strong>Zero outbound network calls</strong> until user opts in to LLM and clicks Explain</li>
+<li>"Apply" produces a Blueprint instance indistinguishable from hand-written</li>
+<li><code>docs/privacy.md</code> survives a hostile read by an HA-community privacy advocate</li>
+<li>≥3 community detector contributions within 60 days</li>
+</ul>
+<hr />
+<h2 id="why-no-vector-db-rag-recorded-for-posterity">Why no vector DB / RAG (recorded for posterity)<a class="headerlink" href="#why-no-vector-db-rag-recorded-for-posterity" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Data is <strong>structured</strong> (state events, entity metadata, YAML configs); SQL handles it.</li>
+<li>"Search" is <strong>structural</strong> (by entity, by area, by pattern fingerprint), not semantic.</li>
+<li>The LLM is a <strong>narrow translator</strong> ("turn this candidate into prose"), not a brain that needs retrieval. The heuristic detector already picked the context.</li>
+<li>Embeddings cost cloud API calls (privacy hit) or local sentence-transformers (heavy CPU/RAM); zero retrieval benefit at v0.1–v1.0 scope.</li>
+<li>User-feedback loop ("stop suggesting dismissed things") is a fingerprint blacklist + confidence weights, not vector similarity.</li>
+<li>Upgrade path if conversational queries land in v2.x: <code>sqlite-vss</code> extension on the SQLite we already use. No separate DB process.</li>
+</ul>
+<p><strong>Don't relitigate this without a feature that genuinely needs semantic distance.</strong></p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+        
+<div class="md-social">
+  
+    
+    
+    
+    
+      
+      
+    
+    <a href="https://github.com/botts7/ha-insights" target="_blank" rel="noopener" title="github.com" class="md-social__link">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.instant", "navigation.tracking", "navigation.sections", "navigation.top", "search.suggest", "search.highlight", "content.code.copy", "content.action.edit"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>

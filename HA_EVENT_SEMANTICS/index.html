@@ -1,0 +1,928 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Proactive routine detection and AI-assisted automation suggestions for Home Assistant.">
+      
+      
+      
+        <link rel="canonical" href="https://botts7.github.io/ha-insights/HA_EVENT_SEMANTICS/">
+      
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Home Assistant State-Change Event Semantics — Ground Truth - HA Insights</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#home-assistant-state-change-event-semantics-ground-truth" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="HA Insights" class="md-header__button md-logo" aria-label="HA Insights" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            HA Insights
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Home Assistant State-Change Event Semantics — Ground Truth
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m17.75 4.09-2.53 1.94.91 3.06-2.63-1.81-2.63 1.81.91-3.06-2.53-1.94L12.44 4l1.06-3 1.06 3zm3.5 6.91-1.64 1.25.59 1.98-1.7-1.17-1.7 1.17.59-1.98L15.75 11l2.06-.05L18.5 9l.69 1.95zm-2.28 4.95c.83-.08 1.72 1.1 1.19 1.85-.32.45-.66.87-1.08 1.27C15.17 23 8.84 23 4.94 19.07c-3.91-3.9-3.91-10.24 0-14.14.4-.4.82-.76 1.27-1.08.75-.53 1.93.36 1.85 1.19-.27 2.86.69 5.83 2.89 8.02a9.96 9.96 0 0 0 8.02 2.89m-1.64 2.02a12.08 12.08 0 0 1-7.8-3.47c-2.17-2.19-3.33-5-3.49-7.82-2.81 3.14-2.7 7.96.31 10.98 3.02 3.01 7.84 3.12 10.98.31"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3m0-7 2.39 3.42C13.65 5.15 12.84 5 12 5s-1.65.15-2.39.42zM3.34 7l4.16-.35A7.2 7.2 0 0 0 5.94 8.5c-.44.74-.69 1.5-.83 2.29zm.02 10 1.76-3.77a7.131 7.131 0 0 0 2.38 4.14zM20.65 7l-1.77 3.79a7.02 7.02 0 0 0-2.38-4.15zm-.01 10-4.14.36c.59-.51 1.12-1.14 1.54-1.86.42-.73.69-1.5.83-2.29zM12 22l-2.41-3.44c.74.27 1.55.44 2.41.44.82 0 1.63-.17 2.37-.44z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/botts7/ha-insights" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    botts7/ha-insights
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="HA Insights" class="md-nav__button md-logo" aria-label="HA Insights" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    HA Insights
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/botts7/ha-insights" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    botts7/ha-insights
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ARCHITECTURE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../privacy/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Privacy
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../writing-a-detector/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Writing a detector
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ws-api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    WebSocket API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#gotcha-1-group-fan-out" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Gotcha 1 — Group fan-out
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#gotcha-2-scene-activation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Gotcha 2 — Scene activation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#gotcha-3-script-execution" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Gotcha 3 — Script execution
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#gotcha-4-template-entities-critical-for-false-positives" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Gotcha 4 — Template entities (CRITICAL FOR FALSE POSITIVES)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#gotcha-5-ha-restart-bootstrap-critical-for-false-positives" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Gotcha 5 — HA restart / bootstrap (CRITICAL FOR FALSE POSITIVES)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#gotcha-6-unavailable-state-transitions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Gotcha 6 — unavailable state transitions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#gotcha-7-automation-triggers-on-bootstrap" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Gotcha 7 — Automation triggers on bootstrap
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#gotcha-8-recorder-semantics" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Gotcha 8 — Recorder semantics
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#mentioned-briefly" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Mentioned briefly
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#top-3-broadest-false-positive-sources" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Top 3 broadest false-positive sources
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-we-filter-today-audit" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What we filter today (audit)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#action-items-derived-from-this-audit" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Action items derived from this audit
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+    <a href="https://github.com/botts7/ha-insights/edit/main/docs/HA_EVENT_SEMANTICS.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4zm10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1z"/></svg>
+    </a>
+  
+  
+
+
+<h1 id="home-assistant-state-change-event-semantics-ground-truth">Home Assistant State-Change Event Semantics — Ground Truth<a class="headerlink" href="#home-assistant-state-change-event-semantics-ground-truth" title="Permanent link">&para;</a></h1>
+<p>Reference for HA Insights detector authors. Source: direct reading of
+home-assistant/core at <code>the HA core checkout</code> (cloned
+2026-05-13, HA dev branch).</p>
+<p>This document tells you EXACTLY when HA fires <code>state_changed</code> events
+and how the resulting stream differs from a naive "every state change
+is independent" model. Every false-positive class our detectors have
+hit traces to one of the gotchas below.</p>
+<hr />
+<h2 id="gotcha-1-group-fan-out">Gotcha 1 — Group fan-out<a class="headerlink" href="#gotcha-1-group-fan-out" title="Permanent link">&para;</a></h2>
+<p><strong>Behaviour:</strong> When a group entity (e.g. <code>light.living_room_group</code>)
+is toggled, the group does NOT emit state_changed events for its
+members directly. Instead it forwards the service call to each
+member via <code>hass.services.async_call(blocking=True, context=...)</code>.
+Each member then fires its own state_changed independently. All
+member events share the same <code>context.id</code>.</p>
+<p>The group entity itself emits state_changed AFTER members report
+back, based on its computed aggregate state.</p>
+<p><strong>Source:</strong> <code>homeassistant/components/group/light.py:171-186</code>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">hass</span><span class="o">.</span><span class="n">services</span><span class="o">.</span><span class="n">async_call</span><span class="p">(</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>    <span class="n">light</span><span class="o">.</span><span class="n">DOMAIN</span><span class="p">,</span> <span class="n">SERVICE_TURN_ON</span><span class="p">,</span> <span class="n">data</span><span class="p">,</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>    <span class="n">blocking</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">context</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">_context</span><span class="p">,</span>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="p">)</span>
+</span></code></pre></div></p>
+<p><strong>Correlation key:</strong> <code>context.id</code> is shared across all member
+state_changed events from a single group toggle.</p>
+<p><strong>Implication for detectors:</strong> A burst of N entities all changing
+within a few ms with the SAME <code>context.id</code> is one logical operation.
+frequency_anomaly should treat this as ONE event, not N.
+orphan_device should NOT flag a member that's been silent
+individually if the group has been active (the member may be
+slaved and not propagating its own events — see Gotcha 4).</p>
+<hr />
+<h2 id="gotcha-2-scene-activation">Gotcha 2 — Scene activation<a class="headerlink" href="#gotcha-2-scene-activation" title="Permanent link">&para;</a></h2>
+<p><strong>Behaviour:</strong> Scene <code>turn_on</code> fires ONE state_changed for the
+scene entity itself (timestamp update), then forwards target
+service calls. Each target fires its own state_changed
+asynchronously. context.id is shared across scene + target events.</p>
+<p><strong>Source:</strong> <code>homeassistant/components/scene/__init__.py:148-156</code>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="bp">self</span><span class="o">.</span><span class="n">_async_record_activation</span><span class="p">()</span>    <span class="c1"># timestamp update</span>
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="bp">self</span><span class="o">.</span><span class="n">async_write_ha_state</span><span class="p">()</span>        <span class="c1"># scene state_changed fires</span>
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">async_activate</span><span class="p">(</span><span class="o">**</span><span class="n">kwargs</span><span class="p">)</span> <span class="c1"># target service calls</span>
+</span></code></pre></div></p>
+<p><strong>Edge case:</strong> Scene state is stateless — only <code>last_activated</code>
+timestamp. The scene's "state" doesn't reflect target outcomes.</p>
+<p><strong>Implication for detectors:</strong> Same as group fan-out — context.id
+groups the operation. ManualHabitDetector should NOT flag each
+target individually as a habit; the user's intent was "activate
+scene X".</p>
+<hr />
+<h2 id="gotcha-3-script-execution">Gotcha 3 — Script execution<a class="headerlink" href="#gotcha-3-script-execution" title="Permanent link">&para;</a></h2>
+<p><strong>Behaviour:</strong> A script's actions are processed sequentially (by
+default) or in parallel (<code>mode: parallel</code>). Each action that
+results in a state change fires its own state_changed. The script
+entity itself does NOT fire state_changed unless the script
+<em>entity</em> is toggled directly. All state_changed events from a
+single script run share the same <code>context.id</code>.</p>
+<p><strong>Source:</strong> <code>homeassistant/components/script/__init__.py</code> →
+<code>homeassistant/helpers/script.py</code></p>
+<p><strong>context.user_id behaviour:</strong>
+- Caller is a user → user_id is that user
+- Caller is an automation → user_id is None, parent_id chains back
+- Caller is a schedule / system → user_id is None</p>
+<p><strong>Implication for detectors:</strong> Use <code>context.user_id</code> to discriminate
+manual habits from automation noise — but check <code>context.parent_id</code>
+to see if the call chain originated from an automation that runs
+<em>because</em> of a user action (still automated, not a habit).</p>
+<hr />
+<h2 id="gotcha-4-template-entities-critical-for-false-positives">Gotcha 4 — Template entities (CRITICAL FOR FALSE POSITIVES)<a class="headerlink" href="#gotcha-4-template-entities-critical-for-false-positives" title="Permanent link">&para;</a></h2>
+<p><strong>Behaviour:</strong> Template entities fire state_changed ONLY when the
+computed value changes. If the source entity updates but the
+template result stays the same (boolean templates with multiple
+sources hitting the same OR result), NO state_changed fires for
+the template entity.</p>
+<p>When the computed value IS the same as previous, HA fires
+<code>EVENT_STATE_REPORTED</code> instead — a different event we don't
+currently observe.</p>
+<p><strong>Source:</strong> <code>homeassistant/components/template/template_entity.py:90-143</code>
++ <code>homeassistant/core.py:2341</code> (same_state and same_attr check
+that re-routes to STATE_REPORTED).</p>
+<p><strong>Edge case:</strong> <code>force_update: true</code> does NOT bypass this. HA's
+state machine enforces same-state-no-event globally.</p>
+<p><strong>Implication for detectors:</strong>
+- cooccurrence: a template entity that "follows" its source by
+  definition will appear MORE correlated than physical entities.
+  Pair detection should drop pairs where one entity's
+  <code>attributes.source</code> or <code>attributes.entity_id</code> lists the other.
+- orphan_device: a template entity going silent is meaningful
+  (the computed value is stable, not that the device is offline).
+  Don't flag template-domain entities as orphans.
+- frequency_anomaly: same — templates can't run-away in the
+  "stuck loop" sense; they just compute.</p>
+<hr />
+<h2 id="gotcha-5-ha-restart-bootstrap-critical-for-false-positives">Gotcha 5 — HA restart / bootstrap (CRITICAL FOR FALSE POSITIVES)<a class="headerlink" href="#gotcha-5-ha-restart-bootstrap-critical-for-false-positives" title="Permanent link">&para;</a></h2>
+<p><strong>Behaviour:</strong> When HA boots, every entity platform calls
+<code>_async_write_ha_state()</code> as it adds entities. Each call fires
+state_changed with <code>old_state=None</code> and <code>new_state=&lt;restored&gt;</code>.
+For a 500-entity install, that's 500 state_changed events
+within the bootstrap window (~5 seconds).</p>
+<p><strong>Source:</strong> <code>homeassistant/core.py:2313-2402</code> (<code>async_set_internal</code>)
+The check <code>old_state is None</code> sets <code>state.is_fresh = True</code>.</p>
+<p><strong>Boundary marker:</strong> <code>homeassistant_started</code> event fires once,
+synchronously, AFTER all entity platforms are loaded.</p>
+<p><strong>Implication for detectors:</strong> Every restart looks like a
+correlated burst. Without a filter:
+- cooccurrence flags every "B follows A within seconds" pair
+- frequency_anomaly might flag the burst day
+- streak / schedule detect "midnight startup routine"</p>
+<p><strong>Filter rule:</strong> Drop state_changed events where <code>old_state is None</code>
+unless the timestamp is more than 5 seconds after the most recent
+<code>homeassistant_started</code>. HA's own automation state trigger has
+this guard built in — we should mirror it.</p>
+<hr />
+<h2 id="gotcha-6-unavailable-state-transitions">Gotcha 6 — <code>unavailable</code> state transitions<a class="headerlink" href="#gotcha-6-unavailable-state-transitions" title="Permanent link">&para;</a></h2>
+<p><strong>Behaviour:</strong> When an entity loses its source (network drop, MQTT
+disconnect), the integration sets <code>available=False</code> and calls
+<code>async_write_ha_state()</code>, which fires state_changed with
+<code>new_state.state="unavailable"</code>. When the entity recovers, the
+same mechanism fires state_changed back to the actual value.</p>
+<p><strong>Source:</strong> <code>homeassistant/helpers/entity.py:1056-1069</code>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="k">if</span> <span class="ow">not</span> <span class="n">available</span><span class="p">:</span>
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>    <span class="k">return</span> <span class="n">STATE_UNAVAILABLE</span>
+</span></code></pre></div></p>
+<p><strong>Edge case:</strong> A flapping entity (lossy WiFi) can fire dozens of
+<code>X → unavailable → X</code> events per hour. This is a REAL signal for
+diagnostics but is noise for habit/schedule detection.</p>
+<p><strong>Implication for detectors:</strong>
+- orphan_device: an entity whose LAST event was a transition TO
+  <code>unavailable</code> is reporting a NETWORK issue, not a dead battery.
+  Re-frame the insight.
+- frequency_anomaly: filter out <code>unavailable ↔ X</code> transition
+  events when computing baseline + today's count. Otherwise a
+  device flapping at 50×/hr falsely looks like a runaway
+  automation.
+- All habit/routine detectors: skip events where
+  <code>old_state == 'unavailable' OR new_state == 'unavailable'</code>.</p>
+<hr />
+<h2 id="gotcha-7-automation-triggers-on-bootstrap">Gotcha 7 — Automation triggers on bootstrap<a class="headerlink" href="#gotcha-7-automation-triggers-on-bootstrap" title="Permanent link">&para;</a></h2>
+<p><strong>Behaviour:</strong> HA's <code>platform: state</code> trigger has a built-in guard
+to ignore state_changed events where <code>old_state is None</code> (the
+bootstrap fan-out). Users who explicitly set <code>from: null</code> opt
+INTO bootstrap-triggered runs.</p>
+<p><strong>Source:</strong> <code>homeassistant/components/automation/__init__.py</code> →
+<code>homeassistant/helpers/trigger.py</code></p>
+<p><strong>Implication for detectors:</strong> This is a SIGNAL — if HA's own
+state trigger filters bootstrap events, we should too. The fact
+that core does this confirms our filter rule from Gotcha 5.</p>
+<hr />
+<h2 id="gotcha-8-recorder-semantics">Gotcha 8 — Recorder semantics<a class="headerlink" href="#gotcha-8-recorder-semantics" title="Permanent link">&para;</a></h2>
+<p><strong>Behaviour:</strong> Recorder persists ONLY "significant" state changes.
+The significance threshold is integration-specific: numeric
+sensors round to a sane precision, binary states are always
+significant. <code>get_significant_states</code> returns this filtered view,
+not every single state_changed.</p>
+<p><strong>Source:</strong> <code>homeassistant/components/recorder/__init__.py</code> +
+<code>recorder/history.py</code></p>
+<p><strong>Implication for detectors:</strong> Backfill from recorder gives a
+LOWER event count than live observation. Detectors that count
+events (frequency_anomaly, streak) must distinguish:
+- <code>today_count</code> from the live buffer (every event)
+- <code>baseline_count</code> from recorder (significant events only)
+Mixing the two inflates ratios. Currently we don't make this
+distinction — worth a follow-up audit.</p>
+<hr />
+<h2 id="mentioned-briefly">Mentioned briefly<a class="headerlink" href="#mentioned-briefly" title="Permanent link">&para;</a></h2>
+<p><strong><code>homeassistant_started</code> event:</strong> Fires once after bootstrap. Use
+as the bootstrap-window boundary for Gotcha 5 filter.</p>
+<p><strong>device_tracker:</strong> Fires state_changed on ZONE transitions, not
+every GPS coordinate. So "home → not_home → home" is what we see,
+not the underlying GPS jitter. Good — fewer false positives for
+commute pattern detection.</p>
+<p><strong>person.*:</strong> Derives state from device_trackers. Fires
+state_changed when the computed person state changes (any tracker
+moves the dial). Useful for presence inference; downstream of
+device_tracker zone transitions.</p>
+<hr />
+<h2 id="top-3-broadest-false-positive-sources">Top 3 broadest false-positive sources<a class="headerlink" href="#top-3-broadest-false-positive-sources" title="Permanent link">&para;</a></h2>
+<ol>
+<li>
+<p><strong>Bootstrap fan-out</strong> (Gotcha 5): every HA restart looks like a
+   correlated state burst. Every detector that counts events or
+   detects correlation false-positives without an <code>old_state is
+   None</code> filter.</p>
+</li>
+<li>
+<p><strong>context.id batch correlation</strong> (Gotchas 1-3): groups, scenes,
+   and scripts produce N state_changed events for ONE logical
+   user/automation intent. Without context.id grouping, every
+   batch operation false-multiplies into N separate insights.</p>
+</li>
+<li>
+<p><strong>Template entity false-correlation</strong> (Gotcha 4): templates that
+   compute from other entities will appear correlated with their
+   sources by definition. Pair-discovery in cooccurrence /
+   lagged_correlation must drop pairs where one is a template
+   computed from the other.</p>
+</li>
+</ol>
+<hr />
+<h2 id="what-we-filter-today-audit">What we filter today (audit)<a class="headerlink" href="#what-we-filter-today-audit" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Filter</th>
+<th>Source code</th>
+<th>Covers gotchas</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Same-device dedup (frequency_anomaly)</td>
+<td><code>frequency_anomaly.py</code> device_id_by_entity</td>
+<td>Partial — only entities on the SAME HA device</td>
+</tr>
+<tr>
+<td>Symmetric dep map (cooccurrence)</td>
+<td><code>detectors/__init__.py</code> _build_entity_dependencies</td>
+<td>Partial Gotcha 4 (parent↔child + sibling for small groups)</td>
+</tr>
+<tr>
+<td>Container-to-members (RedundantTargetDetector)</td>
+<td><code>_build_container_map</code></td>
+<td>Partial Gotcha 1 (structural; doesn't use context.id)</td>
+</tr>
+<tr>
+<td>Group-member orphan skip (v1.4.8)</td>
+<td><code>orphan_device._has_active_parent</code></td>
+<td>NEW — covers slaved-members per Gotcha 1</td>
+</tr>
+<tr>
+<td>Group-fanout candidate skip (v1.4.8)</td>
+<td><code>frequency_anomaly</code> parent-of map</td>
+<td>NEW — covers fan-out per Gotcha 1 (but via structural map, not context.id — see TODO below)</td>
+</tr>
+<tr>
+<td><code>unavailable</code> filter</td>
+<td>NOT IMPLEMENTED</td>
+<td>Gotcha 6 missing — TODO</td>
+</tr>
+<tr>
+<td>Bootstrap window filter</td>
+<td>NOT IMPLEMENTED</td>
+<td>Gotcha 5 missing — TODO</td>
+</tr>
+<tr>
+<td>context.id batch correlator</td>
+<td>NOT IMPLEMENTED</td>
+<td>Gotchas 1-3 missing — TODO</td>
+</tr>
+<tr>
+<td>Template-domain orphan skip</td>
+<td>NOT IMPLEMENTED</td>
+<td>Gotcha 4 missing — TODO</td>
+</tr>
+<tr>
+<td>Recorder vs live distinction</td>
+<td>NOT IMPLEMENTED</td>
+<td>Gotcha 8 missing — TODO</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="action-items-derived-from-this-audit">Action items derived from this audit<a class="headerlink" href="#action-items-derived-from-this-audit" title="Permanent link">&para;</a></h2>
+<p>The "TODO" rows above become the test-harness fixture set and the
+filter work for the v1.5 line. Priority:</p>
+<ol>
+<li><strong>Bootstrap-window filter</strong> (Gotcha 5 — broadest impact)</li>
+<li><strong>context.id batch correlation</strong> (Gotchas 1-3 — applies across
+   most detectors)</li>
+<li><strong><code>unavailable</code> transition filter</strong> (Gotcha 6 — false alarms in
+   orphan_device + frequency_anomaly)</li>
+<li><strong>Template-source pair drop</strong> (Gotcha 4 — cooccurrence /
+   lagged_correlation cleanups)</li>
+<li><strong>Recorder vs live distinction</strong> (Gotcha 8 — quieter but
+   inflates everything that mixes today vs baseline)</li>
+</ol>
+<p>Each item is a fixture in <code>tests/_ha_semantics/</code> + filter code +
+smoke-test regression.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+        
+<div class="md-social">
+  
+    
+    
+    
+    
+      
+      
+    
+    <a href="https://github.com/botts7/ha-insights" target="_blank" rel="noopener" title="github.com" class="md-social__link">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.instant", "navigation.tracking", "navigation.sections", "navigation.top", "search.suggest", "search.highlight", "content.code.copy", "content.action.edit"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>
