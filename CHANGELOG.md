@@ -4,6 +4,240 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+## [1.5.30] — 2026-05-15
+
+### Fixed
+
+- **Goal-tracking setup-step deeplink** now lands on the HA Insights tile
+  (`/config/integrations/integration/ha_insights`) instead of the
+  integrations dashboard. The v1.5.17 detour was defensive against a
+  reported blank-page issue that no longer reproduces on HA 2023.1+.
+
+## [1.5.29] — 2026-05-15
+
+### Added
+
+- **Goal Tracker targets exposed in OptionsFlow** (Advanced step) as five
+  Optional HH:MM string fields: bedtime by, wake up by, leave home by,
+  get to work by, home by. The detector has been reading `goals_json`
+  since v1.4 but the field was never surfaced — users couldn't actually
+  configure goals. Serializes back into the same `goals_json` string the
+  detector consumes; manual goals_json setters keep working unchanged.
+
+## [1.5.28] — 2026-05-15
+
+### Added
+
+- **HA 2024.4+ label support.** `ws_api` emits `labels[]` per insight
+  from `hierarchy.labels_of` (primary entity's labels, cascading from
+  device + area). Pair with companion card v1.2.10 for a Label filter
+  chip and `group_by: "label"`. Empty array when no labels OR HA < 2024.4.
+
+## [1.5.27] — 2026-05-14
+
+### Fixed
+
+- **Conflict scanner factors `for:` duration** into state-trigger signatures.
+  Two triggers with the same entity + to_state but different `for:` durations
+  fire at different times — pre-1.5.27 we matched them as the same signature
+  and silently flagged false-positive 🔁 already-automated conflicts.
+  Signature is now `set[tuple[entity, to_state, for_seconds]]`.
+
+## [1.5.26] — 2026-05-14
+
+### Added
+
+- **Sun-relative trigger emission** in `streak` + `schedule` detectors.
+  When a daily pattern's wall-clock fingerprint tracks sunset / sunrise
+  within ±10 min more closely than a fixed time, the proposed automation
+  emits `platform: sun` with the correct event + offset instead of
+  `platform: time`. Stops the integration from generating clock-time
+  YAML for patterns that are clearly photo-period driven.
+
+## [1.5.25] — 2026-05-13
+
+### Fixed
+
+- **Long-silence filter** drops state transitions that follow a > 8h gap
+  with no other activity for the same entity. Implicit poll-cycle wake-ups
+  (e.g. BYD car virtual-unavailable transitions every 8h) were escaping
+  the unavailable-transition filter and polluting daily-pattern detectors.
+
+## [1.5.24] — 2026-05-13
+
+### Fixed
+
+- **Group/scene-aware conflict matching.** Pre-1.5.24 the conflict scanner
+  did a literal `set.intersection` of action `entity_id`s, which missed
+  the case where an insight targets `light.backyard_garden_lights` (a group)
+  and the existing automation targets the individual member lights. The
+  scanner now expands both sides via `hierarchy.members_of` before
+  intersecting — same intent, different surface form, now matched.
+
+## [1.5.23] — 2026-05-12
+
+### Fixed
+
+- **Cohort dedup bug**: pet feeder entity with no device_id was being
+  merged into HA group-light cohorts. `_find_common_container` was
+  calling `device_ids.discard(None)` **before** the `len == 1` shared-
+  device check, so any set containing `{None, device_A}` collapsed to
+  `{device_A}` and incorrectly assigned the orphan to that device.
+  Fixed to require `None not in device_ids`.
+
+## [1.5.22] — 2026-05-12
+
+### Fixed
+
+- **URGENT deadlock**: `automation_audit` detector was hanging on
+  `/config/integrations/dashboard` (frontend stuck on spinner). Cause:
+  `_load_iot_classes` called `async_get_integration` from inside a
+  worker thread — HA's loader requires the main event loop. Moved
+  iot_class enumeration to `run_all_detectors` on the main loop and
+  threaded the map through `DetectorContext`.
+
+## [1.5.18 – 1.5.21] — 2026-05-11
+
+### Added
+
+- **ButtonPressHabitDetector** (v1.5.21, Phase 3 of v1.6 button-press work).
+  Pairs `event.*` firings (HA's native button-press abstraction) with
+  consequent state changes within a 5s window; emits AUTOMATION_PROPOSAL
+  insights with `platform: state` trigger + template condition.
+- **Event-type capture** for HA `event.*` entities (v1.5.19–20). The
+  state-event buffer records `event_type` so detectors can group button
+  presses by which press (`single_press`, `double_press`, etc.) the user
+  is actually correlating against.
+- **Manual habit detection accepts physical switches** (v1.5.18) when the
+  entity belongs to a local integration (Zigbee, Z-Wave, ESPHome, MQTT,
+  Hue local bridge). A relay-style smart-switch controlling smart lights
+  via button-press is "manual" behavior worth surfacing.
+
+## [1.5.13 – 1.5.17] — 2026-05-10
+
+### Added
+
+- **Cross-integration coupling finding** in automation_audit. Flags
+  automations that pair a cloud-polling source with a local-push action
+  (Tuya → ZHA, etc.) so users see "this one cloud round-trip is the
+  reason your light feels slow".
+- **Per-member cohort metadata** (`cohort_member_info` on every insight).
+  Each cohort member now carries its own `integration` + `external_source`,
+  so the expand/collapse dropdown shows accurate 🔌 / 🏷️ badges per row.
+
+### Fixed
+
+- **Setup-quality reframe** — "Setup health" → "Setup completeness".
+  Health framed unset features as failure; completeness frames them
+  as steps. Structured `setup_steps` payload + per-step deeplinks.
+- **Daily-pattern detectors** (streak, schedule, cooccurrence, seasonality)
+  now drop `FROM-unavailable` state transitions across the board, not
+  just the recorder rollup path. Centralizes the filter via the new
+  `lib/event_filters.py` module (v1.5.16).
+
+## [1.5.0 – 1.5.12] — 2026-05-07 → 2026-05-10
+
+### Added
+
+- **HA event-semantics gotcha filters.** Five subtle classes of HA event
+  noise that detectors were treating as signal — all now filtered
+  centrally:
+  - Gotchas 1–3: `context.id` batch correlation (one user action fans
+    out to N entities via groups/scenes; previously counted as N habits)
+  - Gotcha 4: template / derived-platform pair drop (state of
+    `sensor.derived` mirrors `sensor.source`; both stored, only one
+    is the real signal)
+  - Gotcha 6: unavailable-transition filter (entity going `unavailable`
+    on integration reload is not a user action)
+  - Gotcha 8: recorder-vs-live event distinction (long-window detectors
+    consume recorder rollups; short-window detectors consume the live
+    state-event buffer)
+- **`code review` audit fix batches** (v1.5.8–10) — 16 confirmed bugs
+  across three batches, ranging from data-loss in option migration to
+  broken filter chips to example-data leaking into prod insights.
+- **Maturity tier rendering** — every insight now carries a
+  `maturity: "stable" | "beta" | "experimental"` field. Card renders
+  🟡 BETA / 🧪 EXPERIMENTAL pills accordingly. Pre-HACS demotion of
+  four risky detectors (`phone_charge_reminder`, `weather_correlation`,
+  `presence_inference`, `routine`) to BETA.
+
+### Fixed
+
+- Bootstrap fan-out filter — HA's startup event burst (every entity
+  emits one `state_changed`) was being read as user activity.
+- HA group fan-out + slaved-member false positives.
+- Explain prompt is now insight-kind-aware (diagnostic framing for
+  anomalies, vs proposal framing for patterns).
+- Dismiss survives re-scans — re-emitted insights inherit dismissal
+  state instead of re-notifying.
+- 4 audit-cache staleness bugs (compute_cache_key call-site mismatches).
+
+## [1.4.0] — 2026-05-03
+
+### Added
+
+- **Multi-step OptionsFlow wizard** with refinement-aware intro. New
+  users get a guided preset → mobile targets → experimental opt-in
+  flow; returning users land on the Advanced form directly.
+- **Three-tier detector maturity flag** (`stable` / `beta` / `experimental`)
+  with config-time gating via `allow_experimental_detectors`.
+- **Try with example data** — fixture-driven insight preview so users
+  can see what the integration produces before granting recorder access.
+- **PhoneChargeReminderDetector** (BETA) — predicts low-battery wake-up
+  windows from charging history; emits a daily mobile notification when
+  the user is on track to wake up with < 30%.
+- **WeatherCorrelationDetector** (BETA) — pairs OpenWeatherMap (or any
+  HA `weather.*` entity) state transitions with downstream actions.
+- **Opt-in community analytics** — weekly aggregate counts (detector
+  fire/apply/dismiss per maturity tier) to `analytics_endpoint`.
+  Off by default; payload contract documented in `analytics.py`.
+- **Notify modes** — Basic (Quiet / Balanced / Chatty) + Adaptive +
+  Advanced presets. Four anti-spam knobs (confidence floor, daily cap,
+  quiet hours, attribution-confidence floor) auto-derived from preset
+  unless mode is Advanced.
+- **Multi-user notification routing**: `notify.mobile_app_*` multi-select
+  picker + per-user policy overrides (Dad gets balanced, Mum gets
+  adaptive). Resolved at notification time.
+- **Sun-relative triggers** in `ManualHabit` + `Routine` detectors.
+- **GoalTrackerDetector** — compare user-defined target times against
+  observed phone activity, report adherence over 14 days.
+- **SetupQualityDetector** — per-feature setup-completeness scoring
+  ("3 things would unlock high-impact detectors").
+- **PresenceInferenceDetector** (BETA) — infer per-room occupancy from
+  activity concentration when no PIR sensor is wired.
+- **RoutineDetector** — bundle multi-entity morning / evening flows
+  into one insight ("you turn off 4 things between 22:45 and 23:00").
+
+### Changed
+
+- **OptionsFlow** consolidated to one Advanced form that merges instead
+  of replacing options (fixes silent option-drop regression when fields
+  not in the form get cleared).
+
+## [1.2.0] — 2026-04-26
+
+### Added
+
+- **Incremental chunked backfill** for large datasets — historical state
+  events are paged in 25-entity batches with 60s per-entity timeout and
+  120s per-batch budget. Single-flight lock prevents pile-up.
+- **Repairs dual-emit** — high-confidence audit findings surface in
+  `Settings → Repairs` alongside HA's native issues. HACS feature +
+  core-merge bridge: dropping the integration into HA core would lose
+  no functionality.
+- **v1.2.x smoke suite** — 21 regression guards covering dedup, audit
+  packet emission, fix builder, fingerprint stability, store schema
+  migration, recorder-window detection.
+
+### Fixed
+
+- **Audit fingerprint stability** — re-scans were duplicating insights
+  instead of updating in place; the fingerprint included a timestamp
+  field that should have been omitted.
+- **Repairs persistence across HA restarts**. Sweep only on uninstall.
+- **Dedup bucket signature** now lowercased (`light.MAIN_ROOM` and
+  `light.main_room` no longer split into separate cohorts).
+
 ## [1.1.0] — 2026-05-12
 
 The audit release. v1.0 was pattern detection on what your home does;
