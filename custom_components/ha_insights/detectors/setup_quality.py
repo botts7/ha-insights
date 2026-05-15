@@ -305,14 +305,19 @@ _RECIPES: list[dict[str, Any]] = [
     {
         "name": "Goal tracking",
         "feature_key": "goal_tracker",
-        "next_step": 'add goals JSON in Configure → Advanced (e.g. {"bedtime_by": "22:30"})',
-        # v1.5.17: /config/integrations/integration/<domain> rendered
-        # blank on some HA versions. The canonical dashboard URL
-        # /config/integrations works everywhere — user clicks the
-        # HA Insights tile, then Configure. One extra click but
-        # zero confusion.
-        "setup_url": "/config/integrations",
-        "setup_url_label": "Open HA Integrations (click the HA Insights tile → Configure)",
+        "next_step": "set bedtime / wake / commute targets in Configure → Advanced",
+        # v1.5.30: link directly at the HA Insights tile rather than
+        # the integrations dashboard. v1.5.17 had backed off to the
+        # dashboard after the per-integration URL was reportedly blank
+        # on some HA builds; that issue hasn't reproduced on HA 2023.1+
+        # (HACS's effective minimum), and the dashboard hop is now
+        # the bigger UX cost — users land on a sea of tiles instead of
+        # the one tile that has the Configure button they want. If a
+        # future HA regresses, restore /config/integrations as a
+        # fallback in a hotfix; version-gating per-build for one URL
+        # would cost more than it saves.
+        "setup_url": "/config/integrations/integration/ha_insights",
+        "setup_url_label": "Open HA Insights → Configure → Advanced",
         "setup_url_external": False,
         "scenarios": [
             "Track 'you make it to bedtime by 22:30 on 4 of 7 nights'",
