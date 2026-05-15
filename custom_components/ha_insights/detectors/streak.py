@@ -25,6 +25,11 @@ from ..lib.timing_likelihood import (
     apply_to_confidence,
     assess_timing,
 )
+from ..lib.cooccurrence_likelihood import (
+    DEFAULT_WINDOW_SECONDS as COOCC_WINDOW,
+    apply_to_confidence as apply_coocc_to_confidence,
+    assess_cooccurrence,
+)
 from ..lib.event_filters import (
     is_after_long_silence,
     is_from_unavailable_state,
@@ -234,10 +239,30 @@ class StreakDetector(Detector):
             timestamps=streak_times_local,
             iot_class=iot_class,
         )
+        # v1.5.36: co-occurrence — count other-entity activity within
+        # ±5s of each streak event. Streaks that fire in isolation are
+        # device-timer signature; multimodal context = human action.
+        nearby_counts: list[int] = []
+        if ctx.event_buffer is not None:
+            window = timedelta(seconds=COOCC_WINDOW)
+            for ts_local in streak_times_local:
+                hits = sum(
+                    1
+                    for other in ctx.event_buffer.query(
+                        since=ts_local - window,
+                        until=ts_local + window,
+                    )
+                    if other.entity_id != entity_id
+                )
+                nearby_counts.append(hits)
+        cooccurrence = assess_cooccurrence(nearby_counts)
+
         base_confidence = min(1.0, len(longest_run) / 7.0) * max(
             0.0, 1.0 - stddev / 60.0,
         )
-        confidence = round(apply_to_confidence(base_confidence, timing), 3)
+        confidence = apply_to_confidence(base_confidence, timing)
+        confidence = apply_coocc_to_confidence(confidence, cooccurrence)
+        confidence = round(confidence, 3)
 
         title = (
             f"{entity_id} -> {new_state} "
@@ -309,6 +334,9 @@ class StreakDetector(Detector):
             # Underscore-prefixed so automation_writer strips it
             # before the YAML hits automations.yaml.
             "_timing_assessment": timing.to_dict(),
+            # v1.5.36: co-occurrence assessment — surrounding-event
+            # density per streak event.
+            "_cooccurrence_assessment": cooccurrence.to_dict(),
         }
 
         return Insight(

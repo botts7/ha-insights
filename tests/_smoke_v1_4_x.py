@@ -2114,6 +2114,35 @@ def _():
     assert "goal_wake_up_by" in en
 
 
+@t("v1.5.36: co-occurrence-likelihood lib + schedule/streak compose with timing")
+def _():
+    """Sibling library to timing_likelihood — counts surrounding entity
+    state changes within ±5s of each cluster event. Isolated patterns
+    are device-timer-likely; busy context is human-action-likely.
+    Composes with timing via chained apply_to_confidence calls. Each
+    detector also stashes _cooccurrence_assessment in payload."""
+    # Library
+    src_lib = _read(
+        "custom_components/ha_insights/lib/cooccurrence_likelihood.py"
+    )
+    assert "class CooccurrenceClass" in src_lib
+    assert "HUMAN_CONTEXT" in src_lib
+    assert "AMBIGUOUS" in src_lib
+    assert "ISOLATED" in src_lib
+    assert "def assess_cooccurrence(" in src_lib
+    assert "def apply_to_confidence(" in src_lib
+    assert "DEFAULT_WINDOW_SECONDS" in src_lib
+    # Wired into schedule + streak
+    src_sched = _read("custom_components/ha_insights/detectors/schedule.py")
+    assert "from ..lib.cooccurrence_likelihood import" in src_sched
+    assert "assess_cooccurrence(" in src_sched
+    assert '"_cooccurrence_assessment"' in src_sched
+    src_streak = _read("custom_components/ha_insights/detectors/streak.py")
+    assert "from ..lib.cooccurrence_likelihood import" in src_streak
+    assert "assess_cooccurrence(" in src_streak
+    assert '"_cooccurrence_assessment"' in src_streak
+
+
 @t("v1.5.35: schedule + streak fold timing_likelihood into confidence")
 def _():
     """Centralized lib/timing_likelihood.py grades event-cluster

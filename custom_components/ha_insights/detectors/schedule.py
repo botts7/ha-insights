@@ -36,6 +36,11 @@ from ..lib.timing_likelihood import (
     apply_to_confidence,
     assess_timing,
 )
+from ..lib.cooccurrence_likelihood import (
+    DEFAULT_WINDOW_SECONDS as COOCC_WINDOW,
+    apply_to_confidence as apply_coocc_to_confidence,
+    assess_cooccurrence,
+)
 from .base import Detector, DetectorContext, register_detector
 
 if TYPE_CHECKING:
@@ -191,12 +196,35 @@ class ScheduleDetector(Detector):
             iot_class=iot_class,
         )
 
+        # v1.5.36: co-occurrence scoring. Counts OTHER entity state
+        # changes within ±5s of each cluster event. Isolated events
+        # = device-timer signature; busy context = human action.
+        # We pull from the live event_buffer (14-day window) and
+        # exclude this entity's own events from the count.
+        nearby_counts: list[int] = []
+        if ctx.event_buffer is not None:
+            from datetime import timedelta as _td
+
+            window = _td(seconds=COOCC_WINDOW)
+            for ev in events:
+                hits = sum(
+                    1
+                    for other in ctx.event_buffer.query(
+                        since=ev.timestamp - window,
+                        until=ev.timestamp + window,
+                    )
+                    if other.entity_id != entity_id
+                )
+                nearby_counts.append(hits)
+        cooccurrence = assess_cooccurrence(nearby_counts)
+
         base_confidence = (
             min(1.0, len(minutes) / 14.0)
             * consistency
             * max(0.0, 1.0 - stddev / 15.0)
         )
         confidence = apply_to_confidence(base_confidence, timing)
+        confidence = apply_coocc_to_confidence(confidence, cooccurrence)
 
         avg_h = int(avg_min // 60)
         avg_m_int = round(avg_min % 60)
@@ -270,6 +298,10 @@ class ScheduleDetector(Detector):
             # can train per-entity overrides later. Underscored so the
             # automation_writer strips it before writing automations.yaml.
             "_timing_assessment": timing.to_dict(),
+            # v1.5.36: co-occurrence assessment — surrounding-event
+            # density per cluster event. Sibling signal to timing;
+            # detectors compose by chaining the two penalties.
+            "_cooccurrence_assessment": cooccurrence.to_dict(),
         }
 
         area_id = events[0].area_id if events else None
