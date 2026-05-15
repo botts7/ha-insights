@@ -1985,7 +1985,10 @@ def _():
     # works; user clicks the HA Insights tile from there).
     assert "presence_inference" in src
     assert "/config/devices/dashboard" in src
-    assert '"setup_url": "/config/integrations"' in src
+    # v1.5.30: goal_tracker URL now lands on the HA Insights tile
+    # directly. v1.5.17's defensive fallback to the integrations
+    # dashboard didn't reproduce on HA 2023.1+ — see commit 8a12d89.
+    assert '"/config/integrations/integration/ha_insights"' in src
     assert "companion.home-assistant.io" in src
     # The summary payload must expose setup_steps for the frontend
     assert '"setup_steps": setup_steps' in src
@@ -2109,6 +2112,25 @@ def _():
     en = _read("custom_components/ha_insights/translations/en.json")
     assert "goal_bedtime_by" in en
     assert "goal_wake_up_by" in en
+
+
+@t("v1.5.31: ws_api strips trailing 'Automate this?' CTA on shadowed insights")
+def _():
+    """A client-side strip in card v1.2.11 proved unreliable under
+    HA's service-worker caching of Lit templates — incognito tabs
+    still saw the old title. Moving the strip server-side at WS-list
+    time (after conflicts_with has been computed) guarantees every
+    consumer — panel, dashboard card, persistent_notification, mobile
+    push, daily digest — gets the de-CTA'd title."""
+    src = _read("custom_components/ha_insights/ws_api.py")
+    assert "_strip_already_automated_cta" in src
+    assert "_ALREADY_AUTOMATED_CTA_RE" in src
+    # Helper applied conditionally on conflicts_with
+    assert "if ins.conflicts_with:" in src
+    assert "_strip_already_automated_cta(d.get(\"title\", \"\"))" in src
+    # Regex covers all three known CTAs
+    assert "Automate" in src
+    assert "Build" in src
 
 
 @t("v1.5.28: ws_api emits `labels` per insight from hierarchy.labels_of")

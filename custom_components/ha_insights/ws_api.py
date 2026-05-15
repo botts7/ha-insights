@@ -720,6 +720,18 @@ async def ws_list(
         d["referenced_in_automations_links"] = _build_automation_links(
             referenced_in
         )
+        # v1.5.31: strip the "Automate this?" / "Automate it?" / "Build
+        # automation?" trailing CTA when the conflict scanner has already
+        # matched this pattern to an existing automation. The 🔁 pill
+        # tells the user the answer is "you already did" — keeping the
+        # question in the title reads as a contradictory CTA. Moved
+        # server-side after a card-side fix in v1.2.11 proved unreliable
+        # under HA's service-worker caching of Lit-compiled templates.
+        # Notifications + mobile push + daily digest now benefit too.
+        # `_strip_already_automated_cta` is pure-string; if the title
+        # doesn't end in a known CTA we return it unchanged.
+        if ins.conflicts_with:
+            d["title"] = _strip_already_automated_cta(d.get("title", ""))
         enriched.append(d)
 
     # Display-time dedup: merge insights that share a normalized title
@@ -739,6 +751,29 @@ async def ws_list(
 # Pure-logic core lives in lib/dedup.py so it's testable without HA.
 # This wrapper walks the entity registry to build the device_id map.
 # ---------------------------------------------------------------------------
+
+
+# v1.5.31: trailing call-to-action patterns the detectors emit and the
+# 🔁-already-automated check should strip. Pre-compiled for the hot path
+# (every insight in the list call gets checked). Case-insensitive,
+# whitespace-tolerant; matches at end-of-string only so it can't
+# accidentally chew up earlier text.
+import re as _re
+
+_ALREADY_AUTOMATED_CTA_RE = _re.compile(
+    r"\s*(?:Automate\s+(?:this|it)\??|Build\s+automation\??)\s*$",
+    _re.IGNORECASE,
+)
+
+
+def _strip_already_automated_cta(title: str) -> str:
+    """Drop the trailing 'Automate this?' / 'Automate it?' / 'Build
+    automation?' from titles where the conflict scanner already
+    matched an existing automation. Pure string transform — no side
+    effects on storage. See `_ALREADY_AUTOMATED_CTA_RE` for patterns."""
+    if not title:
+        return title
+    return _ALREADY_AUTOMATED_CTA_RE.sub("", title).rstrip()
 
 
 def _normalize_title_for_dedup(title: str, eids: list[str]) -> str:
