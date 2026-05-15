@@ -349,11 +349,19 @@ class SetupQualityDetector(Detector):
         # Carry recipe + advice along with the tier so the rollup can
         # surface USELESS gaps inline (the per-feature card path
         # intentionally skips USELESS — see _build_feature_insight).
-        per_feature_full: list[tuple[dict[str, Any], str, str]] = []
+        # v1.5.33: 4th element = `details` list (per-check detail strings
+        # like "1 GPS device_tracker(s)"). Threaded into the summary so
+        # setup_steps[i]["signals"] surfaces WHICH signals are wired,
+        # not just a count. Lets the GREAT-tier expander show users
+        # what's already detected (and re-opens the door to "manage"
+        # link instead of hiding it entirely).
+        per_feature_full: list[
+            tuple[dict[str, Any], str, str, list[str]]
+        ] = []
         for recipe in _RECIPES:
             tier, advice, details = self._evaluate_recipe(ctx, recipe)
             per_feature_tiers.append((recipe["name"], tier))
-            per_feature_full.append((recipe, tier, advice))
+            per_feature_full.append((recipe, tier, advice, details))
             insight = self._build_feature_insight(
                 recipe=recipe,
                 tier=tier,
@@ -483,7 +491,9 @@ class SetupQualityDetector(Detector):
     def _build_summary_insight(
         self,
         per_feature_tiers: list[tuple[str, str]],
-        per_feature_full: list[tuple[dict[str, Any], str, str]] | None = None,
+        per_feature_full: (
+            list[tuple[dict[str, Any], str, str, list[str]]] | None
+        ) = None,
     ) -> Insight | None:
         if not per_feature_tiers:
             return None
@@ -515,7 +525,7 @@ class SetupQualityDetector(Detector):
         # user sees what's already wired AND what to add.
         setup_steps: list[dict[str, Any]] = []
         if per_feature_full:
-            for recipe, tier, advice in per_feature_full:
+            for recipe, tier, advice, details in per_feature_full:
                 if tier == "USELESS":
                     useless_items.append(
                         (recipe["name"], recipe.get("next_step", ""))
@@ -533,6 +543,12 @@ class SetupQualityDetector(Detector):
                         "setup_url_external": bool(
                             recipe.get("setup_url_external")
                         ),
+                        # v1.5.33: per-check detail strings (e.g.
+                        # "1 GPS device_tracker(s)", "12 areas with
+                        # ≥1 entity"). Card renders these so users
+                        # can see WHICH signals are wired, not just
+                        # the rolled-up tier verdict.
+                        "signals": list(details),
                     }
                 )
 
