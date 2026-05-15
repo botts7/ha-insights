@@ -21,19 +21,8 @@ from typing import TYPE_CHECKING
 from homeassistant.util import dt as dt_util
 
 from ..insight import Insight, InsightKind
-from ..lib.timing_likelihood import (
-    apply_to_confidence,
-    assess_timing,
-)
-from ..lib.cooccurrence_likelihood import (
-    DEFAULT_WINDOW_SECONDS as COOCC_WINDOW,
-    apply_to_confidence as apply_coocc_to_confidence,
-    assess_cooccurrence,
-)
-from ..lib.persistence_likelihood import (
-    apply_to_confidence as apply_pers_to_confidence,
-    assess_persistence,
-)
+from ..lib.cooccurrence_likelihood import DEFAULT_WINDOW_SECONDS as COOCC_WINDOW
+from ..lib.human_likelihood import assess_human_likelihood
 from ..lib.event_filters import (
     is_after_long_silence,
     is_from_unavailable_state,
@@ -223,12 +212,10 @@ class StreakDetector(Detector):
         avg_min_within = avg_minute % 60
         avg_time = time(hour=avg_hour, minute=avg_min_within).strftime("%H:%M:%S")
 
-        # v1.5.35: timing-likelihood scoring. Same lib + math as
-        # schedule.py — demote streaks whose timing is statistically
-        # too tight to be human (likely a device internal timer or
-        # platform schedule firing on a cron). See
-        # `lib/timing_likelihood.py` for the iot_class-aware threshold
-        # tables and stddev / range math.
+        # v1.5.38: composite human-likelihood assessment — same shape
+        # as schedule.py. Buffer-query inputs (nearby_counts +
+        # durations) stay in the HA-aware detector; the pure-math
+        # composition is delegated to lib/human_likelihood.py.
         integration = (
             ctx.hierarchy.integration_of.get(entity_id)
             if ctx.hierarchy is not None
@@ -239,15 +226,11 @@ class StreakDetector(Detector):
             if integration
             else None
         )
-        timing = assess_timing(
-            timestamps=streak_times_local,
-            iot_class=iot_class,
-        )
-        # v1.5.36: co-occurrence — count other-entity activity within
-        # ±5s of each streak event. Streaks that fire in isolation are
-        # device-timer signature; multimodal context = human action.
         nearby_counts: list[int] = []
+        durations: list[float] = []
         if ctx.event_buffer is not None:
+            from bisect import bisect_right as _br
+
             window = timedelta(seconds=COOCC_WINDOW)
             for ts_local in streak_times_local:
                 hits = sum(
@@ -259,17 +242,6 @@ class StreakDetector(Detector):
                     if other.entity_id != entity_id
                 )
                 nearby_counts.append(hits)
-        cooccurrence = assess_cooccurrence(nearby_counts)
-
-        # v1.5.37: persistence — fixed-cycle session lengths are device
-        # timers (toothbrush 2-min, NVR hourly profile). Per cluster
-        # event, look up the next state-change for this entity and
-        # record the gap. Sessions still open at buffer's edge are
-        # omitted so we don't bias toward shorter durations.
-        durations: list[float] = []
-        if ctx.event_buffer is not None:
-            from bisect import bisect_right as _br
-
             all_for_entity = sorted(
                 (
                     ev for ev in ctx.event_buffer.query(entity_id=entity_id)
@@ -285,15 +257,18 @@ class StreakDetector(Detector):
                     durations.append(
                         (ts_list[idx] - ev_ts).total_seconds()
                     )
-        persistence = assess_persistence(durations)
+
+        features = assess_human_likelihood(
+            timestamps=streak_times_local,
+            nearby_counts=nearby_counts,
+            durations_seconds=durations,
+            iot_class=iot_class,
+        )
 
         base_confidence = min(1.0, len(longest_run) / 7.0) * max(
             0.0, 1.0 - stddev / 60.0,
         )
-        confidence = apply_to_confidence(base_confidence, timing)
-        confidence = apply_coocc_to_confidence(confidence, cooccurrence)
-        confidence = apply_pers_to_confidence(confidence, persistence)
-        confidence = round(confidence, 3)
+        confidence = round(features.apply_to(base_confidence), 3)
 
         title = (
             f"{entity_id} -> {new_state} "
@@ -361,16 +336,10 @@ class StreakDetector(Detector):
                 {"service": service, "target": {"entity_id": entity_id}}
             ],
             "mode": "single",
-            # v1.5.35: timing assessment for card tooltip + LLM context.
-            # Underscore-prefixed so automation_writer strips it
-            # before the YAML hits automations.yaml.
-            "_timing_assessment": timing.to_dict(),
-            # v1.5.36: co-occurrence assessment — surrounding-event
-            # density per streak event.
-            "_cooccurrence_assessment": cooccurrence.to_dict(),
-            # v1.5.37: persistence — duration-in-state distribution.
-            # CV < 5% = device cycle.
-            "_persistence_assessment": persistence.to_dict(),
+            # v1.5.38: composite payload — all three grader
+            # assessments merged in one call. Future libs added to
+            # HumanLikelihoodFeatures appear here automatically.
+            **features.payload_keys(),
         }
 
         return Insight(

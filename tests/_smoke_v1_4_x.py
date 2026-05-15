@@ -2114,13 +2114,46 @@ def _():
     assert "goal_wake_up_by" in en
 
 
+@t("v1.5.38: HumanLikelihoodFeatures composite — schedule/streak collapse the apply-chain")
+def _():
+    """v1.5.35-37 added three sibling signal-grader libs (timing,
+    cooccurrence, persistence). Each detector inlined the same 6-line
+    chain. v1.5.38 collapses that into one composite call so future
+    grader libs drop into lib/human_likelihood.py and detectors don't
+    change. Behavior is byte-for-byte equivalent — see
+    tests/test_lib_human_likelihood.py."""
+    src_composite = _read(
+        "custom_components/ha_insights/lib/human_likelihood.py"
+    )
+    # Public API surface
+    assert "class HumanLikelihoodFeatures" in src_composite
+    assert "def assess_human_likelihood(" in src_composite
+    assert "def apply_to(" in src_composite
+    assert "def payload_keys(" in src_composite
+    # Fields exposed for downstream consumers
+    assert "timing:" in src_composite
+    assert "cooccurrence:" in src_composite
+    assert "persistence:" in src_composite
+    # Detectors call the composite
+    src_sched = _read("custom_components/ha_insights/detectors/schedule.py")
+    src_streak = _read("custom_components/ha_insights/detectors/streak.py")
+    for name, src in (("schedule", src_sched), ("streak", src_streak)):
+        assert "assess_human_likelihood(" in src, (
+            f"{name} not using composite"
+        )
+        assert "features.apply_to(" in src, (
+            f"{name} not using composite apply_to"
+        )
+        assert "features.payload_keys()" in src, (
+            f"{name} not using composite payload_keys"
+        )
+
+
 @t("v1.5.37: persistence-likelihood lib — duration-in-state CV scoring")
 def _():
     """Third signal-grader lib: classifies fixed-cycle device timers
-    (CV < 5%) vs human-variable sessions. Toothbrush ON->OFF 2:00.005
-    every brushing = robotic precision; TV ON sessions vary 15min to
-    4h = human. Wires into schedule + streak via the chained
-    apply_to_confidence pattern."""
+    (CV < 5%) vs human-variable sessions. Post-v1.5.38 wired through
+    the composite, not direct imports."""
     src_lib = _read(
         "custom_components/ha_insights/lib/persistence_likelihood.py"
     )
@@ -2130,25 +2163,30 @@ def _():
     assert "TIGHT_DURATION" in src_lib
     assert "coefficient_of_variation" in src_lib
     assert "def assess_persistence(" in src_lib
-    # Detectors wire it
+    src_composite = _read(
+        "custom_components/ha_insights/lib/human_likelihood.py"
+    )
+    assert "from .persistence_likelihood import" in src_composite
+    assert "assess_persistence(" in src_composite
     src_sched = _read("custom_components/ha_insights/detectors/schedule.py")
-    assert "from ..lib.persistence_likelihood import" in src_sched
-    assert "assess_persistence(" in src_sched
-    assert '"_persistence_assessment"' in src_sched
     src_streak = _read("custom_components/ha_insights/detectors/streak.py")
-    assert "from ..lib.persistence_likelihood import" in src_streak
-    assert "assess_persistence(" in src_streak
-    assert '"_persistence_assessment"' in src_streak
+    for name, src in (("schedule", src_sched), ("streak", src_streak)):
+        assert (
+            '"_persistence_assessment"' in src
+            or "features.payload_keys()" in src
+        ), f"{name} missing persistence in payload"
+        # Buffer-query for durations stays in detector (HA-aware code)
+        assert "durations" in src, (
+            f"{name} missing durations buffer-query input"
+        )
 
 
-@t("v1.5.36: co-occurrence-likelihood lib + schedule/streak compose with timing")
+@t("v1.5.36: co-occurrence-likelihood lib + payload _cooccurrence_assessment via composite")
 def _():
     """Sibling library to timing_likelihood — counts surrounding entity
-    state changes within ±5s of each cluster event. Isolated patterns
-    are device-timer-likely; busy context is human-action-likely.
-    Composes with timing via chained apply_to_confidence calls. Each
-    detector also stashes _cooccurrence_assessment in payload."""
-    # Library
+    state changes within ±5s of each cluster event. Post-v1.5.38 the
+    detectors access it through the HumanLikelihoodFeatures composite
+    but the lib contract is unchanged."""
     src_lib = _read(
         "custom_components/ha_insights/lib/cooccurrence_likelihood.py"
     )
@@ -2159,26 +2197,33 @@ def _():
     assert "def assess_cooccurrence(" in src_lib
     assert "def apply_to_confidence(" in src_lib
     assert "DEFAULT_WINDOW_SECONDS" in src_lib
-    # Wired into schedule + streak
+    # Composite imports and uses
+    src_composite = _read(
+        "custom_components/ha_insights/lib/human_likelihood.py"
+    )
+    assert "from .cooccurrence_likelihood import" in src_composite
+    assert "assess_cooccurrence(" in src_composite
+    # Each detector ships the payload key (directly or via composite)
     src_sched = _read("custom_components/ha_insights/detectors/schedule.py")
-    assert "from ..lib.cooccurrence_likelihood import" in src_sched
-    assert "assess_cooccurrence(" in src_sched
-    assert '"_cooccurrence_assessment"' in src_sched
     src_streak = _read("custom_components/ha_insights/detectors/streak.py")
-    assert "from ..lib.cooccurrence_likelihood import" in src_streak
-    assert "assess_cooccurrence(" in src_streak
-    assert '"_cooccurrence_assessment"' in src_streak
+    for name, src in (("schedule", src_sched), ("streak", src_streak)):
+        assert (
+            '"_cooccurrence_assessment"' in src
+            or "features.payload_keys()" in src
+        ), f"{name} missing cooccurrence in payload"
+        # Each still computes nearby_counts from buffer query
+        assert "nearby_counts" in src, (
+            f"{name} missing nearby_counts buffer-query input"
+        )
 
 
-@t("v1.5.35: schedule + streak fold timing_likelihood into confidence")
+@t("v1.5.35: timing-likelihood lib + payload _timing_assessment via composite")
 def _():
     """Centralized lib/timing_likelihood.py grades event-cluster
     timing on a human-vs-device-likely axis using iot_class-aware
-    thresholds. Schedule + streak detectors import it, compute the
-    assessment, fold it into confidence via apply_to_confidence(),
-    and stash the result under `_timing_assessment` in the payload
-    so the card can render a '🤖 device-managed' / '🤖 tight-pattern'
-    pill explaining the demotion."""
+    thresholds. Post-v1.5.38, schedule + streak access it through
+    the HumanLikelihoodFeatures composite rather than directly, but
+    the lib contract + payload key are unchanged."""
     # Library exists with the canonical contract
     src_lib = _read(
         "custom_components/ha_insights/lib/timing_likelihood.py"
@@ -2193,18 +2238,23 @@ def _():
     # cloud thresholds are wider than local — accounts for network jitter
     assert "cloud_polling" in src_lib
     assert "local_push" in src_lib
-    # Wired into schedule
+    # The composite imports + uses the lib (one level of indirection
+    # from detectors post-v1.5.38)
+    src_composite = _read(
+        "custom_components/ha_insights/lib/human_likelihood.py"
+    )
+    assert "from .timing_likelihood import" in src_composite
+    assert "assess_timing(" in src_composite
+    # Payload key still carried in schedule + streak
     src_sched = _read("custom_components/ha_insights/detectors/schedule.py")
-    assert "from ..lib.timing_likelihood import" in src_sched
-    assert "assess_timing(" in src_sched
-    assert "apply_to_confidence(" in src_sched
-    assert '"_timing_assessment"' in src_sched
-    # Wired into streak
     src_streak = _read("custom_components/ha_insights/detectors/streak.py")
-    assert "from ..lib.timing_likelihood import" in src_streak
-    assert "assess_timing(" in src_streak
-    assert "apply_to_confidence(" in src_streak
-    assert '"_timing_assessment"' in src_streak
+    # _timing_assessment ships via features.payload_keys() —
+    # verify either the literal key OR the composite call.
+    for name, src in (("schedule", src_sched), ("streak", src_streak)):
+        assert (
+            '"_timing_assessment"' in src
+            or "features.payload_keys()" in src
+        ), f"{name} missing timing assessment in payload"
 
 
 @t("v1.5.34: automation_writer strips _-prefixed detector metadata before write")

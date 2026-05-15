@@ -31,20 +31,8 @@ from ..lib.event_filters import (
     is_from_unavailable_state,
     pattern_value,
 )
-from ..lib.timing_likelihood import (
-    TimingClass,
-    apply_to_confidence,
-    assess_timing,
-)
-from ..lib.cooccurrence_likelihood import (
-    DEFAULT_WINDOW_SECONDS as COOCC_WINDOW,
-    apply_to_confidence as apply_coocc_to_confidence,
-    assess_cooccurrence,
-)
-from ..lib.persistence_likelihood import (
-    apply_to_confidence as apply_pers_to_confidence,
-    assess_persistence,
-)
+from ..lib.cooccurrence_likelihood import DEFAULT_WINDOW_SECONDS as COOCC_WINDOW
+from ..lib.human_likelihood import assess_human_likelihood
 from .base import Detector, DetectorContext, register_detector
 
 if TYPE_CHECKING:
@@ -179,12 +167,14 @@ class ScheduleDetector(Detector):
         if stddev > self.TIME_STDDEV_MAX_MIN:
             return None
 
-        # v1.5.35: timing-likelihood scoring. Demotes patterns that are
-        # statistically too tight to be human-driven (BLE toothbrush
-        # firing OFF exactly 2 min after ON, solar inverter polling at
-        # sunrise, etc). iot_class drives the threshold so cloud-polled
-        # devices aren't false-positived on their inherent network
-        # jitter. See lib/timing_likelihood.py for the math.
+        # v1.5.38: composite human-likelihood assessment. Bundles
+        # the timing / co-occurrence / persistence grader libs into
+        # one call. Pre-v1.5.38 this was 3 separate assess + 3
+        # apply_to_confidence calls; the composite collapses to one
+        # so future grader libs (transition_entropy v1.5.39+) drop
+        # into lib/human_likelihood.py and detectors don't change.
+        # Behavior is byte-for-byte equivalent to the v1.5.37 chain —
+        # see tests/test_lib_human_likelihood.py.
         integration = (
             ctx.hierarchy.integration_of.get(entity_id)
             if ctx.hierarchy is not None
@@ -195,18 +185,14 @@ class ScheduleDetector(Detector):
             if integration
             else None
         )
-        timing = assess_timing(
-            timestamps=[dt_util.as_local(ev.timestamp) for ev in events],
-            iot_class=iot_class,
-        )
-
-        # v1.5.36: co-occurrence scoring. Counts OTHER entity state
-        # changes within ±5s of each cluster event. Isolated events
-        # = device-timer signature; busy context = human action.
-        # We pull from the live event_buffer (14-day window) and
-        # exclude this entity's own events from the count.
+        # Buffer queries: nearby-event counts within ±5s, and per-event
+        # duration-in-state. Same logic as pre-v1.5.38, lifted out of
+        # the apply chain so the composite call is the only line that
+        # changes when grader libs are added later.
         nearby_counts: list[int] = []
+        durations: list[float] = []
         if ctx.event_buffer is not None:
+            from bisect import bisect_right as _br
             from datetime import timedelta as _td
 
             window = _td(seconds=COOCC_WINDOW)
@@ -220,18 +206,8 @@ class ScheduleDetector(Detector):
                     if other.entity_id != entity_id
                 )
                 nearby_counts.append(hits)
-        cooccurrence = assess_cooccurrence(nearby_counts)
-
-        # v1.5.37: persistence — how long the entity stays in the new
-        # state each time. Fixed sub-second cycles (toothbrush's 2-min
-        # OFF, NVR's hourly profile) are unmistakable device timers
-        # the timing + cooccurrence libs can miss. For each cluster
-        # event find the next state-change for this entity and record
-        # the gap; sessions that haven't ended by the buffer's edge are
-        # omitted so we don't bias toward shorter durations.
-        durations: list[float] = []
-        if ctx.event_buffer is not None:
-            # Snapshot the buffer once so we don't re-scan per event.
+            # Persistence: snapshot per-entity timeline once, bisect
+            # for next-state-change after each cluster event.
             all_for_entity = sorted(
                 (
                     ev for ev in ctx.event_buffer.query(entity_id=entity_id)
@@ -241,27 +217,26 @@ class ScheduleDetector(Detector):
             )
             ts_list = [ev.timestamp for ev in all_for_entity]
             for ev in events:
-                # Find the next event for this entity AFTER ev. Bisect
-                # is O(log N), well within scan budget for 14-day data.
-                from bisect import bisect_right as _br
-
                 idx = _br(ts_list, ev.timestamp)
                 if idx < len(ts_list):
-                    next_ts = ts_list[idx]
                     durations.append(
-                        (next_ts - ev.timestamp).total_seconds()
+                        (ts_list[idx] - ev.timestamp).total_seconds()
                     )
                 # else: session hasn't ended → omit
-        persistence = assess_persistence(durations)
+
+        features = assess_human_likelihood(
+            timestamps=[dt_util.as_local(ev.timestamp) for ev in events],
+            nearby_counts=nearby_counts,
+            durations_seconds=durations,
+            iot_class=iot_class,
+        )
 
         base_confidence = (
             min(1.0, len(minutes) / 14.0)
             * consistency
             * max(0.0, 1.0 - stddev / 15.0)
         )
-        confidence = apply_to_confidence(base_confidence, timing)
-        confidence = apply_coocc_to_confidence(confidence, cooccurrence)
-        confidence = apply_pers_to_confidence(confidence, persistence)
+        confidence = features.apply_to(base_confidence)
 
         avg_h = int(avg_min // 60)
         avg_m_int = round(avg_min % 60)
@@ -329,19 +304,12 @@ class ScheduleDetector(Detector):
             "condition": [{"condition": "time", "weekday": weekdays_yaml}],
             "action": [{"service": service, "target": {"entity_id": entity_id}}],
             "mode": "single",
-            # v1.5.35: timing-likelihood assessment so the card can show
-            # WHY confidence is what it is (tooltip on the pill), the
-            # LLM can reference it during Refine, and dismiss feedback
-            # can train per-entity overrides later. Underscored so the
-            # automation_writer strips it before writing automations.yaml.
-            "_timing_assessment": timing.to_dict(),
-            # v1.5.36: co-occurrence assessment — surrounding-event
-            # density per cluster event. Sibling signal to timing;
-            # detectors compose by chaining the two penalties.
-            "_cooccurrence_assessment": cooccurrence.to_dict(),
-            # v1.5.37: persistence assessment — duration-in-state
-            # distribution. CV < 5% = device cycle.
-            "_persistence_assessment": persistence.to_dict(),
+            # v1.5.38: composite payload merge. Adds all three
+            # grader assessments at once. Future libs added to
+            # HumanLikelihoodFeatures show up here automatically.
+            # Underscore-prefixed → automation_writer strips before
+            # automations.yaml write.
+            **features.payload_keys(),
         }
 
         area_id = events[0].area_id if events else None
