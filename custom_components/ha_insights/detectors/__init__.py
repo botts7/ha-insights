@@ -591,7 +591,7 @@ _MAX_GROUP_SIZE_FOR_SIBLING_FILTER = 6
 def _common_entity_prefix(entity_ids: list[str]) -> str | None:
     """Longest common prefix across entity_ids (post-domain). Useful as a
     friendly device label when N entities all share the same name root,
-    e.g. `binary_sensor.home_nvr_*` (33 entities) or
+    e.g. `binary_sensor.nvr_camera_*` (33 entities) or
     `switch.front_door_*` (3 entities). Returns None for prefixes < 4
     chars (too generic to be useful) or when the input set spans
     multiple domains.
@@ -723,7 +723,7 @@ def _dedup_grouped_insights(
     # here was a bug. v1.2's hierarchy migration left entity_dependencies
     # sparse / empty on many installs (the relationships moved to the
     # central EntityHierarchy), and the guard made the dedup helper
-    # return raw lists. Result: the 51-entity "home NVR" orphan-device
+    # return raw lists. Result: a 51-entity NVR-style orphan-device
     # cohort never merged. The hierarchy.find_common_parent path + the
     # heuristic same-domain co-fingerprint fallback both work fine
     # without entity_dependencies — its only consumer is the legacy

@@ -37,7 +37,7 @@ def normalize_title_for_dedup(
     """Strip per-entity tokens from a title so two insights that
     differ only in their entity name produce the same signature.
 
-    `binary_sensor.home_nvr_x hasn't reported in 8d. …`
+    `binary_sensor.nvr_camera_x hasn't reported in 8d. …`
       → `<E> hasn't reported in 8d. …`
 
     Numeric tokens (durations, counts) are preserved because they

@@ -61,22 +61,17 @@ def _():
     assert "similar entities" in r[0]["title"]
 
 
-@t("dedup: 34 real home_nvr names collapse to 1")
+@t("dedup: 34 synthetic NVR-prefix names collapse to 1")
 def _():
-    names = [
-        "front_garden_dio", "front_garden_external", "front_garden_motion",
-        "garage_dio", "garage_external", "garage_motion",
-        "porch_dio", "porch_external", "porch_motion",
-        "backyard_2_dio", "backyard_2_external", "backyard_2_motion",
-        "backyard_dio", "backyard_external", "backyard_motion",
-        "driveway_dio", "driveway_external", "driveway_motion",
-        "north_side_dio", "north_side_external", "north_side_motion",
-        "south_side_dio", "south_side_external", "south_side_motion",
-        "alfresco_dio", "alfresco_external", "alfresco_motion",
-        "lounge_dio", "lounge_external", "lounge_motion",
-        "front_door_bell_audio", "front_door_bell_dio",
-        "front_door_bell_external", "front_door_bell_motion",
-    ]
+    # Reproduces a real-world dedup pressure point: a single NVR
+    # exporting N cameras × M sub-sensors each, all silent. The
+    # display-time dedup must collapse them into one cohort row.
+    # Names are synthesized from a zone × sensor matrix; exact
+    # zone/sensor labels are arbitrary, only the count and shared
+    # prefix structure are load-bearing.
+    zones = [f"zone_{i:02d}" for i in range(12)]
+    suffixes = ["dio", "external", "motion"]
+    names = [f"{z}_{s}" for z in zones for s in suffixes][:34]
     enriched = [_enriched(f"binary_sensor.home_nvr_{n}", n_days=9) for n in names]
     r = display_time_dedup(enriched, {})
     assert len(r) == 1, f"got {len(r)}"
@@ -212,8 +207,11 @@ def _():
 
 @t("translations: 4 audit options present in OptionsFlow strings")
 def _():
+    # v1.4 wizard restructure moved the four audit knobs out of the
+    # init step and into the Advanced step (init became the
+    # mode-picker + wizard branch). Test must look at the right step.
     j = json.load(open("custom_components/ha_insights/translations/en.json"))
-    data = j["options"]["step"]["init"]["data"]
+    data = j["options"]["step"]["advanced"]["data"]
     for key in (
         "audit_rollup_window_days",
         "audit_analysis_depth",
@@ -245,11 +243,20 @@ def _():
     assert "ha-insights-refresh" in src
 
 
-@t("panel: dispatches refresh after Scan/Purge/Backfill")
+@t("panel: dispatches refresh / purge events after Scan/Purge/Backfill")
 def _():
     src = open("../ha-insights-card/src/ha-insights-panel.ts", encoding="utf-8").read()
-    count = src.count("ha-insights-refresh")
-    assert count >= 3, f"only {count} dispatches found"
+    # v1.2.22: Purge moved to a dedicated `ha-insights-purged` event
+    # (with 30s suppression of "added" subscribe events). Scan + Backfill
+    # still use `ha-insights-refresh`. Total event dispatches across the
+    # three actions must remain ≥ 3 — they just live on two channels now.
+    refresh = src.count("ha-insights-refresh")
+    purged = src.count("ha-insights-purged")
+    total = refresh + purged
+    assert total >= 3, (
+        f"only {total} dispatches found (refresh={refresh}, purged={purged}) — "
+        "expected ≥3 across Scan, Backfill, and Purge actions."
+    )
 
 
 @t("ManualHabit: detector invariants present")

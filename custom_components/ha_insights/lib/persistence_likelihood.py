@@ -33,7 +33,7 @@ cycle. If they span orders of magnitude, that's a human.
   smoking gun: every brushing session is exactly 2:00.005 long. No
   human brushes for *exactly* 120 seconds and zero microseconds.
 
-- **NVR profile cycling**: a "switch.home_nvr_profile_3 → on" event
+- **NVR profile cycling**: a "switch.nvr_profile_3 → on" event
   has ~variable timing across days, surrounded by other camera
   activity (so cooccurrence sees human context). But each session
   is exactly 3600.000 seconds — clear device cycle.
