@@ -18,6 +18,10 @@ venv/
 .idea/
 .vscode/
 
+# Local-only contributor / agent docs (not published)
+CLAUDE.md
+.dev/
+
 # OS
 .DS_Store
 Thumbs.db

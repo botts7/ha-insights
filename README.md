@@ -250,7 +250,7 @@ on HA data — AFT models are the queued replacement).
 - **Token usage row** — every refine modal shows approximate in/out token counts so you know exactly what each call cost.
 - **24 unit tests** covering dedup, audit packet builders, deterministic fix builders. Run via `pytest tests/test_lib_dedup.py tests/test_audit_packet.py tests/test_audit_fixes.py`.
 
-Full plan + design notes: [`docs/AUTOMATION_AUDIT_PLAN.md`](docs/AUTOMATION_AUDIT_PLAN.md)
+See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the full audit pipeline design.
 
 ---
 
@@ -329,8 +329,7 @@ A per-month USD budget can be set in OptionsFlow for cloud agents; the backgroun
 ## Companion docs
 
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — full architectural charter
-- [`docs/AUTOMATION_AUDIT_PLAN.md`](docs/AUTOMATION_AUDIT_PLAN.md) — v1.1 design + phases
-- [`docs/PHASE_6_VALIDATION.md`](docs/PHASE_6_VALIDATION.md) — pre-release regression matrix
+- [`docs/HA_EVENT_SEMANTICS.md`](docs/HA_EVENT_SEMANTICS.md) — HA state-change event gotchas detector authors must know
 - [`docs/privacy.md`](docs/privacy.md) — what's stored / what isn't / how to wipe
 - [`docs/ws-api.md`](docs/ws-api.md) — stable WebSocket API contract
 - [`docs/writing-a-detector.md`](docs/writing-a-detector.md) — community detector contribution guide
