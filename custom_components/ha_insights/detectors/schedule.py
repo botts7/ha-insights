@@ -31,6 +31,11 @@ from ..lib.event_filters import (
     is_from_unavailable_state,
     pattern_value,
 )
+from ..lib.timing_likelihood import (
+    TimingClass,
+    apply_to_confidence,
+    assess_timing,
+)
 from .base import Detector, DetectorContext, register_detector
 
 if TYPE_CHECKING:
@@ -165,11 +170,33 @@ class ScheduleDetector(Detector):
         if stddev > self.TIME_STDDEV_MAX_MIN:
             return None
 
-        confidence = (
+        # v1.5.35: timing-likelihood scoring. Demotes patterns that are
+        # statistically too tight to be human-driven (BLE toothbrush
+        # firing OFF exactly 2 min after ON, solar inverter polling at
+        # sunrise, etc). iot_class drives the threshold so cloud-polled
+        # devices aren't false-positived on their inherent network
+        # jitter. See lib/timing_likelihood.py for the math.
+        integration = (
+            ctx.hierarchy.integration_of.get(entity_id)
+            if ctx.hierarchy is not None
+            else None
+        )
+        iot_class = (
+            ctx.iot_class_by_integration.get(integration)
+            if integration
+            else None
+        )
+        timing = assess_timing(
+            timestamps=[dt_util.as_local(ev.timestamp) for ev in events],
+            iot_class=iot_class,
+        )
+
+        base_confidence = (
             min(1.0, len(minutes) / 14.0)
             * consistency
             * max(0.0, 1.0 - stddev / 15.0)
         )
+        confidence = apply_to_confidence(base_confidence, timing)
 
         avg_h = int(avg_min // 60)
         avg_m_int = round(avg_min % 60)
@@ -237,6 +264,12 @@ class ScheduleDetector(Detector):
             "condition": [{"condition": "time", "weekday": weekdays_yaml}],
             "action": [{"service": service, "target": {"entity_id": entity_id}}],
             "mode": "single",
+            # v1.5.35: timing-likelihood assessment so the card can show
+            # WHY confidence is what it is (tooltip on the pill), the
+            # LLM can reference it during Refine, and dismiss feedback
+            # can train per-entity overrides later. Underscored so the
+            # automation_writer strips it before writing automations.yaml.
+            "_timing_assessment": timing.to_dict(),
         }
 
         area_id = events[0].area_id if events else None

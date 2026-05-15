@@ -2114,6 +2114,43 @@ def _():
     assert "goal_wake_up_by" in en
 
 
+@t("v1.5.35: schedule + streak fold timing_likelihood into confidence")
+def _():
+    """Centralized lib/timing_likelihood.py grades event-cluster
+    timing on a human-vs-device-likely axis using iot_class-aware
+    thresholds. Schedule + streak detectors import it, compute the
+    assessment, fold it into confidence via apply_to_confidence(),
+    and stash the result under `_timing_assessment` in the payload
+    so the card can render a '🤖 device-managed' / '🤖 tight-pattern'
+    pill explaining the demotion."""
+    # Library exists with the canonical contract
+    src_lib = _read(
+        "custom_components/ha_insights/lib/timing_likelihood.py"
+    )
+    assert "class TimingClass" in src_lib
+    assert "DEVICE_LIKELY" in src_lib
+    assert "TIGHT_PATTERN" in src_lib
+    assert "HUMAN_LIKELY" in src_lib
+    assert "def assess_timing(" in src_lib
+    assert "def apply_to_confidence(" in src_lib
+    assert "iot_class" in src_lib
+    # cloud thresholds are wider than local — accounts for network jitter
+    assert "cloud_polling" in src_lib
+    assert "local_push" in src_lib
+    # Wired into schedule
+    src_sched = _read("custom_components/ha_insights/detectors/schedule.py")
+    assert "from ..lib.timing_likelihood import" in src_sched
+    assert "assess_timing(" in src_sched
+    assert "apply_to_confidence(" in src_sched
+    assert '"_timing_assessment"' in src_sched
+    # Wired into streak
+    src_streak = _read("custom_components/ha_insights/detectors/streak.py")
+    assert "from ..lib.timing_likelihood import" in src_streak
+    assert "assess_timing(" in src_streak
+    assert "apply_to_confidence(" in src_streak
+    assert '"_timing_assessment"' in src_streak
+
+
 @t("v1.5.34: automation_writer strips _-prefixed detector metadata before write")
 def _():
     """Detectors stash internal state in keys like `_manual_habit`,

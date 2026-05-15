@@ -21,6 +21,10 @@ from typing import TYPE_CHECKING
 from homeassistant.util import dt as dt_util
 
 from ..insight import Insight, InsightKind
+from ..lib.timing_likelihood import (
+    apply_to_confidence,
+    assess_timing,
+)
 from ..lib.event_filters import (
     is_after_long_silence,
     is_from_unavailable_state,
@@ -210,11 +214,30 @@ class StreakDetector(Detector):
         avg_min_within = avg_minute % 60
         avg_time = time(hour=avg_hour, minute=avg_min_within).strftime("%H:%M:%S")
 
-        confidence = round(
-            min(1.0, len(longest_run) / 7.0)
-            * max(0.0, 1.0 - stddev / 60.0),
-            3,
+        # v1.5.35: timing-likelihood scoring. Same lib + math as
+        # schedule.py — demote streaks whose timing is statistically
+        # too tight to be human (likely a device internal timer or
+        # platform schedule firing on a cron). See
+        # `lib/timing_likelihood.py` for the iot_class-aware threshold
+        # tables and stddev / range math.
+        integration = (
+            ctx.hierarchy.integration_of.get(entity_id)
+            if ctx.hierarchy is not None
+            else None
         )
+        iot_class = (
+            ctx.iot_class_by_integration.get(integration)
+            if integration
+            else None
+        )
+        timing = assess_timing(
+            timestamps=streak_times_local,
+            iot_class=iot_class,
+        )
+        base_confidence = min(1.0, len(longest_run) / 7.0) * max(
+            0.0, 1.0 - stddev / 60.0,
+        )
+        confidence = round(apply_to_confidence(base_confidence, timing), 3)
 
         title = (
             f"{entity_id} -> {new_state} "
@@ -282,6 +305,10 @@ class StreakDetector(Detector):
                 {"service": service, "target": {"entity_id": entity_id}}
             ],
             "mode": "single",
+            # v1.5.35: timing assessment for card tooltip + LLM context.
+            # Underscore-prefixed so automation_writer strips it
+            # before the YAML hits automations.yaml.
+            "_timing_assessment": timing.to_dict(),
         }
 
         return Insight(
