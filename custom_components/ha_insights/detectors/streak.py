@@ -30,6 +30,10 @@ from ..lib.cooccurrence_likelihood import (
     apply_to_confidence as apply_coocc_to_confidence,
     assess_cooccurrence,
 )
+from ..lib.persistence_likelihood import (
+    apply_to_confidence as apply_pers_to_confidence,
+    assess_persistence,
+)
 from ..lib.event_filters import (
     is_after_long_silence,
     is_from_unavailable_state,
@@ -257,11 +261,38 @@ class StreakDetector(Detector):
                 nearby_counts.append(hits)
         cooccurrence = assess_cooccurrence(nearby_counts)
 
+        # v1.5.37: persistence — fixed-cycle session lengths are device
+        # timers (toothbrush 2-min, NVR hourly profile). Per cluster
+        # event, look up the next state-change for this entity and
+        # record the gap. Sessions still open at buffer's edge are
+        # omitted so we don't bias toward shorter durations.
+        durations: list[float] = []
+        if ctx.event_buffer is not None:
+            from bisect import bisect_right as _br
+
+            all_for_entity = sorted(
+                (
+                    ev for ev in ctx.event_buffer.query(entity_id=entity_id)
+                    if not ev.from_bootstrap
+                ),
+                key=lambda ev: ev.timestamp,
+            )
+            ts_list = [ev.timestamp for ev in all_for_entity]
+            for d in longest_run:
+                ev_ts = per_day[d]
+                idx = _br(ts_list, ev_ts)
+                if idx < len(ts_list):
+                    durations.append(
+                        (ts_list[idx] - ev_ts).total_seconds()
+                    )
+        persistence = assess_persistence(durations)
+
         base_confidence = min(1.0, len(longest_run) / 7.0) * max(
             0.0, 1.0 - stddev / 60.0,
         )
         confidence = apply_to_confidence(base_confidence, timing)
         confidence = apply_coocc_to_confidence(confidence, cooccurrence)
+        confidence = apply_pers_to_confidence(confidence, persistence)
         confidence = round(confidence, 3)
 
         title = (
@@ -337,6 +368,9 @@ class StreakDetector(Detector):
             # v1.5.36: co-occurrence assessment — surrounding-event
             # density per streak event.
             "_cooccurrence_assessment": cooccurrence.to_dict(),
+            # v1.5.37: persistence — duration-in-state distribution.
+            # CV < 5% = device cycle.
+            "_persistence_assessment": persistence.to_dict(),
         }
 
         return Insight(

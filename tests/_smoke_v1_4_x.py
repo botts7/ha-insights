@@ -2114,6 +2114,33 @@ def _():
     assert "goal_wake_up_by" in en
 
 
+@t("v1.5.37: persistence-likelihood lib — duration-in-state CV scoring")
+def _():
+    """Third signal-grader lib: classifies fixed-cycle device timers
+    (CV < 5%) vs human-variable sessions. Toothbrush ON->OFF 2:00.005
+    every brushing = robotic precision; TV ON sessions vary 15min to
+    4h = human. Wires into schedule + streak via the chained
+    apply_to_confidence pattern."""
+    src_lib = _read(
+        "custom_components/ha_insights/lib/persistence_likelihood.py"
+    )
+    assert "class PersistenceClass" in src_lib
+    assert "FIXED_CYCLE" in src_lib
+    assert "HUMAN_VARIABLE" in src_lib
+    assert "TIGHT_DURATION" in src_lib
+    assert "coefficient_of_variation" in src_lib
+    assert "def assess_persistence(" in src_lib
+    # Detectors wire it
+    src_sched = _read("custom_components/ha_insights/detectors/schedule.py")
+    assert "from ..lib.persistence_likelihood import" in src_sched
+    assert "assess_persistence(" in src_sched
+    assert '"_persistence_assessment"' in src_sched
+    src_streak = _read("custom_components/ha_insights/detectors/streak.py")
+    assert "from ..lib.persistence_likelihood import" in src_streak
+    assert "assess_persistence(" in src_streak
+    assert '"_persistence_assessment"' in src_streak
+
+
 @t("v1.5.36: co-occurrence-likelihood lib + schedule/streak compose with timing")
 def _():
     """Sibling library to timing_likelihood — counts surrounding entity

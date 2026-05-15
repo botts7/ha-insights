@@ -41,6 +41,10 @@ from ..lib.cooccurrence_likelihood import (
     apply_to_confidence as apply_coocc_to_confidence,
     assess_cooccurrence,
 )
+from ..lib.persistence_likelihood import (
+    apply_to_confidence as apply_pers_to_confidence,
+    assess_persistence,
+)
 from .base import Detector, DetectorContext, register_detector
 
 if TYPE_CHECKING:
@@ -218,6 +222,38 @@ class ScheduleDetector(Detector):
                 nearby_counts.append(hits)
         cooccurrence = assess_cooccurrence(nearby_counts)
 
+        # v1.5.37: persistence — how long the entity stays in the new
+        # state each time. Fixed sub-second cycles (toothbrush's 2-min
+        # OFF, NVR's hourly profile) are unmistakable device timers
+        # the timing + cooccurrence libs can miss. For each cluster
+        # event find the next state-change for this entity and record
+        # the gap; sessions that haven't ended by the buffer's edge are
+        # omitted so we don't bias toward shorter durations.
+        durations: list[float] = []
+        if ctx.event_buffer is not None:
+            # Snapshot the buffer once so we don't re-scan per event.
+            all_for_entity = sorted(
+                (
+                    ev for ev in ctx.event_buffer.query(entity_id=entity_id)
+                    if not ev.from_bootstrap
+                ),
+                key=lambda ev: ev.timestamp,
+            )
+            ts_list = [ev.timestamp for ev in all_for_entity]
+            for ev in events:
+                # Find the next event for this entity AFTER ev. Bisect
+                # is O(log N), well within scan budget for 14-day data.
+                from bisect import bisect_right as _br
+
+                idx = _br(ts_list, ev.timestamp)
+                if idx < len(ts_list):
+                    next_ts = ts_list[idx]
+                    durations.append(
+                        (next_ts - ev.timestamp).total_seconds()
+                    )
+                # else: session hasn't ended → omit
+        persistence = assess_persistence(durations)
+
         base_confidence = (
             min(1.0, len(minutes) / 14.0)
             * consistency
@@ -225,6 +261,7 @@ class ScheduleDetector(Detector):
         )
         confidence = apply_to_confidence(base_confidence, timing)
         confidence = apply_coocc_to_confidence(confidence, cooccurrence)
+        confidence = apply_pers_to_confidence(confidence, persistence)
 
         avg_h = int(avg_min // 60)
         avg_m_int = round(avg_min % 60)
@@ -302,6 +339,9 @@ class ScheduleDetector(Detector):
             # density per cluster event. Sibling signal to timing;
             # detectors compose by chaining the two penalties.
             "_cooccurrence_assessment": cooccurrence.to_dict(),
+            # v1.5.37: persistence assessment — duration-in-state
+            # distribution. CV < 5% = device cycle.
+            "_persistence_assessment": persistence.to_dict(),
         }
 
         area_id = events[0].area_id if events else None
