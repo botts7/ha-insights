@@ -4,6 +4,149 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+## [1.5.41] — 2026-05-16
+
+### Fixed
+
+- **Panel cache-bust string includes integration version.** Pre-v1.5.41
+  the query was `?v={mtime}-{size}`; HACS tarball extraction preserves
+  mtimes from the release tarball, so byte-similar bundles landed
+  cache-identical and the browser kept the cached panel after an
+  update. Now `?v={version}-{mtime}-{size}` — a version bump alone
+  forces a refetch on the next integration reload.
+
+## [1.5.40] — 2026-05-16
+
+### Added
+
+- **`lib/transition_entropy.py`** — fourth signal-grader (sibling to
+  timing / cooccurrence / persistence). Approximates Houzé 2022's AIT
+  memorability via a 2nd-order Markov proxy: counts distinct preceding
+  entities per cluster event. High diversity at unstable timing →
+  `NOVEL_CONTEXT` → 25 % confidence demotion. Stable few-entity
+  contexts agree with `HUMAN_CONTEXT`. Toothbrush vs. solar inverter
+  separate cleanly on this axis where co-occurrence alone misclassified
+  them. Wired into schedule + streak as an `Optional` grader on the
+  v1.5.38 composite; legacy callers get byte-identical scores.
+
+## [1.5.39] — 2026-05-16
+
+### Fixed
+
+- **3-day streaks now graded.** All four grader libs lowered
+  `_MIN_SAMPLES` from 4 → 3 so StreakDetector's 3-day-floor patterns
+  no longer fall through ungraded. stddev/CV is still computable at
+  n=3 (df=2); accuracy is lower than n≥10 but matches the downstream
+  consumer's floor. Closes the live-validation gap where 3-day
+  device patterns (solar inverter, BYD windows) stayed at 39–42 %
+  with no device pill.
+- **Persistence checks the previous state's duration too.** Toothbrush
+  OFF events previously saw only forward duration (24 h until next
+  brushing → HUMAN_VARIABLE, no penalty). `assess_persistence` now
+  accepts `previous_state_durations_seconds`; picks the direction
+  with the lower CV. The 2-minute brushing cycle now fingerprints as
+  FIXED_CYCLE in the backward direction.
+
+## [1.5.38] — 2026-05-16
+
+### Changed
+
+- **Three-lib apply-chain collapsed into a `HumanLikelihoodFeatures`
+  composite.** schedule + streak previously inlined 18 lines of
+  identical `lib.apply_to()` + `payload[_*_assessment] = ...` plumbing.
+  Composite owns one `.apply_to(base)` + one `.payload_keys()`; future
+  graders extend it without touching detectors. Equivalence test
+  (`tests/test_lib_human_likelihood.py`, 7 cases × human/device/cloud/
+  unknown iot_class) pins byte-for-byte identical output against the
+  pre-refactor chain.
+
+## [1.5.37] — 2026-05-15
+
+### Added
+
+- **`lib/persistence_likelihood.py`** — third signal-grader. CV of
+  duration-in-state classifies sessions as FIXED_CYCLE (CV < 5 %,
+  0.25× multiplier), TIGHT_DURATION (CV < 30 %, 0.85×), or
+  HUMAN_VARIABLE (1.0×). Scale-invariant so 2-minute toothbrush
+  cycles and 4-hour TV sessions compare cleanly. Open-ended sessions
+  at buffer edges are omitted to avoid short-bias. Pure-math,
+  HA-core-adoptable.
+
+## [1.5.36] — 2026-05-15
+
+### Added
+
+- **`lib/cooccurrence_likelihood.py`** — second signal-grader.
+  Median nearby-event count classifies events as HUMAN_CONTEXT,
+  AMBIGUOUS, or ISOLATED in the ±5 s window. Wired into schedule +
+  streak alongside timing_likelihood; combined demotion lands an
+  isolated device-timer pattern around ~7 % confidence so users
+  don't see it unless they explicitly browse low-confidence rows.
+
+## [1.5.35] — 2026-05-15
+
+### Added
+
+- **`lib/timing_likelihood.py`** — first signal-grader. Classifies
+  recurring events as DEVICE_LIKELY / TIGHT_PATTERN / HUMAN_LIKELY
+  / INSUFFICIENT_DATA from stddev + range, with iot_class-aware
+  thresholds: local push/polling at < 2 s range, cloud push/polling
+  at < 10 s, unknown at < 5 s (conservative). Sub-second precision
+  on a daily pattern is a fingerprint no human can produce.
+- **Card** (v1.2.17) renders a 🤖 *device-managed* / *tight-pattern*
+  pill on graded rows so users see WHY confidence was demoted.
+
+## [1.5.34] — 2026-05-15
+
+### Fixed
+
+- **Underscore-prefixed detector metadata stripped before writing
+  automations.yaml.** `_manual_habit`, `_audit`, `_streak`, and the
+  v1.5.35+ `_*_assessment` keys are detector bookkeeping, not part
+  of the applied automation. HA's automation loader was lenient
+  enough to accept the extras but they polluted every applied
+  entry's YAML. `AutomationWriter.write()` now calls
+  `_strip_private_keys()` first.
+
+## [1.5.33] — 2026-05-15
+
+### Added
+
+- **Per-check signal details surfaced in setup_quality.** Each
+  recipe check's detail string ("1 GPS device_tracker(s)", "12 areas
+  with ≥1 entity") now lands in `setup_steps[i]['signals']` instead
+  of being dropped. Card (v1.2.15) renders them under the GREAT-tier
+  badge so users can verify *which* sensors / trackers were matched.
+  Setup-URL link now shows at every tier with a verb-swapped label
+  ("Manage" at GREAT vs. "Set this up" below).
+
+## [1.5.32] — 2026-05-15
+
+### Fixed
+
+- **Panel resolver prefers HACS path over legacy `/www/`.** The
+  integration was registering the sidebar panel from
+  `/local/ha-insights-panel.js` (= `/config/www/...`). HACS lands
+  the bundle at `/config/www/community/ha-insights-card/...`. Two
+  files on disk; integration kept serving the legacy one even when
+  it was stale. Resolver now picks the HACS path when present;
+  falls back to legacy for manual installs. Cache-buster computes
+  off the file actually being served, so HACS users no longer need
+  to "Reload UI" / hard-refresh after every plugin update.
+
+## [1.5.31] — 2026-05-15
+
+### Fixed
+
+- **`Automate this?` CTA stripped server-side on shadowed insights.**
+  Card v1.2.11 had a client-side strip when `conflicts_with` was
+  non-empty, but users reported still seeing the CTA in incognito —
+  likely HA service-worker / Lovelace resource-registry caching of
+  the compiled template. Server-side strip in `ws_api.py` bypasses
+  all client caching; notifications, persistent-notification, mobile
+  push, and daily digest all benefit. Card-side strip kept as
+  defense in depth (regex no-ops when already stripped).
+
 ## [1.5.30] — 2026-05-15
 
 ### Fixed

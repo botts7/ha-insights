@@ -89,6 +89,33 @@ Click **Apply** and it writes a real `automation:` block to `automations.yaml`. 
 
 ---
 
+## Device-vs-human classification (v1.5.35+)
+
+A 36-day daily pattern at exactly `08:54:00.000` with zero variance is almost
+certainly a device's internal timer — not a habit you'd want to "automate".
+HA Insights demotes these so you don't see them at default confidence.
+
+Four pure-math libraries each grade one signal; their multipliers compose
+into a single confidence demotion:
+
+| Library | Signal | Device fingerprint |
+|---|---|---|
+| `lib/timing_likelihood.py` | stddev + range of fire times | sub-second precision on a daily pattern |
+| `lib/cooccurrence_likelihood.py` | median nearby events in ±5 s | isolated (no other entities reacting) |
+| `lib/persistence_likelihood.py` | CV of duration-in-state, both directions | FIXED_CYCLE (CV < 5 %) — e.g. 2-minute toothbrush |
+| `lib/transition_entropy.py` | distinct preceding entities | NOVEL_CONTEXT — every fire follows a different lead-in |
+
+Each is HA-core-adoptable (no HA imports, pure-Python, fully unit-tested),
+bundled behind a `HumanLikelihoodFeatures` composite. Adding a fifth grader
+is a ~10-line addition to the composite — detectors don't change. Threshold
+tables are iot_class-aware (local push/polling tightens to < 2 s; cloud
+push/polling relaxes to < 10 s).
+
+The card pairs render a **🤖 device-managed** or **🤖 tight-pattern** pill
+with a tooltip explaining which signal demoted the row.
+
+---
+
 ## Screenshots
 
 > _Captured on a 1000-entity HA install running v1.2.0._
@@ -153,6 +180,62 @@ Click **Apply** and it writes a real `automation:` block to `automations.yaml`. 
 Per-entity opt-out blocks specific entities from EVER being sent (not even pseudonymized). Every outbound call is logged with bytes / agent / cost / success. The **"What gets sent?"** modal previews the exact payload before any LLM action.
 
 Full details: [`docs/privacy.md`](docs/privacy.md).
+
+---
+
+## v1.5 highlights
+
+- **Four signal-grader libraries** (v1.5.35–v1.5.40) classify events as
+  device- vs. human-driven from timing / co-occurrence / persistence /
+  transition-entropy. Pure-math, HA-core-adoptable, bundled via the
+  `HumanLikelihoodFeatures` composite — adding a fifth grader is a
+  ~10-line extension, detectors don't change.
+- **iot_class-aware thresholds** — cloud-integrated devices add network
+  jitter, so the same algorithm uses different sub-second bands for
+  `local_*` vs `cloud_*` integrations.
+- **HA semantics filters** (v1.5.x) — context.id batch correlator,
+  unavailable-transition filter, template-source pair drop, long-silence
+  filter — all pulled into `lib/event_filters.py` so they're liftable
+  into HA core without integration scaffolding.
+- **Cohort dedup hardening** (v1.5.23) — entities with `device_id=None`
+  no longer get falsely absorbed into other cohorts.
+- **iot_class deadlock fix** (v1.5.22) — `_load_iot_classes` now reads
+  the manifest cache off-loop.
+- **HACS-path panel resolver** (v1.5.32) — eliminates the post-update
+  "hard-refresh required" loop for HACS users.
+- **Versioned cache-bust** (v1.5.41) — panel URL now includes integration
+  version so HACS updates always serve the new bundle.
+
+## Research inspiration
+
+Detector design draws on published work in habit detection, anomaly
+attribution, and human-vs-device routine classification. None of these
+papers is reimplemented verbatim — each maps to a concrete library plus
+a deliberate simplification suited to running on-device against HA's
+14-day buffer:
+
+- **Houzé 2022** — *Algorithmic Information Theory (AIT) memorability*
+  for anomaly scoring. `transition_entropy.py` approximates the AIT
+  score via a 2nd-order Markov proxy (entropy of distinct preceding
+  entities). Full AIT would require building a generative model of the
+  house; the proxy needs O(N) over the cluster window and catches the
+  same novelty signal in practice.
+- **Gad 2026** — multimodal context features (co-occurrence, persistence)
+  as device-vs-human signal. Direct inspiration for the second + third
+  grader libraries.
+- **Fu 2021 (HAWatcher)** — shadow-execution + correlation rules; 97 %
+  precision claim. Reserved as v1.6 roadmap: detect rules that should
+  be firing but aren't, by maintaining a parallel state model and
+  comparing against actuals.
+- **PELT (Killick 2012)** — change-point detection. Used in the
+  seasonality + frequency-anomaly detectors for "behavior shifted on
+  date X" findings.
+
+What we deliberately don't ship: vector embeddings of entity history
+(memory cost grows with the install — see `docs/ARCHITECTURE.md` for
+why the no-vector-DB decision was load-bearing); Cox proportional-hazards
+survival models (researched, found to fail proportionality assumptions
+on HA data — AFT models are the queued replacement).
 
 ---
 
