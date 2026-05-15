@@ -84,9 +84,12 @@ class CooccurrenceClass(str, Enum):
     co-occurrence reliably."""
 
 
-# Need ≥ 4 cluster events for a meaningful mean. Fewer can be skewed
-# by a single multimodal event.
-_MIN_SAMPLES = 4
+# Need ≥ 3 cluster events for a meaningful mean. v1.5.39 lowered from
+# 4 so 3-day streaks get graded (matches StreakDetector's floor).
+# Fewer samples means one HA-restart-burst outlier has more leverage,
+# but we use median-based classification (robust to single outliers)
+# so n=3 stays informative.
+_MIN_SAMPLES = 3
 
 
 # Default window: ±5 seconds. Wide enough to capture human-action

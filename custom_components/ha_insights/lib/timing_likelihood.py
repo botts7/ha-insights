@@ -102,9 +102,13 @@ class TimingClass(str, Enum):
 
 
 # Minimum sample size to compute meaningful stddev. With 2 events the
-# stddev is the half-range; with 3 it's marginal. 4+ gives a stable
-# enough number to trust.
-_MIN_SAMPLES = 4
+# stddev is the half-range; with 3 it's marginal but matches our
+# downstream consumers (StreakDetector floors at 3-day streaks). v1.5.39
+# lowered this from 4 to 3 so 3-day patterns don't pass through ungraded
+# — verified against the validation run where solar-inverter ON @ 07:22
+# (3 days, sems cloud_polling) and BYD-windows OFF @ 10:06 (3 days,
+# byd_vehicle) were both clearly device patterns getting no penalty.
+_MIN_SAMPLES = 3
 
 
 @dataclass(frozen=True)

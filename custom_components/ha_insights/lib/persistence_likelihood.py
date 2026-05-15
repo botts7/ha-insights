@@ -81,7 +81,7 @@ class PersistenceClass(str, Enum):
     handle the sample-size guard."""
 
 
-_MIN_SAMPLES = 4
+_MIN_SAMPLES = 3
 
 
 # Coefficient-of-variation thresholds for classification.
@@ -135,26 +135,59 @@ class PersistenceAssessment:
 
 def assess_persistence(
     durations_seconds: list[float],
+    previous_state_durations_seconds: list[float] | None = None,
 ) -> PersistenceAssessment:
-    """Classify a list of duration-in-state measurements.
+    """Classify a duration-in-state distribution as fixed-cycle vs human.
+
+    v1.5.39 extends the assessment to look in BOTH directions:
+
+    - **Forward direction** (`durations_seconds`): how long the entity
+      STAYS in the new state after the cluster event. Catches things
+      like "switch turns ON, then auto-OFF after exactly 5:00.001".
+
+    - **Backward direction** (`previous_state_durations_seconds`):
+      how long the entity WAS in the previous state before flipping
+      at the cluster event. Catches the toothbrush case — the OFF
+      event's brushing-session length is the fingerprint, not how
+      long it stays off afterward.
+
+    A device-cycle event has tight CV in ONE direction even when the
+    other direction is human-variable. So we compute CV in both
+    directions when both are provided and use whichever is MORE
+    conclusive (lower CV) for classification. The `reason` text
+    cites which direction won so the user can verify.
+
+    Pre-v1.5.39 callers passed only `durations_seconds` (forward).
+    That path still works — backward direction is opt-in via the new
+    optional parameter; existing callers see identical output.
 
     Args:
-        durations_seconds: how long the entity stayed in the new state
-            for each event in the cluster, in seconds. Detector
-            computes these by querying the event buffer for the next
-            state change for the entity after each cluster event.
-            Sessions that haven't transitioned out by the end of the
-            buffer should be OMITTED (we don't know the duration);
-            the sample-size guard handles the sparsity.
+        durations_seconds: forward-direction (next-state) durations
+            for each cluster event. Sessions still open at the buffer
+            edge should be OMITTED — the sample-size guard handles
+            the sparsity.
+        previous_state_durations_seconds: backward-direction
+            (previous-state) durations. None means "skip backward
+            analysis"; an empty list means "tried but no data
+            available" (treated as None for classification).
 
     Returns:
-        PersistenceAssessment with CV-based classification.
+        PersistenceAssessment with CV from the more-conclusive
+        direction. `reason` includes the direction marker.
 
-    Pure function; no I/O, no HA imports. Liftable into HA core
-    helpers like its siblings.
+    Pure function; no I/O, no HA imports.
     """
-    n = len(durations_seconds)
-    if n < _MIN_SAMPLES:
+    fwd = _summarize(durations_seconds)
+    bwd = _summarize(previous_state_durations_seconds)
+
+    # Pick the more conclusive direction (lower CV among those with
+    # enough samples). When neither direction has enough samples,
+    # return INSUFFICIENT_DATA citing the better-populated direction.
+    if fwd is None and bwd is None:
+        # Use the larger sample count for the error message.
+        fwd_n = len(durations_seconds)
+        bwd_n = len(previous_state_durations_seconds or [])
+        n = max(fwd_n, bwd_n)
         return PersistenceAssessment(
             mean_duration_seconds=0.0,
             stddev_duration_seconds=0.0,
@@ -164,50 +197,89 @@ def assess_persistence(
                 PersistenceClass.INSUFFICIENT_DATA
             ],
             reason=(
-                f"only {n} completed sessions — need ≥ {_MIN_SAMPLES} "
-                f"with known end times to assess persistence."
+                f"only {n} completed sessions in either direction — "
+                f"need ≥ {_MIN_SAMPLES} to assess persistence."
             ),
             sample_count=n,
         )
 
-    mean_v = statistics.fmean(durations_seconds)
-    stddev_v = statistics.stdev(durations_seconds)
-    # CV undefined when mean is 0 (would be an instant-revert event);
-    # treat as fixed cycle since there's literally no variation.
-    cv = (stddev_v / mean_v) if mean_v > 0 else 0.0
+    # Choose the direction with the lower CV (tighter = more likely
+    # to be the device fingerprint). If only one direction has data,
+    # use it.
+    if bwd is None or (fwd is not None and fwd.cv <= bwd.cv):
+        chosen = fwd
+        direction_label = "next-state duration"
+        assert chosen is not None  # narrow for type checker
+    else:
+        chosen = bwd
+        direction_label = "previous-state duration"
 
-    if cv < _FIXED_CYCLE_CV:
+    if chosen.cv < _FIXED_CYCLE_CV:
         cls = PersistenceClass.FIXED_CYCLE
         reason = (
-            f"every session lasts ~{_fmt_seconds(mean_v)} with CV "
-            f"{cv * 100:.1f}% across {n} events — robotic precision, "
-            f"consistent with a device internal timer (no human varies "
-            f"a session length below ±5%)."
+            f"every {direction_label} lasts ~{_fmt_seconds(chosen.mean)} "
+            f"with CV {chosen.cv * 100:.1f}% across {chosen.n} events — "
+            f"robotic precision, consistent with a device internal timer "
+            f"(no human varies a session length below ±5%)."
         )
-    elif cv < _TIGHT_DURATION_CV:
+    elif chosen.cv < _TIGHT_DURATION_CV:
         cls = PersistenceClass.TIGHT_DURATION
         reason = (
-            f"sessions average {_fmt_seconds(mean_v)} with CV "
-            f"{cv * 100:.0f}% — consistent but not robotic. Could be "
-            f"an alarm-driven routine or a polite device."
+            f"{direction_label}s average {_fmt_seconds(chosen.mean)} with "
+            f"CV {chosen.cv * 100:.0f}% — consistent but not robotic. "
+            f"Could be an alarm-driven routine or a polite device."
         )
     else:
         cls = PersistenceClass.HUMAN_VARIABLE
         reason = (
-            f"sessions span {_fmt_seconds(min(durations_seconds))} to "
-            f"{_fmt_seconds(max(durations_seconds))} (mean "
-            f"{_fmt_seconds(mean_v)}, CV {cv * 100:.0f}%) — variable "
-            f"enough to be human-controlled."
+            f"{direction_label}s span {_fmt_seconds(chosen.min_v)} to "
+            f"{_fmt_seconds(chosen.max_v)} (mean "
+            f"{_fmt_seconds(chosen.mean)}, CV {chosen.cv * 100:.0f}%) — "
+            f"variable enough to be human-controlled."
         )
 
     return PersistenceAssessment(
-        mean_duration_seconds=round(mean_v, 3),
-        stddev_duration_seconds=round(stddev_v, 3),
-        coefficient_of_variation=round(cv, 4),
+        mean_duration_seconds=round(chosen.mean, 3),
+        stddev_duration_seconds=round(chosen.stddev, 3),
+        coefficient_of_variation=round(chosen.cv, 4),
         persistence_class=cls,
         human_likelihood=_LIKELIHOOD_BY_CLASS[cls],
         reason=reason,
-        sample_count=n,
+        sample_count=chosen.n,
+    )
+
+
+@dataclass(frozen=True)
+class _DurationSummary:
+    """Internal summary of one direction's duration distribution."""
+
+    n: int
+    mean: float
+    stddev: float
+    cv: float
+    min_v: float
+    max_v: float
+
+
+def _summarize(
+    durations: list[float] | None,
+) -> _DurationSummary | None:
+    """Compute CV summary for one direction; None if not enough data."""
+    if durations is None:
+        return None
+    n = len(durations)
+    if n < _MIN_SAMPLES:
+        return None
+    mean_v = statistics.fmean(durations)
+    stddev_v = statistics.stdev(durations)
+    cv = (stddev_v / mean_v) if mean_v > 0 else 0.0
+    return _DurationSummary(
+        n=n,
+        mean=mean_v,
+        stddev=stddev_v,
+        cv=cv,
+        min_v=min(durations),
+        max_v=max(durations),
     )
 
 

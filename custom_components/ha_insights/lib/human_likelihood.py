@@ -126,30 +126,39 @@ def assess_human_likelihood(
     nearby_counts: list[int],
     durations_seconds: list[float],
     iot_class: str | None = None,
+    previous_state_durations_seconds: list[float] | None = None,
 ) -> HumanLikelihoodFeatures:
     """One-shot composite assessment.
 
-    Detectors pre-compute the three input lists (timestamps from
-    cluster events, nearby_counts from event_buffer.query() windows,
-    durations from next-state-change lookups) and pass them all in.
-    This module dispatches to each sibling lib in turn.
+    Detectors pre-compute the input lists (cluster event timestamps,
+    surrounding-event counts, durations forward + optionally backward)
+    and pass them all in. This module dispatches to each sibling lib.
 
     Args:
         timestamps: cluster event timestamps (timezone-aware datetimes).
         nearby_counts: surrounding-event count per cluster event.
-        durations_seconds: duration-in-state per cluster event;
-            sessions still open at buffer edge should be omitted.
+        durations_seconds: forward duration-in-state per cluster
+            event (how long the entity stayed in the new state).
         iot_class: HA integration iot_class for the entity (e.g.
-            "cloud_polling", "local_push"). Drives the timing
-            threshold table.
+            "cloud_polling", "local_push").
+        previous_state_durations_seconds: v1.5.39 — backward duration
+            (how long the entity WAS in the previous state before
+            the cluster event). When provided, the persistence lib
+            picks whichever direction has the lower CV — catches
+            things like toothbrush OFF events where the brushing
+            session length (backward) is the device fingerprint.
+            None means "skip backward analysis"; an empty list
+            means "tried, no data".
 
     Returns:
-        HumanLikelihoodFeatures bundle. Use `.apply_to(base)` for
-        the chained confidence and `.payload_keys()` for the
-        payload merge.
+        HumanLikelihoodFeatures bundle. Use `.apply_to(base)` and
+        `.payload_keys()`.
     """
     return HumanLikelihoodFeatures(
         timing=assess_timing(timestamps=timestamps, iot_class=iot_class),
         cooccurrence=assess_cooccurrence(nearby_counts),
-        persistence=assess_persistence(durations_seconds),
+        persistence=assess_persistence(
+            durations_seconds,
+            previous_state_durations_seconds=previous_state_durations_seconds,
+        ),
     )

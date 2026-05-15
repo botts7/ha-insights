@@ -32,13 +32,14 @@ def _at(hour: int, minute: int, second: int = 0, microsecond: int = 0,
 # ----- Sample-size guards -----
 
 def test_insufficient_samples_returns_neutral_assessment() -> None:
-    """Fewer than 4 events → INSUFFICIENT_DATA, human_likelihood=1.0
-    so detectors don't penalize what we can't measure."""
-    events = [_at(17, 25, day_offset=i) for i in range(3)]
+    """Fewer than 3 events → INSUFFICIENT_DATA, human_likelihood=1.0
+    so detectors don't penalize what we can't measure. v1.5.39
+    lowered _MIN_SAMPLES from 4 to 3 to match StreakDetector's floor."""
+    events = [_at(17, 25, day_offset=i) for i in range(2)]
     a = assess_timing(events)
     assert a.timing_class is TimingClass.INSUFFICIENT_DATA
     assert a.human_likelihood == 1.0
-    assert a.sample_count == 3
+    assert a.sample_count == 2
 
 
 def test_empty_event_list_handled() -> None:

@@ -14,10 +14,11 @@ from custom_components.ha_insights.lib.persistence_likelihood import (  # noqa: 
 
 
 def test_insufficient_samples_returns_neutral() -> None:
-    a = assess_persistence([120.0, 121.0, 119.5])
+    """v1.5.39: lowered _MIN_SAMPLES from 4 to 3 to match StreakDetector."""
+    a = assess_persistence([120.0, 121.0])
     assert a.persistence_class is PersistenceClass.INSUFFICIENT_DATA
     assert a.human_likelihood == 1.0
-    assert a.sample_count == 3
+    assert a.sample_count == 2
 
 
 def test_empty_input_handled() -> None:
@@ -66,6 +67,73 @@ def test_tight_duration_band() -> None:
     a2 = assess_persistence(durations2)
     assert a2.persistence_class is PersistenceClass.TIGHT_DURATION
     assert a2.human_likelihood == 0.85
+
+
+def test_backward_direction_catches_toothbrush_off_event() -> None:
+    """The toothbrush OFF event has variable forward-duration (24h
+    between brushings, depends on user routine) but the BACKWARD
+    duration is a fixed 2-min brushing cycle. v1.5.39 looks in both
+    directions; chooses the more-conclusive (lower-CV) one."""
+    # Forward: how long the toothbrush stays OFF — varies wildly
+    fwd_durations = [22 * 3600, 26 * 3600, 24 * 3600, 23 * 3600, 25 * 3600]
+    # Backward: how long it was ON before — fixed 2-minute timer
+    bwd_durations = [120.0, 120.01, 119.98, 120.02, 119.99]
+    a = assess_persistence(
+        fwd_durations,
+        previous_state_durations_seconds=bwd_durations,
+    )
+    # Should pick the BACKWARD direction (lower CV) and flag fixed cycle
+    assert a.persistence_class is PersistenceClass.FIXED_CYCLE
+    assert a.human_likelihood == 0.25
+    # Reason explicitly cites "previous-state duration"
+    assert "previous-state duration" in a.reason
+
+
+def test_backward_only_when_forward_is_empty() -> None:
+    """If only backward durations are provided (forward not available),
+    use those."""
+    a = assess_persistence(
+        [],
+        previous_state_durations_seconds=[120.0, 120.1, 119.9, 120.05],
+    )
+    assert a.persistence_class is PersistenceClass.FIXED_CYCLE
+    assert "previous-state duration" in a.reason
+
+
+def test_forward_used_when_more_conclusive() -> None:
+    """The classic toothbrush ON event: forward direction (2-min ON
+    cycle) is the device fingerprint, backward (varies daily) is
+    human. Picks the lower-CV direction."""
+    # Forward: fixed 2-min ON
+    fwd_durations = [120.0, 120.05, 119.97, 120.02, 120.01]
+    # Backward: variable 22-26h gap
+    bwd_durations = [22 * 3600, 26 * 3600, 24 * 3600, 23 * 3600, 25 * 3600]
+    a = assess_persistence(
+        fwd_durations,
+        previous_state_durations_seconds=bwd_durations,
+    )
+    assert a.persistence_class is PersistenceClass.FIXED_CYCLE
+    assert "next-state duration" in a.reason
+
+
+def test_both_directions_insufficient() -> None:
+    """If neither direction has enough samples, INSUFFICIENT_DATA."""
+    a = assess_persistence(
+        [120.0],
+        previous_state_durations_seconds=[24.0],
+    )
+    assert a.persistence_class is PersistenceClass.INSUFFICIENT_DATA
+
+
+def test_legacy_call_without_backward_still_works() -> None:
+    """v1.5.38 callers (only forward direction) get identical
+    behavior — backward direction is opt-in."""
+    fwd_durations = [120.005, 120.012, 119.998, 120.008, 120.001, 120.015]
+    # Same call style as pre-v1.5.39
+    a = assess_persistence(fwd_durations)
+    assert a.persistence_class is PersistenceClass.FIXED_CYCLE
+    assert a.human_likelihood == 0.25
+    assert "next-state duration" in a.reason
 
 
 def test_zero_mean_handled_without_zerodivision() -> None:

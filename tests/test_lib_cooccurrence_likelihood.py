@@ -18,10 +18,11 @@ from custom_components.ha_insights.lib.cooccurrence_likelihood import (  # noqa:
 # ----- Sample-size guards -----
 
 def test_insufficient_samples_returns_neutral() -> None:
-    a = assess_cooccurrence([5, 3, 4])
+    """v1.5.39: lowered _MIN_SAMPLES from 4 to 3 to match StreakDetector."""
+    a = assess_cooccurrence([5, 3])
     assert a.cooccurrence_class is CooccurrenceClass.INSUFFICIENT_DATA
     assert a.human_likelihood == 1.0
-    assert a.sample_count == 3
+    assert a.sample_count == 2
 
 
 def test_empty_input_handled() -> None:

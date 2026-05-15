@@ -191,8 +191,9 @@ class ScheduleDetector(Detector):
         # changes when grader libs are added later.
         nearby_counts: list[int] = []
         durations: list[float] = []
+        prev_durations: list[float] = []
         if ctx.event_buffer is not None:
-            from bisect import bisect_right as _br
+            from bisect import bisect_left as _bl, bisect_right as _br
             from datetime import timedelta as _td
 
             window = _td(seconds=COOCC_WINDOW)
@@ -206,8 +207,17 @@ class ScheduleDetector(Detector):
                     if other.entity_id != entity_id
                 )
                 nearby_counts.append(hits)
-            # Persistence: snapshot per-entity timeline once, bisect
-            # for next-state-change after each cluster event.
+            # Persistence: snapshot per-entity timeline once, then for
+            # each cluster event:
+            #   forward  — how long it stays in the NEW state (bisect
+            #              right finds next event after this one)
+            #   backward — how long it was in the PREVIOUS state
+            #              (bisect left finds the prior event)
+            # v1.5.39: both directions feed assess_persistence; the lib
+            # picks whichever has lower CV. Catches things like the
+            # toothbrush OFF event where the brushing-session length
+            # (backward) is the device fingerprint, not the time-until-
+            # next-brushing (forward, varies daily).
             all_for_entity = sorted(
                 (
                     ev for ev in ctx.event_buffer.query(entity_id=entity_id)
@@ -217,17 +227,22 @@ class ScheduleDetector(Detector):
             )
             ts_list = [ev.timestamp for ev in all_for_entity]
             for ev in events:
-                idx = _br(ts_list, ev.timestamp)
-                if idx < len(ts_list):
+                idx_fwd = _br(ts_list, ev.timestamp)
+                if idx_fwd < len(ts_list):
                     durations.append(
-                        (ts_list[idx] - ev.timestamp).total_seconds()
+                        (ts_list[idx_fwd] - ev.timestamp).total_seconds()
                     )
-                # else: session hasn't ended → omit
+                idx_bwd = _bl(ts_list, ev.timestamp)
+                if idx_bwd > 0:
+                    prev_durations.append(
+                        (ev.timestamp - ts_list[idx_bwd - 1]).total_seconds()
+                    )
 
         features = assess_human_likelihood(
             timestamps=[dt_util.as_local(ev.timestamp) for ev in events],
             nearby_counts=nearby_counts,
             durations_seconds=durations,
+            previous_state_durations_seconds=prev_durations,
             iot_class=iot_class,
         )
 

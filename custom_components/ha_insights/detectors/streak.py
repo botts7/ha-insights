@@ -228,8 +228,9 @@ class StreakDetector(Detector):
         )
         nearby_counts: list[int] = []
         durations: list[float] = []
+        prev_durations: list[float] = []
         if ctx.event_buffer is not None:
-            from bisect import bisect_right as _br
+            from bisect import bisect_left as _bl, bisect_right as _br
 
             window = timedelta(seconds=COOCC_WINDOW)
             for ts_local in streak_times_local:
@@ -250,18 +251,25 @@ class StreakDetector(Detector):
                 key=lambda ev: ev.timestamp,
             )
             ts_list = [ev.timestamp for ev in all_for_entity]
+            # v1.5.39: both directions — see schedule.py for rationale.
             for d in longest_run:
                 ev_ts = per_day[d]
-                idx = _br(ts_list, ev_ts)
-                if idx < len(ts_list):
+                idx_fwd = _br(ts_list, ev_ts)
+                if idx_fwd < len(ts_list):
                     durations.append(
-                        (ts_list[idx] - ev_ts).total_seconds()
+                        (ts_list[idx_fwd] - ev_ts).total_seconds()
+                    )
+                idx_bwd = _bl(ts_list, ev_ts)
+                if idx_bwd > 0:
+                    prev_durations.append(
+                        (ev_ts - ts_list[idx_bwd - 1]).total_seconds()
                     )
 
         features = assess_human_likelihood(
             timestamps=streak_times_local,
             nearby_counts=nearby_counts,
             durations_seconds=durations,
+            previous_state_durations_seconds=prev_durations,
             iot_class=iot_class,
         )
 

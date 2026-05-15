@@ -2114,6 +2114,47 @@ def _():
     assert "goal_wake_up_by" in en
 
 
+@t("v1.5.39: grader libs accept n=3, persistence looks in BOTH duration directions")
+def _():
+    """Live-validation gaps from v1.5.38 ship:
+       (1) 3-day streaks pass through ungraded because grader libs
+           required n>=4; lower to 3 to match StreakDetector floor.
+       (2) Toothbrush OFF event has variable forward-duration (24h
+           between brushings) but fixed backward-duration (2-min
+           brushing cycle). Lib now picks the more-conclusive
+           direction."""
+    # _MIN_SAMPLES = 3 in all three grader libs
+    for lib in (
+        "timing_likelihood",
+        "cooccurrence_likelihood",
+        "persistence_likelihood",
+    ):
+        src = _read(f"custom_components/ha_insights/lib/{lib}.py")
+        assert "_MIN_SAMPLES = 3" in src, f"{lib} still at old threshold"
+    # Persistence accepts both directions
+    src_pers = _read(
+        "custom_components/ha_insights/lib/persistence_likelihood.py"
+    )
+    assert "previous_state_durations_seconds" in src_pers
+    assert "next-state duration" in src_pers
+    assert "previous-state duration" in src_pers
+    # Composite passes the new arg through
+    src_comp = _read(
+        "custom_components/ha_insights/lib/human_likelihood.py"
+    )
+    assert "previous_state_durations_seconds" in src_comp
+    # Detectors compute backward duration via bisect_left
+    for det in ("schedule", "streak"):
+        src_det = _read(
+            f"custom_components/ha_insights/detectors/{det}.py"
+        )
+        assert "bisect_left" in src_det, (
+            f"{det} not computing backward direction"
+        )
+        assert "prev_durations" in src_det
+        assert "previous_state_durations_seconds=prev_durations" in src_det
+
+
 @t("v1.5.38: HumanLikelihoodFeatures composite — schedule/streak collapse the apply-chain")
 def _():
     """v1.5.35-37 added three sibling signal-grader libs (timing,
