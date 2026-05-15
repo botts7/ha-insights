@@ -28,6 +28,18 @@ _AUTOMATION_FILE = "automations.yaml"
 _ID_PREFIX = "ha_insights_"
 
 
+def _strip_private_keys(payload: dict[str, Any]) -> dict[str, Any]:
+    """Drop top-level keys that start with an underscore.
+
+    Detectors use `_manual_habit`, `_audit`, `_streak`, etc. to carry
+    metadata the WS layer + the card need (cohort grouping, fix
+    summaries, fingerprint inputs) but which are not part of the
+    HA automation schema. Stripping them keeps `automations.yaml`
+    readable when the user opens it in their editor.
+    """
+    return {k: v for k, v in payload.items() if not str(k).startswith("_")}
+
+
 class AutomationWriter:
     """Read / create / delete automations in HA's automations.yaml."""
 
@@ -45,7 +57,15 @@ class AutomationWriter:
         if auto_id is None:
             auto_id = f"{_ID_PREFIX}{uuid.uuid4().hex[:8]}"
 
-        config = dict(payload)
+        # v1.5.34: strip private detector metadata before writing to
+        # automations.yaml. Detectors stash internal state in
+        # underscore-prefixed keys (_manual_habit, _audit, _streak,
+        # …) so the WS list payload + fingerprint code can read it
+        # without re-running the detector. HA's automation loader is
+        # lenient about extras so this never blew up — but the user
+        # opening automations.yaml in their editor would see hundreds
+        # of irrelevant ML-style fields polluting every applied entry.
+        config = _strip_private_keys(payload)
         config["id"] = auto_id
 
         await self._hass.async_add_executor_job(

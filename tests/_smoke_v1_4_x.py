@@ -2114,6 +2114,34 @@ def _():
     assert "goal_wake_up_by" in en
 
 
+@t("v1.5.34: automation_writer strips _-prefixed detector metadata before write")
+def _():
+    """Detectors stash internal state in keys like `_manual_habit`,
+    `_audit`, `_streak`. Useful for cohort dedup + fingerprinting
+    in the WS list but not part of HA's automation schema — applying
+    such a payload to automations.yaml polluted every entry with
+    detector bookkeeping. v1.5.34 adds _strip_private_keys() to the
+    writer's hot path."""
+    src = _read("custom_components/ha_insights/apply/automation_writer.py")
+    assert "def _strip_private_keys(" in src
+    assert "_strip_private_keys(payload)" in src
+    # Doctest the helper directly
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "aw_v1534",
+        "custom_components/ha_insights/apply/automation_writer.py",
+    )
+    assert spec is not None and spec.loader is not None
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    out = mod._strip_private_keys(
+        {"alias": "x", "_manual_habit": {"foo": 1}, "_audit": []}
+    )
+    assert "alias" in out
+    assert "_manual_habit" not in out
+    assert "_audit" not in out
+
+
 @t("v1.5.32: panel registration prefers HACS path, falls back to legacy /www/")
 def _():
     """For ages we registered the sidebar panel from /local/ha-insights-panel.js
