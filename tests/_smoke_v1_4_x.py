@@ -2114,6 +2114,28 @@ def _():
     assert "goal_wake_up_by" in en
 
 
+@t("v1.5.32: panel registration prefers HACS path, falls back to legacy /www/")
+def _():
+    """For ages we registered the sidebar panel from /local/ha-insights-panel.js
+    (= /config/www/ha-insights-panel.js), but the companion-repo deploy
+    pipeline + HACS both target /www/community/ha-insights-card/. New
+    bundles shipped there were ignored by the panel; users saw stale
+    behavior that no amount of Reload UI fixed because the cache-buster
+    was computed off the stale file's mtime.
+
+    v1.5.32: resolver prefers the HACS path, falls back to the legacy
+    location if HACS isn't installed. Either way, the cache-bust query
+    is computed off the file that's actually being served."""
+    src = _read("custom_components/ha_insights/__init__.py")
+    # Resolver helper that picks HACS path first
+    assert "www/community/ha-insights-card/ha-insights-panel.js" in src
+    assert "/local/community/ha-insights-card/ha-insights-panel.js" in src
+    # Legacy fallback retained
+    assert "www/ha-insights-panel.js" in src
+    # module_url no longer hard-codes /local/ha-insights-panel.js
+    assert "{panel_module_path}?v={cache_bust}" in src
+
+
 @t("v1.5.31: ws_api strips trailing 'Automate this?' CTA on shadowed insights")
 def _():
     """A client-side strip in card v1.2.11 proved unreliable under

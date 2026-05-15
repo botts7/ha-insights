@@ -1427,7 +1427,38 @@ async def _async_register_panel(hass: HomeAssistant) -> None:
         async_remove_panel,
     )
 
-    panel_path = hass.config.path("www/ha-insights-panel.js")
+    # v1.5.32: prefer the HACS install path (where most users will
+    # have the bundle thanks to the companion repo `ha-insights-card`).
+    # Fall back to the legacy /www/ha-insights-panel.js path so anyone
+    # who installed by manually copying the file pre-1.5.32 doesn't
+    # break. Whichever path exists wins; if both, HACS path is canonical.
+    #
+    # Background: shipping a new bundle to HACS path but leaving the
+    # legacy path stale meant the integration kept serving an older
+    # bundle even after deploy — manifesting as "had to hit Reload UI"
+    # and "incognito still shows old behavior" (the URL was the same
+    # /local/ha-insights-panel.js, the file behind it was stale).
+    panel_path_hacs = hass.config.path(
+        "www/community/ha-insights-card/ha-insights-panel.js"
+    )
+    panel_path_legacy = hass.config.path("www/ha-insights-panel.js")
+
+    def _resolve_panel() -> tuple[str, str]:
+        """Return (filesystem_path, module_url) for the panel bundle.
+        Prefers the HACS-managed path. Falls back to the legacy /www/
+        path if HACS isn't installed yet. If neither file exists, we
+        register the HACS path anyway — HACS will land the bundle on
+        next install and the URL stays stable."""
+        if os.path.exists(panel_path_hacs):
+            return (
+                panel_path_hacs,
+                "/local/community/ha-insights-card/ha-insights-panel.js",
+            )
+        return (panel_path_legacy, "/local/ha-insights-panel.js")
+
+    panel_path, panel_module_path = await hass.async_add_executor_job(
+        _resolve_panel
+    )
 
     def _read_signature() -> str:
         """Composite signature: mtime + size. Size catches edits that
@@ -1469,7 +1500,7 @@ async def _async_register_panel(hass: HomeAssistant) -> None:
                 "name": "ha-insights-panel",
                 "embed_iframe": False,
                 "trust_external": False,
-                "module_url": f"/local/ha-insights-panel.js?v={cache_bust}",
+                "module_url": f"{panel_module_path}?v={cache_bust}",
             },
         },
         require_admin=False,
