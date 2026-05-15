@@ -2114,6 +2114,41 @@ def _():
     assert "goal_wake_up_by" in en
 
 
+@t("v1.5.40: transition_entropy lib + composite optional 4th grader")
+def _():
+    """Fourth signal-grader sibling: context-diversity scoring.
+    Counts DISTINCT preceding entities (within ±5s) across cluster
+    events. Few distinct → routine context (human-likely or device
+    polling already caught by other libs). Many distinct → random
+    context, demotes confidence.
+
+    Critically, the composite's 4th grader is Optional: legacy
+    callers (not passing distinct_entity_counts) get IDENTICAL
+    scores to v1.5.39. This pattern is how future grader libs
+    will plug in without forcing simultaneous updates everywhere."""
+    src_lib = _read(
+        "custom_components/ha_insights/lib/transition_entropy.py"
+    )
+    assert "class TransitionEntropyClass" in src_lib
+    assert "ROUTINE_CONTEXT" in src_lib
+    assert "AMBIGUOUS_CONTEXT" in src_lib
+    assert "NOVEL_CONTEXT" in src_lib
+    assert "def assess_transition_entropy(" in src_lib
+    # Composite carries it as Optional
+    src_comp = _read(
+        "custom_components/ha_insights/lib/human_likelihood.py"
+    )
+    assert "transition_entropy: TransitionEntropyAssessment | None" in src_comp
+    assert "distinct_entity_counts: list[int] | None" in src_comp
+    # Detectors compute distinct_entity_counts + pass it through
+    for det in ("schedule", "streak"):
+        src_det = _read(
+            f"custom_components/ha_insights/detectors/{det}.py"
+        )
+        assert "distinct_entity_counts" in src_det
+        assert "distinct_entity_counts=distinct_entity_counts" in src_det
+
+
 @t("v1.5.39: grader libs accept n=3, persistence looks in BOTH duration directions")
 def _():
     """Live-validation gaps from v1.5.38 ship:

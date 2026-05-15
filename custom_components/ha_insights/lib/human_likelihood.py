@@ -73,52 +73,68 @@ from .timing_likelihood import (
     apply_to_confidence as _apply_timing,
     assess_timing,
 )
+from .transition_entropy import (
+    TransitionEntropyAssessment,
+    apply_to_confidence as _apply_entropy,
+    assess_transition_entropy,
+)
 
 
 @dataclass(frozen=True)
 class HumanLikelihoodFeatures:
-    """Bundle of all three signal-grader assessments for one pattern.
+    """Bundle of all four signal-grader assessments for one pattern.
 
     Each field holds the structured assessment from the corresponding
     sibling lib. The bundle exposes two operations:
 
     - `apply_to(base_confidence)` — chains all penalties in canonical
-      order. Detectors call this instead of 3 separate apply calls.
+      order. Detectors call this instead of separate apply calls.
     - `payload_keys()` — yields the underscore-prefixed payload keys
       detectors should merge into their insight payload. Underscores
       keep these out of automations.yaml (automation_writer strips).
 
-    Future grader libs (transition_entropy v1.5.39+, paired_event
-    v1.6+) extend this dataclass by adding a new field + plumbing it
-    through the two methods. Detectors that already use the composite
-    pick up the new grader automatically.
+    Pattern for adding the next grader lib (v1.6+):
+      1. Build `lib/<name>_likelihood.py` matching the pattern.
+      2. Add new field here as Optional (so old callers don't break).
+      3. Apply in `apply_to()` only if not None.
+      4. Add to `payload_keys()` only if not None.
+      5. Detectors that pass the new arg pick up the new grader;
+         detectors that don't get identical pre-v1.6 behavior.
+
+    v1.5.40: `transition_entropy` is Optional for that reason — until
+    every consuming detector computes its input, we don't want to
+    error or under-grade by silently passing zero.
     """
 
     timing: TimingAssessment
     cooccurrence: CooccurrenceAssessment
     persistence: PersistenceAssessment
+    transition_entropy: TransitionEntropyAssessment | None = None
 
     def apply_to(self, base_confidence: float) -> float:
-        """Chain all three apply_to_confidence calls. Order matters
-        only for readability — multiplication is commutative; the
-        composite penalty is the product of human_likelihoods,
-        clamped to [0, 1] at the end."""
+        """Chain all apply_to_confidence calls. Order is commutative
+        (multiplication); we chain in the original lib-addition order
+        for readability. Optional graders are skipped when None."""
         c = base_confidence
         c = _apply_timing(c, self.timing)
         c = _apply_coocc(c, self.cooccurrence)
         c = _apply_pers(c, self.persistence)
+        if self.transition_entropy is not None:
+            c = _apply_entropy(c, self.transition_entropy)
         return c
 
     def payload_keys(self) -> dict[str, Any]:
-        """Return the underscore-prefixed payload entries to merge.
-        Caller does `payload.update(features.payload_keys())` — the
-        underscore-prefix convention (v1.5.34 automation_writer)
-        strips them before YAML write."""
-        return {
+        """Return the underscore-prefixed payload entries to merge."""
+        d = {
             "_timing_assessment": self.timing.to_dict(),
             "_cooccurrence_assessment": self.cooccurrence.to_dict(),
             "_persistence_assessment": self.persistence.to_dict(),
         }
+        if self.transition_entropy is not None:
+            d["_transition_entropy_assessment"] = (
+                self.transition_entropy.to_dict()
+            )
+        return d
 
 
 def assess_human_likelihood(
@@ -127,6 +143,7 @@ def assess_human_likelihood(
     durations_seconds: list[float],
     iot_class: str | None = None,
     previous_state_durations_seconds: list[float] | None = None,
+    distinct_entity_counts: list[int] | None = None,
 ) -> HumanLikelihoodFeatures:
     """One-shot composite assessment.
 
@@ -160,5 +177,10 @@ def assess_human_likelihood(
         persistence=assess_persistence(
             durations_seconds,
             previous_state_durations_seconds=previous_state_durations_seconds,
+        ),
+        transition_entropy=(
+            assess_transition_entropy(distinct_entity_counts)
+            if distinct_entity_counts is not None
+            else None
         ),
     )

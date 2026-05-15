@@ -242,6 +242,63 @@ def test_features_dataclass_carries_all_three_assessments() -> None:
 
 # ----- Clamping survives the chain -----
 
+def test_v1540_transition_entropy_optional_backward_compat() -> None:
+    """v1.5.40 added transition_entropy as the 4th grader. It's
+    Optional so legacy callers (no distinct_entity_counts arg) get
+    IDENTICAL results to v1.5.38/v1.5.39. This pins that contract."""
+    timestamps, nearby, durations = _make_inputs()
+    # Legacy call — no distinct_entity_counts
+    legacy = assess_human_likelihood(
+        timestamps=timestamps,
+        nearby_counts=nearby,
+        durations_seconds=durations,
+        iot_class="local_push",
+    )
+    assert legacy.transition_entropy is None
+    # apply_to skips the missing grader cleanly
+    legacy_score = legacy.apply_to(0.8)
+    # payload_keys doesn't include the new key
+    assert "_transition_entropy_assessment" not in legacy.payload_keys()
+
+    # New caller — distinct_entity_counts provided
+    new_caller = assess_human_likelihood(
+        timestamps=timestamps,
+        nearby_counts=nearby,
+        durations_seconds=durations,
+        iot_class="local_push",
+        distinct_entity_counts=[1, 1, 1, 1, 1, 1, 1, 1, 1, 1],  # routine
+    )
+    assert new_caller.transition_entropy is not None
+    # Routine context = 1.0 multiplier, so score is identical to legacy
+    assert abs(new_caller.apply_to(0.8) - legacy_score) < 1e-9
+    # payload now includes the new key
+    assert "_transition_entropy_assessment" in new_caller.payload_keys()
+
+
+def test_v1540_novel_context_demotes() -> None:
+    """When transition_entropy fires NOVEL_CONTEXT, the composite
+    score drops by 0.75x vs the legacy chain."""
+    timestamps, nearby, durations = _make_inputs()
+    legacy = assess_human_likelihood(
+        timestamps=timestamps,
+        nearby_counts=nearby,
+        durations_seconds=durations,
+        iot_class="local_push",
+    )
+    legacy_score = legacy.apply_to(0.8)
+
+    novel = assess_human_likelihood(
+        timestamps=timestamps,
+        nearby_counts=nearby,
+        durations_seconds=durations,
+        iot_class="local_push",
+        distinct_entity_counts=[10, 12, 11, 9, 8, 10, 11, 9, 10, 11],  # novel
+    )
+    novel_score = novel.apply_to(0.8)
+    # 0.75 multiplier on top of legacy
+    assert abs(novel_score - legacy_score * 0.75) < 1e-9
+
+
 def test_apply_to_clamps_overflow() -> None:
     """Worst-case overflow inputs should still produce [0, 1]."""
     timestamps, nearby, durations = _make_inputs()

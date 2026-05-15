@@ -190,6 +190,7 @@ class ScheduleDetector(Detector):
         # the apply chain so the composite call is the only line that
         # changes when grader libs are added later.
         nearby_counts: list[int] = []
+        distinct_entity_counts: list[int] = []
         durations: list[float] = []
         prev_durations: list[float] = []
         if ctx.event_buffer is not None:
@@ -198,15 +199,17 @@ class ScheduleDetector(Detector):
 
             window = _td(seconds=COOCC_WINDOW)
             for ev in events:
-                hits = sum(
-                    1
-                    for other in ctx.event_buffer.query(
-                        since=ev.timestamp - window,
-                        until=ev.timestamp + window,
-                    )
-                    if other.entity_id != entity_id
-                )
+                hits = 0
+                distinct: set[str] = set()
+                for other in ctx.event_buffer.query(
+                    since=ev.timestamp - window,
+                    until=ev.timestamp + window,
+                ):
+                    if other.entity_id != entity_id:
+                        hits += 1
+                        distinct.add(other.entity_id)
                 nearby_counts.append(hits)
+                distinct_entity_counts.append(len(distinct))
             # Persistence: snapshot per-entity timeline once, then for
             # each cluster event:
             #   forward  — how long it stays in the NEW state (bisect
@@ -243,6 +246,7 @@ class ScheduleDetector(Detector):
             nearby_counts=nearby_counts,
             durations_seconds=durations,
             previous_state_durations_seconds=prev_durations,
+            distinct_entity_counts=distinct_entity_counts,
             iot_class=iot_class,
         )
 

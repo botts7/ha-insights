@@ -227,6 +227,7 @@ class StreakDetector(Detector):
             else None
         )
         nearby_counts: list[int] = []
+        distinct_entity_counts: list[int] = []
         durations: list[float] = []
         prev_durations: list[float] = []
         if ctx.event_buffer is not None:
@@ -234,15 +235,17 @@ class StreakDetector(Detector):
 
             window = timedelta(seconds=COOCC_WINDOW)
             for ts_local in streak_times_local:
-                hits = sum(
-                    1
-                    for other in ctx.event_buffer.query(
-                        since=ts_local - window,
-                        until=ts_local + window,
-                    )
-                    if other.entity_id != entity_id
-                )
+                hits = 0
+                distinct: set[str] = set()
+                for other in ctx.event_buffer.query(
+                    since=ts_local - window,
+                    until=ts_local + window,
+                ):
+                    if other.entity_id != entity_id:
+                        hits += 1
+                        distinct.add(other.entity_id)
                 nearby_counts.append(hits)
+                distinct_entity_counts.append(len(distinct))
             all_for_entity = sorted(
                 (
                     ev for ev in ctx.event_buffer.query(entity_id=entity_id)
@@ -270,6 +273,7 @@ class StreakDetector(Detector):
             nearby_counts=nearby_counts,
             durations_seconds=durations,
             previous_state_durations_seconds=prev_durations,
+            distinct_entity_counts=distinct_entity_counts,
             iot_class=iot_class,
         )
 
