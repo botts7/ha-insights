@@ -346,6 +346,35 @@ A per-month USD budget can be set in OptionsFlow for cloud agents; the backgroun
 
 "HA Insights" is a community project, not affiliated with or endorsed by Nabu Casa. "Home Assistant" is a Nabu Casa trademark; we follow the standard HACS-community pattern of `ha-` prefixed naming and don't use HA brand assets.
 
+## Status & contributing
+
+**v1.5.42** — early public release. What that means in practice:
+
+| Area | Status |
+|---|---|
+| Integration core (detectors, audit, redactor, store, WS API) | **Stable** — months on a real HA install, 75 lib + 157 smoke tests passing |
+| Privacy controls (opt-in LLM, pseudonymization, audit log, "what gets sent?") | **Stable** — privacy contract is a hard rule, not a feature flag |
+| Panel UI | **Hardening** — known regression: blank-on-tab-return after long backgrounding, recovery is automatic but slow. See [#TODO open issue link] |
+| Mobile push throttling, daily-digest cadence | **Hardening** — anti-spam works, fine-tuning the defaults |
+| HAWatcher shadow-execution (v1.6 roadmap) | **Not started** — research direction; contributors welcome |
+
+### How to report something broken
+
+[Open a bug](https://github.com/botts7/ha-insights/issues/new?template=bug.yml) — the template asks for HA version, integration version, browser, repro steps, relevant `homeassistant.log` lines. Detailed reports get triaged same-day; "it broke" reports queue.
+
+### How to contribute
+
+- **Bugs**: fork, branch off `main`, add a test that reproduces (use `tests/test_lib_*.py` for pure logic or `tests/_smoke_v1_4_x.py` for integration-shape checks), open a PR. The PR template walks you through the surgical-diff conventions.
+- **New detector**: see [`docs/writing-a-detector.md`](docs/writing-a-detector.md) — the existing 10+ detectors follow a stable contract; your detector is one folder + one entry in `detectors/__init__.py`.
+- **Discussion / ideas**: [GitHub Discussions](https://github.com/botts7/ha-insights/discussions) for shape-of-the-feature talks; issues are for bugs and concrete proposals.
+
+### Conventions (CLAUDE.md captures these)
+
+- Surgical diffs only — every changed line traces to the request, no drive-by refactors
+- Yield in CPU loops over user-scale data (HA event loop is single-threaded)
+- No hardcoded credentials, IPs, tokens
+- Test-first when feasible; smoke tests catch architectural regressions cheaply
+
 ## License
 
 MIT — see [`LICENSE`](LICENSE).

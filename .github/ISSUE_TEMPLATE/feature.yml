@@ -1,0 +1,42 @@
+name: 💡 Feature request
+description: Idea for a new detector, audit finding, or UX improvement.
+labels: ["feature", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for sharing an idea. Features that already have a use case + a plausible algorithm sketch get prioritized over vague wishlist items.
+
+        Before submitting:
+        - Browse [open feature requests](https://github.com/botts7/ha-insights/issues?q=is%3Aissue+label%3Afeature) — yours may already be queued.
+        - Consider [Discussions](https://github.com/botts7/ha-insights/discussions) for open-ended "what if HA Insights could..." conversations.
+
+  - type: textarea
+    id: use-case
+    attributes:
+      label: Use case
+      description: What problem are you trying to solve in YOUR house? Concrete examples land features faster than abstract proposals.
+      placeholder: |
+        I have 14 motion sensors across the house. Every few weeks one of them silently fails — battery dies, ZigBee drops out, etc. — and I don't notice until my "motion → light" automation stops working in some room. I'd want HA Insights to tell me "binary_sensor.hallway_motion hasn't fired in 8 days; the others in the cluster averaged 4 fires/day in that window."
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposed-behavior
+    attributes:
+      label: Proposed behavior
+      description: How would the feature surface? New detector? New audit finding? New panel UX?
+      placeholder: |
+        Extend `OrphanDeviceDetector` to compare an entity's recent firing rate against its 14-day baseline AND against sibling entities in the same area/device-class. Surface as an `ANOMALY` insight when the entity is silent AND siblings are not.
+    validations:
+      required: false
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: HA blueprint? Existing custom integration? Why don't they fit?
+      placeholder: |
+        I tried a manual `last_changed` template sensor + automation but it doesn't catch the "siblings are still firing" case, and false-fires on entities that legitimately don't change often.
+    validations:
+      required: false

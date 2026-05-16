@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 💬 Discussions
+    url: https://github.com/botts7/ha-insights/discussions
+    about: Open-ended ideas, "what if HA Insights could…", show-and-tell of your routines.
+  - name: 📖 Documentation
+    url: https://botts7.github.io/ha-insights/
+    about: Architecture, privacy charter, writing a detector, WebSocket API reference.
+  - name: 🔒 Security issue (privacy contract violation, secret leak)
+    url: https://github.com/botts7/ha-insights/security/advisories/new
+    about: Please use private security advisories for anything that affects users' data — NOT a public issue.

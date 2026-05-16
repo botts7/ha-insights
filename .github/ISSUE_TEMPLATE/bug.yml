@@ -1,0 +1,96 @@
+name: 🐛 Bug report
+description: Something broke. Detailed reports get triaged same-day; "it doesn't work" reports queue.
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a report. The more concrete the better — most "this is broken" bugs end up being a 5-line fix once we can reproduce.
+
+        Before submitting:
+        - Search [open issues](https://github.com/botts7/ha-insights/issues) for the same symptom.
+        - Check the [CHANGELOG](https://github.com/botts7/ha-insights/blob/main/CHANGELOG.md) for known issues in your version.
+
+  - type: input
+    id: integration-version
+    attributes:
+      label: HA Insights version
+      description: Visible in Settings → Devices & Services → HA Insights → ⋮ → System information
+      placeholder: "1.5.42"
+    validations:
+      required: true
+
+  - type: input
+    id: ha-version
+    attributes:
+      label: Home Assistant Core version
+      placeholder: "2024.12.5"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install-type
+    attributes:
+      label: Install type
+      options:
+        - HACS (default repo)
+        - HACS (custom repo)
+        - Manual copy to custom_components/
+        - Docker dev container
+    validations:
+      required: true
+
+  - type: input
+    id: browser
+    attributes:
+      label: Browser (if it's a panel / card bug)
+      placeholder: "Chrome 130 on Windows 11, Safari 17 on iOS, etc. — leave blank if backend-only"
+    validations:
+      required: false
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: One paragraph. What did you do, what did you see, what did you expect?
+      placeholder: |
+        I opened the HA Insights panel after coming back from another browser tab. Panel showed empty / blank.
+        Expected: existing insights to render.
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: How to reproduce
+      description: Concrete steps. "Always", "sometimes", or specific trigger?
+      placeholder: |
+        1. Open HA Insights panel — works.
+        2. Switch to another browser tab for ~5 min.
+        3. Switch back — panel is blank.
+        4. Refresh the page → renders again.
+        Reproduces 100% on Chrome desktop.
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: |
+        Settings → System → Logs → search "ha_insights". Copy lines from around the time of the bug.
+        Set log level to DEBUG for HA Insights first via Developer Tools → Services → `logger.set_level` if the WARN/ERROR level is empty.
+      render: shell
+      placeholder: |
+        2026-05-16 10:32:14 DEBUG (MainThread) [custom_components.ha_insights.ws_api] home_insights/list returned 12 insights (filtered from 47)
+        2026-05-16 10:34:01 WARNING (MainThread) [custom_components.ha_insights] panel resource <...> 404
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy
+      options:
+        - label: I have **redacted any real entity_ids, area names, or personal info** from the logs above. Replace with `<entity_a>`, `<area_living>`, etc.
+          required: true

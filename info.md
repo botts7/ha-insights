@@ -1,5 +1,13 @@
 # HA Insights
 
+> ⚠️ **Early public release (v1.5.42).** The integration core — detectors,
+> audit pipeline, redactor, store, WS API — has been running on a real HA
+> install for months and is stable. The **panel UI is still hardening**
+> (blank-on-tab-return is a known regression we're chasing). If anything
+> looks broken, please [open an issue](https://github.com/botts7/ha-insights/issues/new/choose)
+> with your HA + integration versions and browser; PRs welcome. Soft
+> launch ahead of the WTH window — your reports drive the priority list.
+
 **Audits the automations you've already written + spots new ones — proactive pattern detection with AI-assisted refinement.**
 
 > *"Your `TV Lights OFF` automation has 3 redundant target entries — drop them?"*
