@@ -102,15 +102,15 @@ def get_adaptive_floor(
                     # cost on every push.
                     entry_data["adaptive_floor"] = bounded
                     return bounded
-    except Exception:  # noqa: BLE001
+    except Exception:
         pass
     return baseline
 
 
 async def tune_adaptive_floor(
     hass: HomeAssistant,
-    entry: "ConfigEntry",
-    store: "InsightStore",
+    entry: ConfigEntry,
+    store: InsightStore,
 ) -> dict[str, float | int | str] | None:
     """Run one tuner pass. Reads recent store outcomes, decides
     whether to raise / lower / hold, persists the new floor.
@@ -125,7 +125,7 @@ async def tune_adaptive_floor(
             include_applied=True,
             include_snoozed=True,
         )
-    except Exception:  # noqa: BLE001
+    except Exception:
         _LOGGER.debug("adaptive tuner: store read failed", exc_info=True)
         return None
 
@@ -217,7 +217,7 @@ async def tune_adaptive_floor(
         merged["adaptive_last_tune_at"] = tune_ts
         merged["adaptive_last_direction"] = direction
         hass.config_entries.async_update_entry(entry, options=merged)
-    except Exception:  # noqa: BLE001
+    except Exception:
         _LOGGER.debug(
             "adaptive tuner: persist to entry.options failed",
             exc_info=True,

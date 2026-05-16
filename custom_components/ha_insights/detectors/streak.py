@@ -22,12 +22,12 @@ from homeassistant.util import dt as dt_util
 
 from ..insight import Insight, InsightKind
 from ..lib.cooccurrence_likelihood import DEFAULT_WINDOW_SECONDS as COOCC_WINDOW
-from ..lib.human_likelihood import assess_human_likelihood
 from ..lib.event_filters import (
     is_after_long_silence,
     is_from_unavailable_state,
     pattern_value,
 )
+from ..lib.human_likelihood import assess_human_likelihood
 from .base import Detector, DetectorContext, register_detector
 
 if TYPE_CHECKING:
@@ -231,7 +231,8 @@ class StreakDetector(Detector):
         durations: list[float] = []
         prev_durations: list[float] = []
         if ctx.event_buffer is not None:
-            from bisect import bisect_left as _bl, bisect_right as _br
+            from bisect import bisect_left as _bl
+            from bisect import bisect_right as _br
 
             window = timedelta(seconds=COOCC_WINDOW)
             for ts_local in streak_times_local:
@@ -317,7 +318,7 @@ class StreakDetector(Detector):
             sun_trigger_data = detect_sun_relative_trigger(
                 streak_times_local, ctx.hass
             )
-        except Exception:  # noqa: BLE001
+        except Exception:
             sun_trigger_data = None
 
         if sun_trigger_data is not None:

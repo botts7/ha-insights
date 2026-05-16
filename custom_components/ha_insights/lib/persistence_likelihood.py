@@ -1,4 +1,4 @@
-"""Persistence-likelihood assessment — distinguish fixed-duration device cycles from variable-duration human sessions.
+"""Persistence likelihood — fixed device cycles vs variable human sessions.
 
 Third signal-grader sibling to `lib/timing_likelihood.py` and
 `lib/cooccurrence_likelihood.py`. Same architecture, same return-
@@ -52,11 +52,11 @@ from __future__ import annotations
 
 import statistics
 from dataclasses import asdict, dataclass
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 
-class PersistenceClass(str, Enum):
+class PersistenceClass(StrEnum):
     """Coarse classification of duration-in-state distribution."""
 
     HUMAN_VARIABLE = "human_variable"

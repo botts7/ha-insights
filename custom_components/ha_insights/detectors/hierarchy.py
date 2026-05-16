@@ -266,7 +266,8 @@ class EntityHierarchy:
     # cooccurrence + lagged_correlation. See
     # docs/HA_EVENT_SEMANTICS.md Gotcha 4.
     _COMPUTED_FROM_OTHER_PLATFORMS: ClassVar[frozenset[str]] = frozenset({
-        "template",         # Most common: binary_sensor.template, sensor.template, light.template, etc.
+        # Most common: binary_sensor.template, sensor.template, light.template, …
+        "template",
         "group",            # group.* derived from members
         "statistics",       # rolling stats over a source sensor
         "utility_meter",    # cumulative meter on a source
@@ -451,13 +452,13 @@ def build_hierarchy(hass: HomeAssistant) -> EntityHierarchy:
     # Symmetric.
     siblings: dict[str, set[str]] = defaultdict(set)
     # Container-based siblings (small groups only)
-    for container, members in members_of.items():
+    for _container, members in members_of.items():
         if 1 < len(members) <= EntityHierarchy.SIBLING_GROUP_MAX_SIZE:
             member_set = set(members)
             for m in members:
                 siblings[m] |= member_set - {m}
     # Device-based siblings (always — devices have few entities typically)
-    for device, ents in entities_on_device.items():
+    for _device, ents in entities_on_device.items():
         if len(ents) > 1:
             ent_list = list(ents)
             for e in ent_list:

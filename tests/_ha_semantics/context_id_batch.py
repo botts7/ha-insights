@@ -15,7 +15,7 @@ events).
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -26,7 +26,7 @@ if TYPE_CHECKING:
 
 
 def synth_group_toggle(
-    buffer: "StateEventBuffer",
+    buffer: StateEventBuffer,
     *,
     at: datetime,
     member_entities: list[str],
@@ -34,7 +34,7 @@ def synth_group_toggle(
     member_spread_ms: int = 50,
     context_id: str | None = None,
     context_user_id: str | None = None,
-) -> tuple[str, list["StateEvent"]]:
+) -> tuple[str, list[StateEvent]]:
     """Synthesize a group toggle: each member fires state_changed
     with the SAME context_id, spread across a tight window (HA
     service calls complete in <200ms typically; default 50ms*N
@@ -67,12 +67,12 @@ def synth_group_toggle(
 
 
 def synth_scene_activation(
-    buffer: "StateEventBuffer",
+    buffer: StateEventBuffer,
     *,
     at: datetime,
     target_entities: list[str],
     context_user_id: str | None = None,
-) -> tuple[str, list["StateEvent"]]:
+) -> tuple[str, list[StateEvent]]:
     """Same shape as a group toggle — each target gets its own
     state_changed with the shared scene context. The scene entity
     itself fires too (HA records a `last_activated` timestamp update)
@@ -88,14 +88,14 @@ def synth_scene_activation(
 
 
 def synth_script_run(
-    buffer: "StateEventBuffer",
+    buffer: StateEventBuffer,
     *,
     at: datetime,
     action_entities: list[str],
     sequential: bool = True,
     step_ms: int = 100,
     context_user_id: str | None = None,
-) -> tuple[str, list["StateEvent"]]:
+) -> tuple[str, list[StateEvent]]:
     """Script with N actions, each touching one entity. `sequential=True`
     spreads events across step_ms*N (typical default-mode script);
     `sequential=False` collapses them within step_ms (parallel-mode).

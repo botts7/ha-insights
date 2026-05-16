@@ -143,7 +143,7 @@ async def backfill(
                         val = attrs.get("event_type")
                         if isinstance(val, str):
                             ev_type = val
-                except Exception:  # noqa: BLE001
+                except Exception:
                     ev_type = None
             event = StateEvent(
                 timestamp=ts,

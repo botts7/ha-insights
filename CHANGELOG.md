@@ -4,6 +4,45 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+## [1.5.50] — 2026-05-17
+
+### Fixed
+
+- **Ruff lint debt — `Tests` CI is now green.** The repo had accumulated
+  **393** ruff violations across the codebase, which kept the `Tests`
+  workflow failing on every push since the lint check was added. Not
+  HACS-blocking (only `Validate` matters there) but a constant red
+  signal that masked real failures. v1.5.50 ships zero.
+
+  Breakdown of what changed:
+
+  - **290 auto-fixes** via `ruff check --fix`: unused `# noqa` directives
+    dropped, `__future__` quoted-annotation strings unquoted, imports
+    sorted, `datetime.timezone.utc` → `UTC`, etc. Mechanical.
+  - **4 real bugs / authoring artifacts fixed**:
+    - `__init__.py` had an unused `get_analytics_settings` import.
+    - `hierarchy.py` had two unused loop variables (`container`, `device`).
+    - `manual_habit.py` had an unused unpack (`svc_call`).
+    - `test_lib_persistence_likelihood.py` had a dead test path with an
+      orphaned assignment + a TODO comment ("Let me check more carefully")
+      that had been left in. Cleaned up.
+  - **4 `(str, Enum)` → `StrEnum`** modernizations: cooccurrence,
+    persistence, timing, transition_entropy likelihood classes.
+  - **27 long lines wrapped** with implicit string concatenation in
+    `setup_quality.py` tier descriptions and a few other spots.
+  - **5 semicolon-separated statements** in test files split onto
+    separate lines.
+  - **Config additions** in `pyproject.toml`:
+    - Ignore RUF001/002/003 globally — we use Unicode arrows / ±
+      / em-dashes intentionally for readability.
+    - Ignore RUF046 globally — defensive `int(x)` casts where the
+      analyzer thinks `x` is already int (it isn't always at runtime).
+    - Per-file `E501` ignore on `lib/event_filters.py` because the
+      module docstring contains a markdown table that would lose
+      grid alignment if wrapped at 100 chars.
+
+All 107 lib unit tests + all 175 smoke tests pass.
+
 ## [1.5.49] — 2026-05-17
 
 ### Fixed

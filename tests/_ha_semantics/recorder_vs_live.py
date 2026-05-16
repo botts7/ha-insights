@@ -18,7 +18,7 @@ See docs/HA_EVENT_SEMANTICS.md Gotcha 8.
 """
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -29,13 +29,13 @@ if TYPE_CHECKING:
 
 
 def synth_recorder_baseline(
-    buffer: "StateEventBuffer",
+    buffer: StateEventBuffer,
     *,
     entity_id: str,
     start: datetime,
     days: int = 13,
     events_per_day: int = 4,
-) -> list["StateEvent"]:
+) -> list[StateEvent]:
     """Add `days × events_per_day` events tagged source="recorder",
     spaced uniformly across the days. Models a backfilled baseline
     period."""
@@ -64,12 +64,12 @@ def synth_recorder_baseline(
 
 
 def synth_live_today(
-    buffer: "StateEventBuffer",
+    buffer: StateEventBuffer,
     *,
     entity_id: str,
     today_start: datetime,
     event_count: int,
-) -> list["StateEvent"]:
+) -> list[StateEvent]:
     """Add today's live events (source defaults to "live").
     Used alongside synth_recorder_baseline to model the realistic
     mixed-source state of a running install."""
@@ -95,4 +95,4 @@ def synth_live_today(
     return out
 
 
-__all__ = ["synth_recorder_baseline", "synth_live_today"]
+__all__ = ["synth_live_today", "synth_recorder_baseline"]

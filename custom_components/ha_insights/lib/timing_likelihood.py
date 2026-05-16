@@ -74,15 +74,14 @@ payload["timing_assessment"] = assessment.to_dict()
 """
 from __future__ import annotations
 
-import math
 import statistics
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, time
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 
-class TimingClass(str, Enum):
+class TimingClass(StrEnum):
     """Coarse classification of an event-timing distribution."""
 
     HUMAN_LIKELY = "human_likely"

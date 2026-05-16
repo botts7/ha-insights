@@ -36,8 +36,8 @@ coactivation data and passes them in as plain dicts. Unit-testable.
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Mapping
 
 
 @dataclass(frozen=True)
@@ -118,7 +118,7 @@ class CandidateEntities:
         if self.is_empty:
             return ""
         lines: list[str] = []
-        for label, group in (
+        for _label, group in (
             ("area-mate", self.area_mates),
             ("device-mate", self.device_mates),
             ("domain-sibling", self.domain_siblings),
@@ -424,7 +424,7 @@ def build_candidate_entities(
 
 
 __all__ = [
-    "CandidateEntity",
     "CandidateEntities",
+    "CandidateEntity",
     "build_candidate_entities",
 ]

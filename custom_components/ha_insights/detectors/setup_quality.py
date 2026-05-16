@@ -78,6 +78,8 @@ def _has_area_coverage(ctx: DetectorContext) -> tuple[bool, str]:
     try:
         from homeassistant.helpers import (
             area_registry as ar,
+        )
+        from homeassistant.helpers import (
             entity_registry as er,
         )
 
@@ -90,7 +92,7 @@ def _has_area_coverage(ctx: DetectorContext) -> tuple[bool, str]:
                 with_area += 1
         area_reg = ar.async_get(ctx.hass)
         n_areas = len(list(area_reg.async_list_areas()))
-    except Exception:  # noqa: BLE001
+    except Exception:
         return (False, "registry not available")
     if total == 0:
         return (False, "no entities")
@@ -107,7 +109,7 @@ def _has_many_areas(ctx: DetectorContext, threshold: int = 5) -> tuple[bool, str
         from homeassistant.helpers import area_registry as ar
 
         n = len(list(ar.async_get(ctx.hass).async_list_areas()))
-    except Exception:  # noqa: BLE001
+    except Exception:
         return (False, "registry not available")
     return (n >= threshold, f"{n} areas defined")
 
@@ -122,7 +124,7 @@ def _has_recorder_retention(
         keep = getattr(rec, "keep_days", None) or getattr(
             rec, "_keep_days", None
         )
-    except Exception:  # noqa: BLE001
+    except Exception:
         return (False, "recorder not loaded")
     if keep is None:
         return (False, "keep_days unset")
@@ -146,7 +148,7 @@ def _has_goals_configured(ctx: DetectorContext) -> tuple[bool, str]:
                         return (True, f"{len(parsed)} goal(s) set")
                 except json.JSONDecodeError:
                     return (False, "goals_json present but malformed")
-    except Exception:  # noqa: BLE001
+    except Exception:
         pass
     return (False, "no goals set")
 
@@ -246,10 +248,31 @@ _RECIPES: list[dict[str, Any]] = [
             "Trigger morning routines when you usually wake (after 7 days of data)",
         ],
         "tiers": [
-            ("USELESS", [_has_mobile_app_gps], "No GPS-source device_tracker found. Install HA Companion App on your phone to unlock sleep + commute insights."),
-            ("LIMITED", [_has_mobile_app_gps], "Mobile App GPS tracker detected — commute pattern (depart/return) can fire. For sleep window, also enable the 'Charging' sensor in the app's Manage Sensors screen."),
-            ("GOOD", [_has_mobile_app_gps, _has_charging_sensor], "Both device tracker AND charging sensor present — sleep window + commute can be derived."),
-            ("GREAT", [_has_mobile_app_gps, _has_charging_sensor, _has_activity_sensor], "All three signals (location + charging + activity) wired — full circadian rhythm + commute reliability available."),
+            (
+                "USELESS",
+                [_has_mobile_app_gps],
+                "No GPS-source device_tracker found. Install HA Companion App "
+                "on your phone to unlock sleep + commute insights.",
+            ),
+            (
+                "LIMITED",
+                [_has_mobile_app_gps],
+                "Mobile App GPS tracker detected — commute pattern "
+                "(depart/return) can fire. For sleep window, also enable the "
+                "'Charging' sensor in the app's Manage Sensors screen.",
+            ),
+            (
+                "GOOD",
+                [_has_mobile_app_gps, _has_charging_sensor],
+                "Both device tracker AND charging sensor present — sleep "
+                "window + commute can be derived.",
+            ),
+            (
+                "GREAT",
+                [_has_mobile_app_gps, _has_charging_sensor, _has_activity_sensor],
+                "All three signals (location + charging + activity) wired — "
+                "full circadian rhythm + commute reliability available.",
+            ),
         ],
     },
     {
@@ -261,7 +284,10 @@ _RECIPES: list[dict[str, Any]] = [
         # cascades to every entity that device owns, so a few
         # clicks covers dozens of entities. Per-entity assignment
         # exists at /config/entities but is slower.
-        "next_step": "set an Area on each device under Settings → Devices & Services → Devices (it cascades to all that device's entities)",
+        "next_step": (
+            "set an Area on each device under Settings → Devices & Services → "
+            "Devices (it cascades to all that device's entities)"
+        ),
         "setup_url": "/config/devices/dashboard",
         "setup_url_label": "Assign devices to areas",
         "setup_url_external": False,
@@ -272,10 +298,34 @@ _RECIPES: list[dict[str, Any]] = [
             "Power room-by-room energy and activity dashboards",
         ],
         "tiers": [
-            ("USELESS", [_has_area_coverage], "Most entities aren't tagged with an Area. Open Settings → Devices & Services → Devices and set an Area on each device — every entity that device owns inherits it, so this is the fastest path. Per-entity overrides live under Settings → Entities. Without area tags the detector can't infer where the user is."),
-            ("LIMITED", [_has_area_coverage], "Some areas covered — presence inference will fire but only for tagged rooms. Tag the rest for full-house coverage."),
-            ("GOOD", [_has_area_coverage, _has_many_areas], "Healthy area + entity coverage — presence inference will produce reliable room-level insights."),
-            ("GREAT", [_has_area_coverage, _has_many_areas, _has_recorder_retention], "Area coverage + 30d+ recorder = stable seasonal-pattern detection at room granularity."),
+            (
+                "USELESS",
+                [_has_area_coverage],
+                "Most entities aren't tagged with an Area. Open Settings → "
+                "Devices & Services → Devices and set an Area on each device "
+                "— every entity that device owns inherits it, so this is the "
+                "fastest path. Per-entity overrides live under Settings → "
+                "Entities. Without area tags the detector can't infer where "
+                "the user is.",
+            ),
+            (
+                "LIMITED",
+                [_has_area_coverage],
+                "Some areas covered — presence inference will fire but only "
+                "for tagged rooms. Tag the rest for full-house coverage.",
+            ),
+            (
+                "GOOD",
+                [_has_area_coverage, _has_many_areas],
+                "Healthy area + entity coverage — presence inference will "
+                "produce reliable room-level insights.",
+            ),
+            (
+                "GREAT",
+                [_has_area_coverage, _has_many_areas, _has_recorder_retention],
+                "Area coverage + 30d+ recorder = stable seasonal-pattern "
+                "detection at room granularity.",
+            ),
         ],
     },
     {
@@ -284,7 +334,11 @@ _RECIPES: list[dict[str, Any]] = [
         # v1.5.18: physical switches count too now (no user_id + no
         # parent_id + local integration = likely wall-switch press).
         # Update the user-facing text to reflect that.
-        "next_step": "use your home for a week — press wall switches, tap dashboard, use the mobile app; anything user-initiated rather than scheduled gets recorded as a manual habit",
+        "next_step": (
+            "use your home for a week — press wall switches, tap dashboard, "
+            "use the mobile app; anything user-initiated rather than "
+            "scheduled gets recorded as a manual habit"
+        ),
         # No URL — the remedy is behavioural.
         "setup_url": None,
         "setup_url_label": None,
@@ -296,10 +350,34 @@ _RECIPES: list[dict[str, Any]] = [
             "Distinguish your habits from automation noise in the timeline",
         ],
         "tiers": [
-            ("USELESS", [_has_user_context_events], "No recent manual events detected in the 14-day buffer. Manual events are HA UI clicks, mobile-app toggles, AND physical switch presses (when the entity is from a local integration like Zigbee, Z-Wave, ESPHome, MQTT, or Hue's local bridge). Either you automate everything (great problem to have), or HA hasn't seen enough activity yet."),
-            ("LIMITED", [_has_user_context_events], "Some manual events present — ManualHabit and Routine detectors will fire on the clearest patterns."),
-            ("GOOD", [_has_user_context_events, _has_area_coverage], "Manual events + area tagging — both detectors will surface high-quality suggestions with room context."),
-            ("GREAT", [_has_user_context_events, _has_area_coverage, _has_recorder_retention], "All signals + 30d recorder retention — pattern detection benefits from longer history."),
+            (
+                "USELESS",
+                [_has_user_context_events],
+                "No recent manual events detected in the 14-day buffer. "
+                "Manual events are HA UI clicks, mobile-app toggles, AND "
+                "physical switch presses (when the entity is from a local "
+                "integration like Zigbee, Z-Wave, ESPHome, MQTT, or Hue's "
+                "local bridge). Either you automate everything (great "
+                "problem to have), or HA hasn't seen enough activity yet.",
+            ),
+            (
+                "LIMITED",
+                [_has_user_context_events],
+                "Some manual events present — ManualHabit and Routine "
+                "detectors will fire on the clearest patterns.",
+            ),
+            (
+                "GOOD",
+                [_has_user_context_events, _has_area_coverage],
+                "Manual events + area tagging — both detectors will surface "
+                "high-quality suggestions with room context.",
+            ),
+            (
+                "GREAT",
+                [_has_user_context_events, _has_area_coverage, _has_recorder_retention],
+                "All signals + 30d recorder retention — pattern detection "
+                "benefits from longer history.",
+            ),
         ],
     },
     {
@@ -326,10 +404,29 @@ _RECIPES: list[dict[str, Any]] = [
             "Trigger a nudge automation when you're at risk of missing a goal",
         ],
         "tiers": [
-            ("USELESS", [_has_goals_configured], "No goals defined. Add JSON to Settings → HA Insights → Configure → goals_json. Example: `{\"bedtime_by\": \"22:30\", \"home_by\": \"18:30\"}`."),
-            ("LIMITED", [_has_goals_configured], "Goals configured — adherence tracking will fire."),
-            ("GOOD", [_has_goals_configured, _has_mobile_app_gps], "Goals + phone data — accurate hit/miss tracking against observed behavior."),
-            ("GREAT", [_has_goals_configured, _has_mobile_app_gps, _has_charging_sensor], "Every goal type (commute + sleep) has the data source it needs."),
+            (
+                "USELESS",
+                [_has_goals_configured],
+                "No goals defined. Add JSON to Settings → HA Insights → "
+                "Configure → goals_json. Example: "
+                "`{\"bedtime_by\": \"22:30\", \"home_by\": \"18:30\"}`.",
+            ),
+            (
+                "LIMITED",
+                [_has_goals_configured],
+                "Goals configured — adherence tracking will fire.",
+            ),
+            (
+                "GOOD",
+                [_has_goals_configured, _has_mobile_app_gps],
+                "Goals + phone data — accurate hit/miss tracking against "
+                "observed behavior.",
+            ),
+            (
+                "GREAT",
+                [_has_goals_configured, _has_mobile_app_gps, _has_charging_sensor],
+                "Every goal type (commute + sleep) has the data source it needs.",
+            ),
         ],
     },
 ]

@@ -60,7 +60,7 @@ events = [e for e in raw if keep(e)]
 from __future__ import annotations
 
 from collections.abc import Callable
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Any, Protocol, runtime_checkable
 
 # ---------- Constants -------------------------------------------------------
@@ -355,7 +355,7 @@ def daily_pattern_filter(
     return keep
 
 
-__all__ = [
+__all__ = [  # noqa: RUF022 — grouped by purpose, comment-anchored ordering is intentional
     # Constants
     "BOOTSTRAP_FANOUT_SECONDS",
     "COMPUTED_FROM_OTHER_PLATFORMS",

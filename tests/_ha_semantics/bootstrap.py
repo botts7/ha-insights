@@ -24,7 +24,7 @@ Usage in tests:
 """
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -35,13 +35,13 @@ if TYPE_CHECKING:
 
 
 def synth_bootstrap_burst(
-    buffer: "StateEventBuffer",
+    buffer: StateEventBuffer,
     *,
     boot_at: datetime,
     entities: list[str],
     restored_states: dict[str, str] | None = None,
     burst_duration: timedelta = timedelta(seconds=3),
-) -> list["StateEvent"]:
+) -> list[StateEvent]:
     """Add a synthesized bootstrap fan-out to `buffer`.
 
     Args:
@@ -87,7 +87,7 @@ def synth_bootstrap_burst(
 
 
 def synth_normal_event(
-    buffer: "StateEventBuffer",
+    buffer: StateEventBuffer,
     *,
     timestamp: datetime,
     entity_id: str,
@@ -95,7 +95,7 @@ def synth_normal_event(
     new_state: str = "on",
     context_user_id: str | None = None,
     context_id: str | None = None,
-) -> "StateEvent":
+) -> StateEvent:
     """Add a single non-bootstrap event for control-group comparisons.
     `from_bootstrap` defaults to False so this is the "real activity"
     case that the bootstrap filter should NOT drop."""

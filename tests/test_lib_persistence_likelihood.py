@@ -6,7 +6,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from custom_components.ha_insights.lib.persistence_likelihood import (  # noqa: E402
+from datetime import UTC
+
+from custom_components.ha_insights.lib.persistence_likelihood import (
     PersistenceClass,
     apply_to_confidence,
     assess_persistence,
@@ -58,11 +60,9 @@ def test_human_tv_session_classified_variable() -> None:
 def test_tight_duration_band() -> None:
     """Alarm-driven routine: coffee maker runs for ~7 minutes most
     days, occasionally 6 or 8. CV between 5% and 30%."""
-    durations = [420.0, 415.0, 430.0, 440.0, 405.0, 425.0]
-    a = assess_persistence(durations)
-    # stddev ≈ 11s, mean ≈ 422s → CV ≈ 2.6% ... actually that's tight too.
-    # Let me check more carefully — need values that give CV in the 5-30% band.
-    # Using 360s ± 60s: cv ≈ 0.17
+    # Using 360s ± 60s: CV ≈ 0.17, well inside the 5-30% TIGHT_DURATION
+    # band. (Earlier authoring iteration tried 420±10 s but that
+    # collapsed into ROBOTIC at CV ≈ 2.6%, which is a different class.)
     durations2 = [360.0, 300.0, 420.0, 360.0, 450.0, 270.0]
     a2 = assess_persistence(durations2)
     assert a2.persistence_class is PersistenceClass.TIGHT_DURATION
@@ -172,21 +172,25 @@ def test_compose_with_timing_and_cooccurrence() -> None:
     """All three libs share apply_to_confidence signature so detectors
     chain. Worst-case (fixed cycle + isolated + tight timing) should
     aggressively demote."""
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
 
     from custom_components.ha_insights.lib.cooccurrence_likelihood import (
         apply_to_confidence as coocc_apply,
+    )
+    from custom_components.ha_insights.lib.cooccurrence_likelihood import (
         assess_cooccurrence,
     )
     from custom_components.ha_insights.lib.timing_likelihood import (
         apply_to_confidence as timing_apply,
+    )
+    from custom_components.ha_insights.lib.timing_likelihood import (
         assess_timing,
     )
 
     # Sub-second precision events
     events = [
         datetime(2026, 5, 1, 17, 25, 0, 10_000 + i * 5_000,
-                 tzinfo=timezone.utc) + timedelta(days=i)
+                 tzinfo=UTC) + timedelta(days=i)
         for i in range(10)
     ]
     timing_a = assess_timing(events, iot_class="local_push")
@@ -216,7 +220,7 @@ if __name__ == "__main__":
             results.append((name, True, ""))
         except AssertionError as e:
             results.append((name, False, str(e)))
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             results.append((name, False, f"{type(e).__name__}: {e}"))
     passed = sum(1 for _, ok, _ in results if ok)
     print(f"\n{passed}/{len(results)} tests passed")

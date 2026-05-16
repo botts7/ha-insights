@@ -12,30 +12,34 @@ it grows."""
 from __future__ import annotations
 
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from custom_components.ha_insights.lib.cooccurrence_likelihood import (  # noqa: E402
+from custom_components.ha_insights.lib.cooccurrence_likelihood import (
     apply_to_confidence as coocc_apply,
+)
+from custom_components.ha_insights.lib.cooccurrence_likelihood import (
     assess_cooccurrence,
 )
-from custom_components.ha_insights.lib.human_likelihood import (  # noqa: E402
-    HumanLikelihoodFeatures,
+from custom_components.ha_insights.lib.human_likelihood import (
     assess_human_likelihood,
 )
-from custom_components.ha_insights.lib.persistence_likelihood import (  # noqa: E402
+from custom_components.ha_insights.lib.persistence_likelihood import (
     apply_to_confidence as pers_apply,
+)
+from custom_components.ha_insights.lib.persistence_likelihood import (
     assess_persistence,
 )
-from custom_components.ha_insights.lib.timing_likelihood import (  # noqa: E402
+from custom_components.ha_insights.lib.timing_likelihood import (
     apply_to_confidence as timing_apply,
+)
+from custom_components.ha_insights.lib.timing_likelihood import (
     assess_timing,
 )
 
-
-_TZ = timezone.utc
+_TZ = UTC
 
 
 def _make_inputs(
@@ -328,7 +332,7 @@ if __name__ == "__main__":
             results.append((name, True, ""))
         except AssertionError as e:
             results.append((name, False, str(e)))
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             results.append((name, False, f"{type(e).__name__}: {e}"))
     passed = sum(1 for _, ok, _ in results if ok)
     print(f"\n{passed}/{len(results)} tests passed")

@@ -30,7 +30,6 @@ detectors that suggest area-scoped + presence-aware automations.
 """
 from __future__ import annotations
 
-from collections import defaultdict
 from datetime import UTC, date, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
@@ -111,7 +110,7 @@ class PhoneActivityDetector(Detector):
                     "_battery_state"
                 ):
                     out.append(eid)
-        except Exception:  # noqa: BLE001
+        except Exception:
             pass
         return out
 
@@ -131,7 +130,7 @@ class PhoneActivityDetector(Detector):
                 attrs = state.attributes or {}
                 if attrs.get("source_type") == "gps":
                     out.append(state.entity_id)
-        except Exception:  # noqa: BLE001
+        except Exception:
             pass
         return out
 
@@ -140,7 +139,7 @@ class PhoneActivityDetector(Detector):
     def _derive_sleep_window(
         self,
         entity_id: str,
-        events: list["StateEvent"],
+        events: list[StateEvent],
     ) -> Insight | None:
         """Map charging-on / charging-off transitions to bedtime / wake
         and look for a clustered pattern across days."""
@@ -242,7 +241,7 @@ class PhoneActivityDetector(Detector):
     def _derive_commute_pattern(
         self,
         entity_id: str,
-        events: list["StateEvent"],
+        events: list[StateEvent],
     ) -> Insight | None:
         """device_tracker state transitions: home→away (departure) and
         away→home (arrival). Cluster across days."""

@@ -157,7 +157,7 @@ def get_rollup_progress() -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-def _resolve_window_days(hass: "HomeAssistant", entry: Any = None) -> int:
+def _resolve_window_days(hass: HomeAssistant, entry: Any = None) -> int:
     """Resolve the rollup window for the audit pipeline.
 
     Prefers an explicit `entry` (the per-entry detector path passes
@@ -179,14 +179,14 @@ def _resolve_window_days(hass: "HomeAssistant", entry: Any = None) -> int:
         if not entries:
             return ROLLUP_WINDOW_DAYS
         return max(get_audit_rollup_window_days(e) for e in entries)
-    except Exception:  # noqa: BLE001
+    except Exception:
         pass
     return ROLLUP_WINDOW_DAYS
 
 
 async def run_rollup_batch(
-    hass: "HomeAssistant",
-    store: "HaInsightsStore",
+    hass: HomeAssistant,
+    store: HaInsightsStore,
     *,
     target_entity_ids: list[str],
     blocked_entities: frozenset[str] = frozenset(),
@@ -224,8 +224,8 @@ async def run_rollup_batch(
 
 
 async def _run_rollup_batch_locked(
-    hass: "HomeAssistant",
-    store: "HaInsightsStore",
+    hass: HomeAssistant,
+    store: HaInsightsStore,
     *,
     target_entity_ids: list[str],
     blocked_entities: frozenset[str] = frozenset(),
@@ -310,7 +310,7 @@ async def _run_rollup_batch_locked(
                     eid,
                     int(_PER_ENTITY_TIMEOUT_SEC),
                 )
-            except Exception as err:  # noqa: BLE001
+            except Exception as err:
                 errors += 1
                 _PROGRESS["errors"] = errors
                 _LOGGER.debug("rollup failed for %s: %s", eid, err)
@@ -375,7 +375,7 @@ def _start_of_day_utc(t: datetime) -> datetime:
 
 
 async def _query_states_chunk(
-    hass: "HomeAssistant",
+    hass: HomeAssistant,
     entity_id: str,
     chunk_start: datetime,
     chunk_end: datetime,
@@ -422,7 +422,7 @@ async def _query_states_chunk(
                 minimal_response=True,
                 no_attributes=True,
             )
-        except Exception as err:  # noqa: BLE001  recorder errors vary by HA version
+        except Exception as err:
             _LOGGER.debug(
                 "rollup: states query failed for %s [%s..%s]: %s",
                 entity_id,
@@ -471,8 +471,8 @@ def _state_to_bucket_deltas(
 
 
 async def _compute_rollups_for_entity_incremental(
-    hass: "HomeAssistant",
-    store: "HaInsightsStore",
+    hass: HomeAssistant,
+    store: HaInsightsStore,
     entity_id: str,
     *,
     window_days: int = ROLLUP_WINDOW_DAYS,

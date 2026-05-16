@@ -26,12 +26,12 @@ from typing import TYPE_CHECKING
 from homeassistant.util import dt as dt_util
 
 from ..insight import Insight, InsightKind
+from ..lib.cooccurrence_likelihood import DEFAULT_WINDOW_SECONDS as COOCC_WINDOW
 from ..lib.event_filters import (
     is_after_long_silence,
     is_from_unavailable_state,
     pattern_value,
 )
-from ..lib.cooccurrence_likelihood import DEFAULT_WINDOW_SECONDS as COOCC_WINDOW
 from ..lib.human_likelihood import assess_human_likelihood
 from .base import Detector, DetectorContext, register_detector
 
@@ -194,7 +194,8 @@ class ScheduleDetector(Detector):
         durations: list[float] = []
         prev_durations: list[float] = []
         if ctx.event_buffer is not None:
-            from bisect import bisect_left as _bl, bisect_right as _br
+            from bisect import bisect_left as _bl
+            from bisect import bisect_right as _br
             from datetime import timedelta as _td
 
             window = _td(seconds=COOCC_WINDOW)
@@ -302,7 +303,7 @@ class ScheduleDetector(Detector):
             sun_trigger_data = detect_sun_relative_trigger(
                 in_set_times_local, ctx.hass
             )
-        except Exception:  # noqa: BLE001
+        except Exception:
             sun_trigger_data = None
 
         description = f"Auto-detected routine: {weekday_label} at {time_str}"

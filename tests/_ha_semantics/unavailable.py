@@ -19,7 +19,7 @@ away or working fine.
 """
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -32,14 +32,14 @@ STATE_UNAVAILABLE = "unavailable"  # matches homeassistant.const.STATE_UNAVAILAB
 
 
 def synth_unavailable_flap(
-    buffer: "StateEventBuffer",
+    buffer: StateEventBuffer,
     *,
     entity_id: str,
     start: datetime,
     cycles: int = 5,
     cycle_minutes: int = 5,
     online_state: str = "on",
-) -> list["StateEvent"]:
+) -> list[StateEvent]:
     """Add `cycles` rounds of online → unavailable → online events.
     Default 5 cycles spaced 5 minutes apart = a typical "flaky
     WiFi node" pattern.
@@ -79,7 +79,7 @@ def synth_unavailable_flap(
     return out
 
 
-def is_availability_transition(event: "StateEvent") -> bool:
+def is_availability_transition(event: StateEvent) -> bool:
     """True iff this event is a transition INTO or OUT OF the
     unavailable state. Detector filters use this to skip the
     event when computing rate / silence / co-occurrence."""
@@ -91,6 +91,6 @@ def is_availability_transition(event: "StateEvent") -> bool:
 
 __all__ = [
     "STATE_UNAVAILABLE",
-    "synth_unavailable_flap",
     "is_availability_transition",
+    "synth_unavailable_flap",
 ]

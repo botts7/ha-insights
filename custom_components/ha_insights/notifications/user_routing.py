@@ -28,7 +28,8 @@ import logging
 from typing import TYPE_CHECKING
 
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers import device_registry as dr, entity_registry as er
+from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import entity_registry as er
 
 if TYPE_CHECKING:
     from homeassistant.config_entries import ConfigEntry
@@ -38,14 +39,14 @@ _LOGGER = logging.getLogger(__name__)
 _MOBILE_APP_DOMAIN = "mobile_app"
 
 
-def _mobile_app_entries(hass: HomeAssistant) -> list["ConfigEntry"]:
+def _mobile_app_entries(hass: HomeAssistant) -> list[ConfigEntry]:
     try:
         return list(hass.config_entries.async_entries(_MOBILE_APP_DOMAIN))
-    except Exception:  # noqa: BLE001
+    except Exception:
         return []
 
 
-def _service_from_entry(entry: "ConfigEntry") -> str | None:
+def _service_from_entry(entry: ConfigEntry) -> str | None:
     """`notify.mobile_app_<slug>` for a mobile_app config entry.
 
     the previous hand-rolled slug only handled
@@ -65,7 +66,7 @@ def _service_from_entry(entry: "ConfigEntry") -> str | None:
         return None
     try:
         from homeassistant.util import slugify
-    except Exception:  # noqa: BLE001 — defensive; should always be importable
+    except Exception:
         # Fallback to hand-rolled — better than nothing.
         slug = raw.lower().replace(" ", "_").replace("-", "_").replace("'", "")
     else:
@@ -120,7 +121,7 @@ def get_user_id_for_entity(
                     uid = entry.data.get("user_id")
                     if isinstance(uid, str) and uid:
                         return uid, 1.0
-    except Exception:  # noqa: BLE001
+    except Exception:
         _LOGGER.debug(
             "mobile_app resolution failed for %s", entity_id, exc_info=True
         )
@@ -168,7 +169,7 @@ def get_user_id_for_entity(
                         continue
                     if tent.device_id == target_device_id:
                         return uid, 0.85
-    except Exception:  # noqa: BLE001
+    except Exception:
         _LOGGER.debug(
             "person resolution failed for %s", entity_id, exc_info=True
         )

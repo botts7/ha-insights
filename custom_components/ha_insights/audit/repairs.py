@@ -79,7 +79,7 @@ def _issue_id_for(insight_id: str) -> str:
     return f"{_ISSUE_PREFIX}{insight_id}"
 
 
-def _eligible_observation_kinds(insight: "Insight") -> list[str]:
+def _eligible_observation_kinds(insight: Insight) -> list[str]:
     """Return the observation kinds in this insight that qualify for
     Repairs emission. Empty list = skip."""
     if insight.detector != "automation_audit":
@@ -106,7 +106,7 @@ def _eligible_observation_kinds(insight: "Insight") -> list[str]:
     return kinds
 
 
-def _summary_for(insight: "Insight") -> tuple[str, str]:
+def _summary_for(insight: Insight) -> tuple[str, str]:
     """Produce (alias, finding_summary) for the translation placeholders."""
     payload = insight.payload or {}
     auditmeta = payload.get("_audit") if isinstance(payload, dict) else None
@@ -149,8 +149,8 @@ def _summary_for(insight: "Insight") -> tuple[str, str]:
 
 
 def sync_audit_issues(
-    hass: "HomeAssistant",
-    insights: list["Insight"],
+    hass: HomeAssistant,
+    insights: list[Insight],
 ) -> dict[str, int]:
     """Reconcile the issue registry with the current audit insight set.
 
@@ -158,11 +158,11 @@ def sync_audit_issues(
     """
     try:
         from homeassistant.helpers import issue_registry as ir
-    except Exception:  # noqa: BLE001
+    except Exception:
         _LOGGER.debug("issue_registry import failed — skipping Repairs sync")
         return {"created": 0, "updated": 0, "deleted": 0}
 
-    desired: dict[str, "Insight"] = {}
+    desired: dict[str, Insight] = {}
     for ins in insights:
         if ins.confidence < _MIN_REPAIRS_CONFIDENCE:
             continue
@@ -191,7 +191,7 @@ def sync_audit_issues(
         try:
             _emit_one(hass, ir, issue_id, ins)
             created += 1
-        except Exception as err:  # noqa: BLE001
+        except Exception as err:
             _LOGGER.debug("Repairs emit failed for %s: %s", issue_id, err)
 
     updated = 0
@@ -200,7 +200,7 @@ def sync_audit_issues(
         try:
             _emit_one(hass, ir, issue_id, ins)
             updated += 1
-        except Exception as err:  # noqa: BLE001
+        except Exception as err:
             _LOGGER.debug("Repairs refresh failed for %s: %s", issue_id, err)
 
     deleted = 0
@@ -208,7 +208,7 @@ def sync_audit_issues(
         try:
             ir.async_delete_issue(hass, DOMAIN, issue_id)
             deleted += 1
-        except Exception as err:  # noqa: BLE001
+        except Exception as err:
             _LOGGER.debug("Repairs delete failed for %s: %s", issue_id, err)
 
     if created or deleted:
@@ -224,10 +224,10 @@ def sync_audit_issues(
 
 
 def _emit_one(
-    hass: "HomeAssistant",
+    hass: HomeAssistant,
     ir_module: Any,
     issue_id: str,
-    insight: "Insight",
+    insight: Insight,
 ) -> None:
     """Create-or-refresh ONE Repairs entry for an audit insight."""
     alias, summary = _summary_for(insight)
@@ -250,13 +250,13 @@ def _emit_one(
     )
 
 
-def clear_issue_for_insight(hass: "HomeAssistant", insight_id: str) -> bool:
+def clear_issue_for_insight(hass: HomeAssistant, insight_id: str) -> bool:
     """Idempotent: drop the Repairs entry for one insight id. Called
     from ws_dismiss / ws_apply so dismissing in our panel also
     clears the Repairs surface. Returns True if a row was deleted."""
     try:
         from homeassistant.helpers import issue_registry as ir
-    except Exception:  # noqa: BLE001
+    except Exception:
         return False
     issue_id = _issue_id_for(insight_id)
     registry = ir.async_get(hass)
@@ -265,18 +265,18 @@ def clear_issue_for_insight(hass: "HomeAssistant", insight_id: str) -> bool:
     try:
         ir.async_delete_issue(hass, DOMAIN, issue_id)
         return True
-    except Exception as err:  # noqa: BLE001
+    except Exception as err:
         _LOGGER.debug("Repairs clear failed for %s: %s", issue_id, err)
         return False
 
 
-def clear_all_audit_issues(hass: "HomeAssistant") -> int:
+def clear_all_audit_issues(hass: HomeAssistant) -> int:
     """Sweep ALL ha_insights audit Repairs entries. Called on
     integration unload / purge so we don't leave orphan issues.
     Returns count deleted."""
     try:
         from homeassistant.helpers import issue_registry as ir
-    except Exception:  # noqa: BLE001
+    except Exception:
         return 0
     registry = ir.async_get(hass)
     issue_ids = [
@@ -290,6 +290,6 @@ def clear_all_audit_issues(hass: "HomeAssistant") -> int:
         try:
             ir.async_delete_issue(hass, DOMAIN, iid)
             n += 1
-        except Exception as err:  # noqa: BLE001
+        except Exception as err:
             _LOGGER.debug("Repairs sweep failed for %s: %s", iid, err)
     return n

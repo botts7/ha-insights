@@ -125,7 +125,7 @@ class PresenceInferenceDetector(Detector):
                 insights.append(insight)
         return insights
 
-    def _is_candidate_event(self, ev: "StateEvent") -> bool:
+    def _is_candidate_event(self, ev: StateEvent) -> bool:
         # Need an area to attribute activity. Untagged entities are
         # useless for presence inference.
         if ev.area_id is None:
@@ -259,5 +259,5 @@ class PresenceInferenceDetector(Detector):
 
             reg = ar.async_get(ctx.hass)
             return {area.id: area.name for area in reg.async_list_areas()}
-        except Exception:  # noqa: BLE001
+        except Exception:
             return {}

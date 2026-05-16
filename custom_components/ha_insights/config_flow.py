@@ -813,7 +813,7 @@ def _notify_mobile_targets_selector(
                     mobile_app_services.append(qualified)
                 else:
                     other_services.append(qualified)
-        except Exception:  # noqa: BLE001
+        except Exception:
             pass
 
         # Always include any value the user already saved, even if
@@ -1096,7 +1096,7 @@ class HaInsightsOptionsFlow(OptionsFlow):
                         "advanced": "Advanced settings (all options)",
                     },
                 )
-            except Exception:  # noqa: BLE001 — older versions may have it but error
+            except Exception:
                 pass
 
         # Fallback: single-question form. Older HA renders this as a
@@ -1131,7 +1131,7 @@ class HaInsightsOptionsFlow(OptionsFlow):
         # Build the user-id → friendly-label map at form-render time
         try:
             users = await self.hass.auth.async_get_users()
-        except Exception:  # noqa: BLE001
+        except Exception:
             users = []
         mobile_app_count: dict[str, int] = {}
         try:
@@ -1139,7 +1139,7 @@ class HaInsightsOptionsFlow(OptionsFlow):
                 uid = cfg.data.get("user_id")
                 if isinstance(uid, str) and uid:
                     mobile_app_count[uid] = mobile_app_count.get(uid, 0) + 1
-        except Exception:  # noqa: BLE001
+        except Exception:
             pass
         overrides = get_notify_user_overrides(self.config_entry)
         user_choices: dict[str, str] = {}
@@ -1345,7 +1345,7 @@ class HaInsightsOptionsFlow(OptionsFlow):
 
             integration = await async_get_integration(self.hass, DOMAIN)
             current_version = integration.version or "1.0"
-        except Exception:  # noqa: BLE001
+        except Exception:
             current_version = "1.0"
         # The form has a single Required boolean so HA reliably renders
         # a Submit button. The flag is consumed downstream but doesn't
@@ -1462,7 +1462,7 @@ class HaInsightsOptionsFlow(OptionsFlow):
 
             integration = await async_get_integration(self.hass, DOMAIN)
             current_version = integration.version or "1.0"
-        except Exception:  # noqa: BLE001
+        except Exception:
             current_version = "1.0"
         # Preserve every existing option, overlay only the wizard
         # outputs. This is critical — a user who set custom audit
@@ -1530,7 +1530,7 @@ class HaInsightsOptionsFlow(OptionsFlow):
         # can clearly see what's on; the underlying CONF_ENABLED_DETECTORS
         # remains None (== all) until they explicitly drop a checkbox.
         try:
-            from .detectors import DETECTORS as _DETECTORS  # noqa: N811
+            from .detectors import DETECTORS as _DETECTORS
 
             all_detector_names = sorted(_DETECTORS.keys())
         except Exception:

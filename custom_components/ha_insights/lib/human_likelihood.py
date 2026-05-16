@@ -54,29 +54,37 @@ composition, total 5 vs the previous 18+.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
 from .cooccurrence_likelihood import (
     CooccurrenceAssessment,
-    apply_to_confidence as _apply_coocc,
     assess_cooccurrence,
+)
+from .cooccurrence_likelihood import (
+    apply_to_confidence as _apply_coocc,
 )
 from .persistence_likelihood import (
     PersistenceAssessment,
-    apply_to_confidence as _apply_pers,
     assess_persistence,
+)
+from .persistence_likelihood import (
+    apply_to_confidence as _apply_pers,
 )
 from .timing_likelihood import (
     TimingAssessment,
-    apply_to_confidence as _apply_timing,
     assess_timing,
+)
+from .timing_likelihood import (
+    apply_to_confidence as _apply_timing,
 )
 from .transition_entropy import (
     TransitionEntropyAssessment,
-    apply_to_confidence as _apply_entropy,
     assess_transition_entropy,
+)
+from .transition_entropy import (
+    apply_to_confidence as _apply_entropy,
 )
 
 

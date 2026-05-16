@@ -52,14 +52,14 @@ MIN_BATCH_SIZE = 2
 
 
 def group_by_context_id(
-    events: Iterable["StateEvent"],
-) -> dict[str, list["StateEvent"]]:
+    events: Iterable[StateEvent],
+) -> dict[str, list[StateEvent]]:
     """Bucket events by their context_id. Skips events whose
     context_id is None (system events, recorder backfill before
     we started capturing). Returns a dict — caller iterates
     `.values()` for the batches.
     """
-    out: dict[str, list["StateEvent"]] = defaultdict(list)
+    out: dict[str, list[StateEvent]] = defaultdict(list)
     for ev in events:
         ctx_id = getattr(ev, "context_id", None)
         if ctx_id:
@@ -68,11 +68,11 @@ def group_by_context_id(
 
 
 def iter_batches(
-    events: Iterable["StateEvent"],
+    events: Iterable[StateEvent],
     *,
     window: timedelta = DEFAULT_BATCH_WINDOW,
     min_size: int = MIN_BATCH_SIZE,
-) -> Iterator[tuple[str, list["StateEvent"]]]:
+) -> Iterator[tuple[str, list[StateEvent]]]:
     """Yield (context_id, batch_events) for groups of 2+ events that
     share a context_id AND fall within `window` of each other.
 
@@ -88,7 +88,7 @@ def iter_batches(
             continue
         # Sort by timestamp; split if there's a gap larger than window
         batch.sort(key=lambda e: e.timestamp)
-        run: list["StateEvent"] = [batch[0]]
+        run: list[StateEvent] = [batch[0]]
         for ev in batch[1:]:
             if ev.timestamp - run[-1].timestamp <= window:
                 run.append(ev)
@@ -101,7 +101,7 @@ def iter_batches(
 
 
 def batched_entity_set(
-    events: Iterable["StateEvent"],
+    events: Iterable[StateEvent],
     *,
     window: timedelta = DEFAULT_BATCH_WINDOW,
 ) -> set[tuple[str, str]]:
@@ -126,7 +126,7 @@ def batched_entity_set(
 __all__ = [
     "DEFAULT_BATCH_WINDOW",
     "MIN_BATCH_SIZE",
+    "batched_entity_set",
     "group_by_context_id",
     "iter_batches",
-    "batched_entity_set",
 ]

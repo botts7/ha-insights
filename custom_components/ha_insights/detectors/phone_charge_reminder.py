@@ -144,7 +144,7 @@ class PhoneChargeReminderDetector(Detector):
                 elif eid.startswith("device_tracker."):
                     base = eid[len("device_tracker.") :]
                     trackers[base] = eid
-        except Exception:  # noqa: BLE001
+        except Exception:
             return []
         out: list[tuple[str, str, str, str | None]] = []
         for base in chargings:
@@ -397,7 +397,7 @@ class PhoneChargeReminderDetector(Detector):
     # -------- drain-rate model --------
 
     def _build_drain_rate_model(
-        self, battery_events: list["StateEvent"]
+        self, battery_events: list[StateEvent]
     ) -> dict[str, Any]:
         """For each (hour-of-day, weekday-vs-weekend) bucket, compute
         average %/h drain across all days where the phone was NOT
@@ -485,7 +485,7 @@ class PhoneChargeReminderDetector(Detector):
 
     def _count_predicted_dead_days(
         self,
-        battery_events: list["StateEvent"],
+        battery_events: list[StateEvent],
         plug_in_per_day: dict[date, datetime],
         rate_model: dict[str, Any],
     ) -> int:
@@ -500,7 +500,7 @@ class PhoneChargeReminderDetector(Detector):
             return 0
 
         # Group battery events by day for fast lookup
-        by_day: dict[date, list["StateEvent"]] = defaultdict(list)
+        by_day: dict[date, list[StateEvent]] = defaultdict(list)
         for ev in battery_events:
             local = dt_util.as_local(ev.timestamp)
             by_day[local.date()].append(ev)
@@ -688,7 +688,7 @@ class PhoneChargeReminderDetector(Detector):
 
     def _summarize_by_weekday(
         self,
-        battery_events: list["StateEvent"],
+        battery_events: list[StateEvent],
         plug_in_per_day: dict[date, datetime],
     ) -> dict[int, dict[str, float | int]]:
         """For each weekday (0=Mon..6=Sun), compute mean minimum
@@ -699,7 +699,7 @@ class PhoneChargeReminderDetector(Detector):
         by_dow: dict[int, list[float]] = defaultdict(list)
         # Build a fast lookup of "battery events on day D before
         # plug-in TS" then take the minimum.
-        events_by_day: dict[date, list["StateEvent"]] = defaultdict(list)
+        events_by_day: dict[date, list[StateEvent]] = defaultdict(list)
         for ev in battery_events:
             events_by_day[dt_util.as_local(ev.timestamp).date()].append(ev)
         for day, plug_in_ts in plug_in_per_day.items():

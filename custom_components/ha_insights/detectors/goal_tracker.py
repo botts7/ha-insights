@@ -33,7 +33,6 @@ huge, surface that as "your commute window is unpredictable
 from __future__ import annotations
 
 import json
-from collections import defaultdict
 from datetime import UTC, date, datetime, time, timedelta
 from typing import TYPE_CHECKING, Any
 
@@ -121,7 +120,7 @@ class GoalTrackerDetector(Detector):
                     key = k.strip().lower().replace(" ", "_").replace("-", "_")
                     norm[key] = v.strip()
                 return norm
-        except Exception:  # noqa: BLE001
+        except Exception:
             pass
         return {}
 
@@ -177,7 +176,7 @@ class GoalTrackerDetector(Detector):
         return sorted(per_day.values())
 
     @staticmethod
-    def _is_goal_event(ev: "StateEvent", goal_name: str) -> bool:
+    def _is_goal_event(ev: StateEvent, goal_name: str) -> bool:
         old = (ev.old_state or "").lower()
         new = (ev.new_state or "").lower()
         if old in {"unknown", "unavailable", "none", ""}:
@@ -214,7 +213,7 @@ class GoalTrackerDetector(Detector):
                     continue
                 if (state.attributes or {}).get("source_type") == "gps":
                     out.append(state.entity_id)
-        except Exception:  # noqa: BLE001
+        except Exception:
             pass
         return out
 
@@ -231,7 +230,7 @@ class GoalTrackerDetector(Detector):
                     "_battery_state"
                 ):
                     out.append(eid)
-        except Exception:  # noqa: BLE001
+        except Exception:
             pass
         return out
 

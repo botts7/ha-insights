@@ -34,7 +34,7 @@ from __future__ import annotations
 from collections import defaultdict
 from datetime import UTC, date, datetime, timedelta
 from statistics import mean
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from homeassistant.util import dt as dt_util
 
@@ -42,7 +42,7 @@ from ..insight import Insight, InsightKind
 from .base import Detector, DetectorContext, Maturity, register_detector
 
 if TYPE_CHECKING:
-    from ..observers.state_event_buffer import StateEvent
+    pass
 
 
 _LOOKBACK_DAYS = 60
@@ -118,7 +118,7 @@ class WeatherCorrelationDetector(Detector):
             for s in ctx.hass.states.async_all():
                 if s.entity_id.startswith("weather.") and s.state:
                     return s.entity_id
-        except Exception:  # noqa: BLE001
+        except Exception:
             return None
         return None
 
@@ -145,7 +145,7 @@ class WeatherCorrelationDetector(Detector):
                     return eid  # explicit match wins
                 if eid.endswith("_temperature"):
                     candidates_priority.append(eid)
-        except Exception:  # noqa: BLE001
+        except Exception:
             return None
         return candidates_priority[0] if candidates_priority else None
 
@@ -156,7 +156,7 @@ class WeatherCorrelationDetector(Detector):
                 domain = s.entity_id.split(".", 1)[0]
                 if domain in _HABIT_DOMAINS:
                     out.append(s.entity_id)
-        except Exception:  # noqa: BLE001
+        except Exception:
             return []
         return out
 

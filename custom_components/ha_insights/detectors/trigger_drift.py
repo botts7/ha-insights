@@ -34,7 +34,6 @@ but the finding itself doesn't need it.
 from __future__ import annotations
 
 import math
-from collections import defaultdict
 from datetime import UTC, date, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 

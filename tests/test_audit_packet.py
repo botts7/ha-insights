@@ -46,8 +46,8 @@ def test_long_on_duration_fires_when_observed_exceeds_for_clause():
     """Light stays on ~200 min on average; automation has for: 60 min.
     Expected: long_on_duration observation."""
     from custom_components.ha_insights.audit.packet import (
-        build_audit_packet,
         OBS_LONG_ON_DURATION,
+        build_audit_packet,
     )
 
     now = datetime(2026, 5, 11, 18, 0, tzinfo=UTC)
@@ -91,8 +91,8 @@ def test_long_on_duration_fires_when_observed_exceeds_for_clause():
 def test_silent_entity_fires_when_state_missing_from_machine():
     """`hass.states` has no entry for the target → silent observation."""
     from custom_components.ha_insights.audit.packet import (
-        build_audit_packet,
         OBS_ENTITY_SILENT,
+        build_audit_packet,
     )
 
     automation = {
@@ -121,8 +121,8 @@ def test_silent_entity_does_NOT_fire_for_live_entities():
     that simply weren't in our scan_areas. Now it only fires when HA
     itself says the entity is missing or unavailable."""
     from custom_components.ha_insights.audit.packet import (
-        build_audit_packet,
         OBS_ENTITY_SILENT,
+        build_audit_packet,
     )
 
     automation = {
@@ -150,8 +150,8 @@ def test_silent_entity_does_NOT_fire_for_live_entities():
 def test_silent_entity_fires_when_unavailable_in_state_machine():
     """HA says state is `unavailable` → silent observation fires."""
     from custom_components.ha_insights.audit.packet import (
-        build_audit_packet,
         OBS_ENTITY_SILENT,
+        build_audit_packet,
     )
 
     automation = {
@@ -177,8 +177,8 @@ def test_silent_entity_skips_device_id_shaped_triggers():
     """Device_id-shaped trigger refs (32-char hex, no dot) are HA's
     `device_id:` triggers, not entity_ids. Don't flag them as dead."""
     from custom_components.ha_insights.audit.packet import (
-        build_audit_packet,
         OBS_ENTITY_SILENT,
+        build_audit_packet,
     )
 
     automation = {

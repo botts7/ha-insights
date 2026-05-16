@@ -105,7 +105,7 @@ class InsightStore:
                 for stmt in statements:
                     try:
                         await self._c.execute(stmt)
-                    except Exception as err:  # noqa: BLE001
+                    except Exception as err:
                         msg = str(err).lower()
                         if (
                             "duplicate column" in msg
