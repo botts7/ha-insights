@@ -692,15 +692,25 @@ def _():
     assert "default_endpoint" in src
 
 
-@t("analytics: weekly scheduler fires Monday 04:00 local when enabled")
+@t("v1.5.43: analytics weekly scheduler removed pending v1.6 receiver deployment")
 def _():
+    """v1.5.43 stripped the OptionsFlow opt-in + the weekly tick scheduler
+    because the default endpoint isn't live yet — firing the POST would
+    silently fail. `analytics.py` library stays in code, the install_uuid
+    option persists, the WS preview endpoint stays. Re-wire when the
+    receiver lands in v1.6."""
     src = _read("custom_components/ha_insights/__init__.py")
-    assert "unsub_analytics" in src
-    assert "from .analytics import send_report" in src
-    # Gated on opt-in
-    assert "if analytics_enabled:" in src
-    # Monday-only inside the daily-tick callback
-    assert "isoweekday() != 1" in src
+    # Scheduler wiring is gone — no async_track_time_change for analytics,
+    # no `from .analytics import send_report`, no `if analytics_enabled:`.
+    assert "from .analytics import send_report" not in src
+    assert "if analytics_enabled:" not in src
+    assert "isoweekday() != 1" not in src
+    # Comment explains why so future contributors don't re-add it without
+    # also standing up the receiver.
+    assert "v1.5.43" in src and "receiver" in src
+    # `unsub_analytics = None` placeholder kept so the storage shape
+    # doesn't change for users who upgraded.
+    assert "unsub_analytics = None" in src
 
 
 @t("analytics: best-effort POST — failures must not break the integration")
@@ -930,13 +940,15 @@ def _():
         and "merged.update(" in src
         and "return self.async_create_entry(title=\"\", data=merged)" in src
     )
-    # And the missing-field set is now part of merged
+    # And the missing-field set is now part of merged.
+    # v1.5.43: dropped CONF_ANALYTICS_* from this list — strip removed
+    # the OptionsFlow surface so there's no cloud_consent persist line
+    # for them. Constants stay defined for backwards compat.
     for missing in (
         "CONF_NOTIFY_MOBILE_TARGETS",
         "CONF_NOTIFY_PRESET",
         "CONF_NOTIFY_MOBILE_THRESHOLD",
         "CONF_NOTIFY_QUIET_HOURS_START",
-        "CONF_ANALYTICS_ENABLED",
         "CONF_ALLOW_EXPERIMENTAL_DETECTORS",
     ):
         assert missing in src, f"cloud_consent missing {missing}"
@@ -2896,8 +2908,6 @@ def _():
         "notify_quiet_hours_end",
         "notify_min_attribution_confidence",
         "allow_experimental_detectors",
-        "analytics_enabled",
-        "analytics_endpoint",
     ):
         assert k in adv, f"advanced step missing data label: {k}"
 

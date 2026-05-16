@@ -331,47 +331,13 @@ async def _setup_entry_body(
         schedule_digest(hass, store, hour=digest_hour) if digest_enabled else None
     )
 
-    # v1.4: Community analytics — weekly POST of aggregate counts
-    # to the project receiver. OFF by default; only fires when the
-    # user explicitly opts in via the OptionsFlow. Schedule is
-    # Monday 04:00 local (low-traffic, after the digest hour).
-    analytics_enabled, analytics_endpoint = get_analytics_settings(entry)
+    # v1.5.43: opt-in community analytics scheduler removed pending the
+    # v1.6 receiver deployment (the default endpoint isn't live yet, so
+    # firing the weekly POST would silently fail). `analytics.py` stays
+    # in the codebase ready to re-wire when the receiver lands; the
+    # `analytics_install_uuid` option also stays (stable identifier,
+    # harmless when unused). See CHANGELOG v1.5.43.
     unsub_analytics = None
-    if analytics_enabled:
-        from homeassistant.helpers.event import async_track_time_change
-
-        from .analytics import send_report
-
-        @callback
-        def _on_analytics_tick(_now) -> None:
-            # ISO weekday 1=Monday. async_track_time_change doesn't
-            # have a weekday filter, so we gate inside the callback.
-            #
-            # must use HA's configured timezone,
-            # not datetime.now() (which uses the host's local tz).
-            # On a host where HA's HA timezone differs from the OS
-            # (Docker, hass.io with overridden config), the gate
-            # fired on the wrong day. async_track_time_change's
-            # _now is already in HA's local tz.
-            from homeassistant.util import dt as dt_util
-
-            ha_now = dt_util.now()
-            if ha_now.isoweekday() != 1:
-                return
-            entry.async_create_background_task(
-                hass,
-                send_report(
-                    hass,
-                    entry,
-                    store,
-                    endpoint=analytics_endpoint or None,
-                ),
-                name=f"{DOMAIN}_analytics_send",
-            )
-
-        unsub_analytics = async_track_time_change(
-            hass, _on_analytics_tick, hour=4, minute=0, second=0
-        )
 
     # v1.4: Adaptive notification tuner. Schedules a daily nudge at
     # 03:00 local that reads recent dismiss/apply outcomes and

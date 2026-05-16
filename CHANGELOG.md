@@ -4,6 +4,22 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+## [1.5.43] — 2026-05-16
+
+### Changed
+
+- **Opt-in community analytics removed from OptionsFlow pending the v1.6
+  receiver deployment.** The default endpoint
+  (`https://analytics.ha-insights.io/v1/report`) isn't live yet, so
+  firing the weekly POST would silently fail and confuse early users.
+  `analytics.py` library + the `analytics_install_uuid` stable
+  identifier + the `home_insights/analytics_preview` WS endpoint stay
+  in the codebase, ready to re-wire when the receiver lands.
+  Existing options entries with `analytics_enabled: true` from v1.4 /
+  v1.5 remain in storage but are dormant — no scheduler runs.
+  Constants `CONF_ANALYTICS_*` and `get_analytics_settings()` keep
+  for backwards compat.
+
 ## [1.5.42] — 2026-05-16
 
 ### Fixed

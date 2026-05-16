@@ -1045,8 +1045,6 @@ class HaInsightsOptionsFlow(OptionsFlow):
         self._allow_experimental_detectors: bool = (
             DEFAULT_ALLOW_EXPERIMENTAL_DETECTORS
         )
-        self._analytics_enabled: bool = DEFAULT_ANALYTICS_ENABLED
-        self._analytics_endpoint: str = DEFAULT_ANALYTICS_ENDPOINT_PLACEHOLDER
         # Per-user override flow state: which user is being edited
         self._editing_user_id: str | None = None
         self._editing_user_name: str | None = None
@@ -1514,9 +1512,6 @@ class HaInsightsOptionsFlow(OptionsFlow):
         current_allow_experimental = get_allow_experimental_detectors(
             self.config_entry
         )
-        current_analytics_enabled, current_analytics_endpoint = (
-            get_analytics_settings(self.config_entry)
-        )
         # Phase B/C/D scan controls. Default to "all detectors run" when the
         # user hasn't customized (preserve v1.0 → v1.1 upgrade behavior).
         current_enabled_detectors = get_enabled_detectors(self.config_entry)
@@ -1631,16 +1626,6 @@ class HaInsightsOptionsFlow(OptionsFlow):
                     current_allow_experimental,
                 )
             )
-            self._analytics_enabled = bool(
-                user_input.get(
-                    CONF_ANALYTICS_ENABLED, current_analytics_enabled
-                )
-            )
-            self._analytics_endpoint = str(
-                user_input.get(
-                    CONF_ANALYTICS_ENDPOINT, current_analytics_endpoint
-                )
-            )
             # Phase B: enabled detectors. If the user submits exactly the
             # same set as "all known detectors", store None to keep the
             # back-compat semantics (None == all). Otherwise store the
@@ -1749,8 +1734,6 @@ class HaInsightsOptionsFlow(OptionsFlow):
                     CONF_ALLOW_EXPERIMENTAL_DETECTORS: (
                         self._allow_experimental_detectors
                     ),
-                    CONF_ANALYTICS_ENABLED: self._analytics_enabled,
-                    CONF_ANALYTICS_ENDPOINT: self._analytics_endpoint,
                     CONF_ENABLED_DETECTORS: self._enabled_detectors,
                     CONF_SCAN_AREAS: self._scan_areas,
                     CONF_SCAN_INTERVAL_HOURS: self._scan_interval_hours,
@@ -1911,21 +1894,12 @@ class HaInsightsOptionsFlow(OptionsFlow):
                     CONF_ALLOW_EXPERIMENTAL_DETECTORS,
                     default=current_allow_experimental,
                 ): bool,
-                # v1.4: opt-in community analytics. Sends anonymous
-                # weekly aggregate counts (detector fire/apply/dismiss
-                # per maturity tier, install UUID, integration version,
-                # HA major.minor). Never PII, never payloads. Use the
-                # WS preview endpoint to inspect the exact bytes
-                # before enabling. Empty endpoint = use the project's
-                # default URL.
-                vol.Optional(
-                    CONF_ANALYTICS_ENABLED,
-                    default=current_analytics_enabled,
-                ): bool,
-                vol.Optional(
-                    CONF_ANALYTICS_ENDPOINT,
-                    default=current_analytics_endpoint,
-                ): str,
+                # v1.5.43: opt-in community analytics removed from
+                # OptionsFlow pending the v1.6 receiver deployment.
+                # `analytics.py` library stays in code, ready to re-
+                # surface when the receiver lands. Existing options
+                # entries with `analytics_enabled: true` remain in
+                # storage (dormant — no scheduler runs).
                 # Phase B: per-detector enable/disable. Defaults to the
                 # full set when the user hasn't customized; explicit
                 # selection persists their choice. If the user selects
@@ -2052,8 +2026,6 @@ class HaInsightsOptionsFlow(OptionsFlow):
                         CONF_ALLOW_EXPERIMENTAL_DETECTORS: (
                             self._allow_experimental_detectors
                         ),
-                        CONF_ANALYTICS_ENABLED: self._analytics_enabled,
-                        CONF_ANALYTICS_ENDPOINT: self._analytics_endpoint,
                         CONF_ENABLED_DETECTORS: self._enabled_detectors,
                         CONF_SCAN_AREAS: self._scan_areas,
                         CONF_SCAN_INTERVAL_HOURS: self._scan_interval_hours,
