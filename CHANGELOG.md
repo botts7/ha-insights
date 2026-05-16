@@ -4,6 +4,29 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+## [1.5.47] — 2026-05-17
+
+### Added
+
+- **Brand icons ship inside the integration.** The
+  `home-assistant/brands` repo no longer accepts new custom-
+  integration assets — Home Assistant 2026.3.0+ reads brand
+  icons directly from each integration's directory. See
+  [brands-proxy-api announcement](https://developers.home-assistant.io/blog/2026/02/24/brands-proxy-api).
+
+  v1.5.47 ships `custom_components/ha_insights/brand/`:
+  - `icon.png` (256×256)
+  - `icon@2x.png` (512×512)
+  - `dark_icon.png` (256×256)
+  - `dark_icon@2x.png` (512×512)
+
+  No manifest change required — HA's frontend resolves the local
+  path automatically when present. On HA 2026.2 and earlier the
+  icons fall back to the brands CDN (which never picked them up
+  because the upstream PR was closed) — those versions will see
+  the default placeholder, which is fine: they're out of support
+  before the next public-release window anyway.
+
 ## [1.5.46] — 2026-05-17
 
 ### Added
