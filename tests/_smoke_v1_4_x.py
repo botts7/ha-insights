@@ -2984,6 +2984,54 @@ def _():
     assert "Extended by HA Insights" in src
 
 
+# ---- v1.5.45: coactivation signal wiring ----
+
+
+@t("v1.5.45: lib/coactivation exists with compute_coactivation_days")
+def _():
+    src = _read("custom_components/ha_insights/lib/coactivation.py")
+    # Public function
+    assert "def compute_coactivation_days(" in src
+    # Anchor entity contract
+    assert "anchor_entity_ids" in src
+    # Default window and lookback match candidate-entities reason string
+    assert "window_seconds: float = 5.0" in src
+    assert "lookback_days: int = 14" in src
+    # Manual filter (chain-automation noise drop)
+    assert "manual_only: bool = True" in src
+    # Bootstrap events excluded
+    assert "from_bootstrap" in src
+    # Pure-lib invariant
+    assert "homeassistant" not in src
+    # Result shape
+    assert "dict[str, int]" in src
+
+
+@t("v1.5.45: ws_suggest_additions populates coactivation_days from buffer")
+def _():
+    src = _read("custom_components/ha_insights/ws_api.py")
+    # Import wired
+    assert "from .lib.coactivation import compute_coactivation_days" in src
+    # Stubbed `coactivation_days=None` comment is gone
+    assert "v1.5.45 will populate from EventBuffer" not in src
+    # Buffer snapshot fed in
+    assert "buffer.snapshot()" in src
+    # Best-effort wrap so a counter failure doesn't kill the response
+    assert "compute_coactivation_days(" in src
+
+
+@t("v1.5.45: coactivation lib counts distinct days, not raw event count")
+def _():
+    """The reason-string in candidate_entities says 'N of 14 DAYS' so
+    the counter must bucket by calendar date, not raw fire count.
+    Guard that the implementation uses .date() bucketing."""
+    src = _read("custom_components/ha_insights/lib/coactivation.py")
+    # date() bucketing — same-day duplicates collapse
+    assert ".date()" in src
+    # days_by_entity → set so a date counts once
+    assert "set[date]" in src or "set[\"date\"]" in src
+
+
 # ---- Run + report ----
 
 passed = sum(1 for _, s, _ in results if s == "PASS")

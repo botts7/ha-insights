@@ -4,6 +4,44 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+## [1.5.45] — 2026-05-16
+
+### Added
+
+- **Coactivation signal wiring for Suggested Additions.** v1.5.44 shipped
+  the candidate-entities pipeline with a `coactivation_days` parameter
+  but stubbed it to `None` — the three weaker signals (area-mates,
+  device-mates, domain-siblings) carried the load. v1.5.45 lights up the
+  fourth, strongest signal.
+
+  New pure-Python lib `lib/coactivation.py` exposes
+  `compute_coactivation_days(events, anchor_entity_ids, …)`. It walks
+  the 14-day state-event buffer, finds candidates that fire within
+  ±5 seconds of any required ("anchor") entity, and returns
+  `entity_id → distinct_days_count`. The Suggested-Additions WS
+  handler calls it with `anchor_entity_ids=required` and passes the
+  result through to `build_candidate_entities`, which promotes
+  `days >= 3` entities into the HIGH-tier "coactivator" bucket — they
+  appear pre-selected in the card modal with the reason
+  *"fired within ±5 s of trigger on N of 14 days"*.
+
+  Defaults match the existing reason-string contract:
+  `window_seconds=5`, `lookback_days=14`, `min_coactivation_days=3`.
+  The lib also applies a `manual_only` filter (default on) that drops
+  chain-automation noise — only events tagged with a `context_user_id`
+  (UI / mobile / voice) or with NO HA-side context at all (physical
+  switch / external) count as candidates. `from_bootstrap=True`
+  events are always excluded (HA startup fan-out — Gotcha 5).
+
+  Best-effort wiring: a buffer snapshot failure or counter exception
+  falls back to `None`, leaving the three structural signals
+  (area / device / domain) to produce candidates without the
+  observed-behavior signal.
+
+  Zero HA imports in the lib — duck-typed `_EventLike` Protocol means
+  the function tests cleanly from a plain Python env and is
+  HA-core-adoptable.
+
 ## [1.5.44] — 2026-05-16
 
 ### Added
