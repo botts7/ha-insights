@@ -6,7 +6,7 @@ Never edit a previously-shipped migration.
 """
 from __future__ import annotations
 
-CURRENT_VERSION = 4
+CURRENT_VERSION = 5
 
 MIGRATIONS: dict[int, str] = {
     1: """
@@ -148,5 +148,18 @@ MIGRATIONS: dict[int, str] = {
     ALTER TABLE insights ADD COLUMN target_user_id_confidence REAL;
 
     INSERT OR REPLACE INTO schema_version (version) VALUES (4);
+    """,
+    # v1.5.46 — Retire lifecycle. Distinct from Dismiss (one-off "not
+    # relevant") and Snooze (temporary suppression): Retire marks an
+    # insight as a pattern the user has consciously decided NOT to
+    # automate going forward, even though the detector keeps seeing
+    # it. Future re-detections of the same fingerprint stay
+    # suppressed until the user manually un-retires. Filtered out of
+    # ws_list by default same as dismissed; surfaced via a separate
+    # `include_retired` opt-in flag for the "history" view.
+    5: """
+    ALTER TABLE insights ADD COLUMN retired_at REAL;
+
+    INSERT OR REPLACE INTO schema_version (version) VALUES (5);
     """,
 }

@@ -88,6 +88,12 @@ SUPPORTED_METHODS = (
     # shows checkbox modal, user picks, apply via existing
     # `home_insights/apply` with new `additional_entity_ids` field.
     "suggest_additions",
+    # v1.5.46: Retire lifecycle alongside Snooze / Dismiss. Retired
+    # insights stay suppressed across re-detections — the user has
+    # consciously decided this pattern is NOT something to automate.
+    # Reversible via `unretire`.
+    "retire",
+    "unretire",
 )
 
 
@@ -127,6 +133,9 @@ def async_register(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_list_ha_users)
     websocket_api.async_register_command(hass, ws_get_user_overrides)
     websocket_api.async_register_command(hass, ws_set_user_override)
+    websocket_api.async_register_command(hass, ws_suggest_additions)
+    websocket_api.async_register_command(hass, ws_retire)
+    websocket_api.async_register_command(hass, ws_unretire)
 
 
 def _get_store(
@@ -281,6 +290,10 @@ async def ws_hello(
         vol.Optional("include_dismissed", default=False): bool,
         vol.Optional("include_applied", default=False): bool,
         vol.Optional("include_snoozed", default=False): bool,
+        # v1.5.46: opt-in surface for retired insights, used by the
+        # history / management view in the panel. Day-to-day list
+        # stays clean by default.
+        vol.Optional("include_retired", default=False): bool,
     }
 )
 @websocket_api.async_response
@@ -304,6 +317,7 @@ async def ws_list(
         include_dismissed=msg["include_dismissed"],
         include_applied=msg["include_applied"],
         include_snoozed=msg["include_snoozed"],
+        include_retired=msg["include_retired"],
     )
 
     # v1.2: reuse the EntityHierarchy built by the most recent scan
@@ -1193,6 +1207,34 @@ async def ws_apply(
             snapshot=snapshot,
             snapshot_hash=hash_config(snapshot),
         )
+
+    # v1.5.46: Logbook entry so the apply shows up in HA's standard
+    # activity timeline alongside the automation_reloaded / config-
+    # updated events the writer already fires. Entity is the resulting
+    # automation so the entry attaches to that automation's row in
+    # the Logbook (clickable on phones / dashboards). Best-effort —
+    # logbook may not be loaded on minimal HA installs; never fail
+    # an apply because the activity log couldn't write.
+    try:
+        from homeassistant.components import logbook
+
+        action = (
+            "Extended"
+            if msg.get("additional_entity_ids")
+            else "Applied (refined)"
+            if override is not None
+            else "Applied"
+        )
+        logbook.async_log_entry(
+            hass,
+            name="HA Insights",
+            message=f"{action} insight: {insight.title}",
+            domain=DOMAIN,
+            entity_id=f"automation.{auto_id}",
+        )
+    except Exception:  # noqa: BLE001
+        pass
+
     connection.send_result(
         msg["id"],
         {
@@ -1676,6 +1718,68 @@ async def ws_snooze(
     if not success:
         connection.send_error(
             msg["id"], "not_found", f"No insight {msg['insight_id']!r}"
+        )
+        return
+    connection.send_result(msg["id"])
+
+
+# ---------------------------------------------------------------------------
+# v1.5.46 — Retire / unretire lifecycle. Sibling to dismiss + snooze.
+# Retire = user has consciously decided NOT to automate this pattern;
+# survives re-detections of the same fingerprint until explicitly cleared.
+# Filtered from ws_list by default; surfaced via include_retired=True.
+# ---------------------------------------------------------------------------
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "home_insights/retire",
+        vol.Required("insight_id"): str,
+    }
+)
+@websocket_api.async_response
+async def ws_retire(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Retire an insight — permanent 'don't auto-suggest' decision."""
+    store = _get_store(hass)
+    if store is None:
+        connection.send_error(msg["id"], "not_set_up", "Store not initialized")
+        return
+    success = await store.retire_insight(msg["insight_id"])
+    if not success:
+        connection.send_error(
+            msg["id"], "not_found", f"No insight {msg['insight_id']!r}"
+        )
+        return
+    connection.send_result(msg["id"])
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "home_insights/unretire",
+        vol.Required("insight_id"): str,
+    }
+)
+@websocket_api.async_response
+async def ws_unretire(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Un-retire an insight — reverse a prior retire decision."""
+    store = _get_store(hass)
+    if store is None:
+        connection.send_error(msg["id"], "not_set_up", "Store not initialized")
+        return
+    success = await store.clear_retired(msg["insight_id"])
+    if not success:
+        connection.send_error(
+            msg["id"],
+            "not_found",
+            f"No insight {msg['insight_id']!r} or it wasn't retired",
         )
         return
     connection.send_result(msg["id"])
