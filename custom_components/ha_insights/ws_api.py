@@ -1248,6 +1248,7 @@ async def ws_suggest_additions(
     """
     from .config_flow import get_blocked_entities
     from .detectors.hierarchy import build_hierarchy
+    from .lib.coactivation import compute_coactivation_days
     from .llm.candidate_entities import build_candidate_entities
     from .llm.refiner import _collect_entity_ids
 
@@ -1285,6 +1286,29 @@ async def ws_suggest_additions(
     # (Hierarchy walked the entity registry to build it).
     all_eids = set(hierarchy.area_of.keys())
 
+    # v1.5.45: coactivation signal — for each required entity, find
+    # which OTHER entities the user manually toggles within ±5 s on
+    # the same calendar day, in the 14-day buffer. Days-count goes
+    # into `coactivation_days` so build_candidate_entities can promote
+    # >=3-day matches into the HIGH-tier coactivator bucket.
+    #
+    # Falls back to None when no buffer is available (early-startup
+    # window, or this entry didn't initialize one) — candidate_entities
+    # simply skips the coactivator pass in that case.
+    coactivation_days: dict[str, int] | None = None
+    buffer = _get_buffer(hass)
+    if buffer is not None:
+        try:
+            coactivation_days = compute_coactivation_days(
+                buffer.snapshot(),
+                anchor_entity_ids=required,
+            )
+        except Exception:  # pragma: no cover — signal is best-effort
+            # A coactivation-counter failure must not block the
+            # response. Other three signals (area / device / domain)
+            # still produce useful candidates without it.
+            coactivation_days = None
+
     candidates = build_candidate_entities(
         required_entity_ids=required,
         area_of=hierarchy.area_of,
@@ -1292,7 +1316,7 @@ async def ws_suggest_additions(
         entities_in_area=hierarchy.entities_in_area,
         entities_on_device=hierarchy.entities_on_device,
         all_entity_ids=all_eids,
-        coactivation_days=None,  # v1.5.45 will populate from EventBuffer
+        coactivation_days=coactivation_days,
         blocked_entity_ids=blocked,
         action_target_only=True,
     )
