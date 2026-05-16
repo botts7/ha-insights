@@ -49,10 +49,17 @@ class CandidateEntity:
     additions instead of hallucinating relationships. Always at least
     one reason; multiple when an entity scores on more than one signal
     (e.g. both area-mate AND coactivator).
+
+    `tier` is a coarse strength label derived from the signal mix.
+    Drives default-select state in the card UI: HIGH is pre-checked,
+    MEDIUM visible-but-unchecked, LOW collapsed under "Show more."
+    Maps to colored chips (green/amber/red) to match the existing
+    insight-confidence visual language.
     """
 
     entity_id: str
     reasons: tuple[str, ...]
+    tier: str = "MEDIUM"  # "HIGH" / "MEDIUM" / "LOW"
 
 
 @dataclass(frozen=True)
@@ -123,6 +130,49 @@ class CandidateEntities:
         return "\n".join(lines)
 
 
+# Domains that support actions in the action block. The Suggested-
+# Additions feature is built around extending an automation's ACTION
+# block, so only entities in these domains are useful as candidates.
+# Trigger-only domains (binary_sensor, sensor, device_tracker, person,
+# zone, sun, weather) are silently filtered. Without this filter the
+# user sees "add `binary_sensor.kitchen_motion`" as a suggested
+# addition, which is nonsensical — you can't `turn_on` a binary_sensor.
+#
+# Liftable: list reflects HA's canonical action-target domains. If HA
+# adds new actionable domains over time, extend here.
+_ACTIONABLE_DOMAINS = frozenset({
+    "light",
+    "switch",
+    "fan",
+    "media_player",
+    "climate",
+    "cover",
+    "lock",
+    "vacuum",
+    "automation",
+    "scene",
+    "script",
+    "input_boolean",
+    "input_button",
+    "notify",
+    "remote",
+    "humidifier",
+    "water_heater",
+    "siren",
+    "valve",
+    "lawn_mower",
+    "button",
+})
+
+
+def _is_actionable(eid: str) -> bool:
+    """True when the entity's domain is one HA treats as an action
+    target (turn_on/turn_off/etc. service calls work on it)."""
+    if "." not in eid:
+        return False
+    return eid.split(".", 1)[0] in _ACTIONABLE_DOMAINS
+
+
 # Caps prevent prompt-bloat. Domain-siblings is the noisiest signal —
 # a house with 30 lights doesn't help the LLM by listing all 30. Keep
 # tight; the other signals get a more generous budget because they
@@ -147,6 +197,7 @@ def build_candidate_entities(
     min_coactivation_days: int = 3,
     blocked_entity_ids: set[str] | None = None,
     caps: Mapping[str, int] | None = None,
+    action_target_only: bool = True,
 ) -> CandidateEntities:
     """Build candidate entities the LLM may add during refine.
 
@@ -168,6 +219,12 @@ def build_candidate_entities(
       blocked_entity_ids: per-entity opt-out set. Members never appear
         in any candidate list, even pseudonymized.
       caps: optional override of per-category candidate count limits.
+      action_target_only: when True (default), only entities in
+        actionable domains (`light, switch, fan, ...`) are surfaced.
+        Sensors and other non-action-target domains are silently
+        dropped — they can't appear in an automation's action block.
+        Set False if extending this builder for trigger/condition
+        suggestions in the future.
 
     Returns:
       CandidateEntities with at most `caps[category]` entries per group.
@@ -175,6 +232,16 @@ def build_candidate_entities(
     """
     blocked = blocked_entity_ids or set()
     use_caps = {**_DEFAULT_CAPS, **(caps or {})}
+
+    # v1.5.44: action-target compatibility filter. Used in three places
+    # below as a single predicate so additions, scenarios, and future
+    # variants stay consistent. When `action_target_only=False`, the
+    # predicate accepts everything (we'd want this for future
+    # trigger/condition suggestion features).
+    def _accept(eid: str) -> bool:
+        if not action_target_only:
+            return True
+        return _is_actionable(eid)
 
     # Reasons accumulate per-entity across signals — an entity may be
     # both an area-mate AND a coactivator, in which case both reasons
@@ -197,6 +264,8 @@ def build_candidate_entities(
         for eid in mates:
             if eid in required_entity_ids or eid in blocked:
                 continue
+            if not _accept(eid):
+                continue
             area_mate_eids.add(eid)
             _add_reason(eid, f"same area as {req_eid}")
 
@@ -209,6 +278,8 @@ def build_candidate_entities(
         mates = entities_on_device.get(device_id, frozenset())
         for eid in mates:
             if eid in required_entity_ids or eid in blocked:
+                continue
+            if not _accept(eid):
                 continue
             # An entity that's BOTH a device-mate and an area-mate is
             # categorized as a device-mate (stronger signal: the device
@@ -223,6 +294,8 @@ def build_candidate_entities(
     if coactivation_days:
         for eid, days in coactivation_days.items():
             if eid in required_entity_ids or eid in blocked:
+                continue
+            if not _accept(eid):
                 continue
             if days < min_coactivation_days:
                 continue
@@ -257,6 +330,8 @@ def build_candidate_entities(
         for eid in all_entity_ids:
             if eid in consumed:
                 continue
+            if not _accept(eid):
+                continue
             if "." not in eid:
                 continue
             dom = eid.split(".", 1)[0]
@@ -289,27 +364,62 @@ def build_candidate_entities(
             if _is_cross_domain(eid):
                 _add_reason(eid, f"different domain ({_domain_of(eid)}.*)")
 
+    # v1.5.44: tier classification — HIGH/MEDIUM/LOW maps to default-
+    # select state in the card UI + chip color matching the existing
+    # insight-confidence visual language (green/amber/red).
+    #
+    # Rules (in order; first match wins):
+    #   HIGH   — coactivator (any window) OR same-domain device-mate
+    #   MEDIUM — same-domain area-mate OR same-domain domain-sibling OR
+    #            cross-domain device-mate (device-cluster topology is
+    #            still a meaningful signal even cross-domain)
+    #   LOW    — cross-domain area-mate (without coactivation evidence)
+    #
+    # The card pre-checks HIGH by default; MEDIUM is visible-but-unchecked;
+    # LOW is collapsed behind "Show more." LLM Refine reads the tier
+    # label inline to weight its addition suggestions.
+    def _tier_for(eid: str, category: str) -> str:
+        cross_domain = _is_cross_domain(eid)
+        if category == "coactivator":
+            return "HIGH"
+        if category == "device_mate":
+            return "HIGH" if not cross_domain else "MEDIUM"
+        if category == "area_mate":
+            return "MEDIUM" if not cross_domain else "LOW"
+        if category == "domain_sibling":
+            return "MEDIUM"
+        return "LOW"
+
     # Materialize the final lists with caps + deterministic ordering.
     # Sort key: (cross_domain_flag, entity_id) — same-domain entries
     # sort to the front, ties broken by alphabetic. This means when the
     # cap clips the list, cross-domain candidates are the first to drop.
-    def _materialize(eids: set[str], cap: int) -> list[CandidateEntity]:
+    def _materialize(
+        eids: set[str], cap: int, category: str
+    ) -> list[CandidateEntity]:
         sorted_eids = sorted(eids, key=lambda e: (_is_cross_domain(e), e))[:cap]
         return [
             CandidateEntity(
                 entity_id=eid,
                 reasons=tuple(reasons_by_entity.get(eid, [])),
+                tier=_tier_for(eid, category),
             )
             for eid in sorted_eids
         ]
 
     return CandidateEntities(
-        area_mates=_materialize(area_mate_eids, use_caps["area_mates"]),
-        device_mates=_materialize(device_mate_eids, use_caps["device_mates"]),
-        domain_siblings=_materialize(
-            domain_sibling_eids, use_caps["domain_siblings"]
+        area_mates=_materialize(
+            area_mate_eids, use_caps["area_mates"], "area_mate"
         ),
-        coactivators=_materialize(coactivator_eids, use_caps["coactivators"]),
+        device_mates=_materialize(
+            device_mate_eids, use_caps["device_mates"], "device_mate"
+        ),
+        domain_siblings=_materialize(
+            domain_sibling_eids, use_caps["domain_siblings"], "domain_sibling"
+        ),
+        coactivators=_materialize(
+            coactivator_eids, use_caps["coactivators"], "coactivator"
+        ),
     )
 
 

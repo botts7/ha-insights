@@ -60,7 +60,9 @@ def _fixture_kitchen():
 
 def test_area_mates_collected():
     fx = _fixture_kitchen()
-    result = build_candidate_entities(**fx)
+    # action_target_only=False so sensors / binary_sensors still surface
+    # for the priority-logic test (the filter has its own test).
+    result = build_candidate_entities(**fx, action_target_only=False)
     eids = [c.entity_id for c in result.area_mates]
     assert "light.kitchen_under_cabinet" in eids
     assert "fan.kitchen_ceiling" in eids
@@ -111,6 +113,7 @@ def test_coactivators_outrank_area_mates():
             "sensor.kitchen_motion": 12,  # ≥ min_coactivation_days
             "fan.kitchen_ceiling": 2,     # < min, excluded
         },
+        action_target_only=False,  # let sensor.* surface for the test
     )
     coactivator_eids = [c.entity_id for c in result.coactivators]
     area_mate_eids = [c.entity_id for c in result.area_mates]
@@ -163,8 +166,9 @@ def test_domain_siblings_skipped_when_no_all_entities():
 def test_caps_enforced():
     """With many area-mates available, the cap clips the list."""
     fx = _fixture_kitchen()
-    # Pad kitchen with 20 extra entities
-    extra = {f"sensor.kitchen_extra_{i}" for i in range(20)}
+    # Pad kitchen with 20 extra entities. Use light.* so they survive
+    # the action-target filter — testing the cap itself, not the filter.
+    extra = {f"light.kitchen_extra_{i}" for i in range(20)}
     fx["entities_in_area"]["kitchen"] = frozenset(
         fx["entities_in_area"]["kitchen"] | extra
     )
@@ -222,6 +226,7 @@ def test_multiple_reasons_accumulate():
     result = build_candidate_entities(
         **fx,
         coactivation_days={"sensor.kitchen_motion": 10},
+        action_target_only=False,  # sensor.* would be filtered otherwise
     )
     sensor_in_coactivators = [
         c for c in result.coactivators if c.entity_id == "sensor.kitchen_motion"
@@ -305,6 +310,176 @@ def test_cross_domain_dropped_first_when_cap_hit():
     assert "light.kitchen_uc" in eids
     assert "light.kitchen_pendant" in eids
     assert "media_player.kitchen_tv" not in eids
+
+
+def test_action_target_filter_drops_non_actionable():
+    """v1.5.44: sensors / binary_sensors / device_trackers etc. are
+    silently dropped — they can't appear in an automation's action
+    block."""
+    result = build_candidate_entities(
+        required_entity_ids={"light.kitchen_main"},
+        area_of={
+            "light.kitchen_main": "kitchen",
+            "light.kitchen_under_cabinet": "kitchen",
+            "binary_sensor.kitchen_motion": "kitchen",
+            "sensor.kitchen_humidity": "kitchen",
+            "device_tracker.someone_phone": "kitchen",
+            "switch.kitchen_disposal": "kitchen",
+        },
+        device_of={
+            eid: f"dev_{eid}"
+            for eid in [
+                "light.kitchen_main",
+                "light.kitchen_under_cabinet",
+                "binary_sensor.kitchen_motion",
+                "sensor.kitchen_humidity",
+                "device_tracker.someone_phone",
+                "switch.kitchen_disposal",
+            ]
+        },
+        entities_in_area={
+            "kitchen": frozenset({
+                "light.kitchen_main",
+                "light.kitchen_under_cabinet",
+                "binary_sensor.kitchen_motion",
+                "sensor.kitchen_humidity",
+                "device_tracker.someone_phone",
+                "switch.kitchen_disposal",
+            }),
+        },
+        entities_on_device={
+            f"dev_{eid}": frozenset({eid})
+            for eid in [
+                "light.kitchen_main",
+                "light.kitchen_under_cabinet",
+                "binary_sensor.kitchen_motion",
+                "sensor.kitchen_humidity",
+                "device_tracker.someone_phone",
+                "switch.kitchen_disposal",
+            ]
+        },
+    )
+    all_eids = result.all_entity_ids()
+    # Actionable domains: light + switch surface as candidates
+    assert "light.kitchen_under_cabinet" in all_eids
+    assert "switch.kitchen_disposal" in all_eids
+    # Non-actionable: dropped
+    assert "binary_sensor.kitchen_motion" not in all_eids
+    assert "sensor.kitchen_humidity" not in all_eids
+    assert "device_tracker.someone_phone" not in all_eids
+
+
+def test_action_target_filter_opt_out():
+    """When `action_target_only=False`, sensors etc. are surfaced
+    (future feature: trigger/condition suggestions)."""
+    result = build_candidate_entities(
+        required_entity_ids={"light.kitchen_main"},
+        area_of={
+            "light.kitchen_main": "kitchen",
+            "binary_sensor.kitchen_motion": "kitchen",
+        },
+        device_of={
+            "light.kitchen_main": "dev_a",
+            "binary_sensor.kitchen_motion": "dev_b",
+        },
+        entities_in_area={
+            "kitchen": frozenset({
+                "light.kitchen_main",
+                "binary_sensor.kitchen_motion",
+            }),
+        },
+        entities_on_device={
+            "dev_a": frozenset({"light.kitchen_main"}),
+            "dev_b": frozenset({"binary_sensor.kitchen_motion"}),
+        },
+        action_target_only=False,
+    )
+    assert "binary_sensor.kitchen_motion" in result.all_entity_ids()
+
+
+def test_tier_high_for_coactivator():
+    fx = _fixture_kitchen()
+    result = build_candidate_entities(
+        **fx,
+        coactivation_days={"sensor.kitchen_motion": 12},
+        action_target_only=False,
+    )
+    # Sensor surfaces because we disabled the action-target filter
+    sensor_cand = next(
+        c for c in result.coactivators if c.entity_id == "sensor.kitchen_motion"
+    )
+    assert sensor_cand.tier == "HIGH"
+
+
+def test_tier_medium_for_same_domain_area_mate():
+    fx = _fixture_kitchen()
+    result = build_candidate_entities(**fx)
+    light_cand = next(
+        c for c in result.area_mates if c.entity_id == "light.kitchen_under_cabinet"
+    )
+    assert light_cand.tier == "MEDIUM"
+
+
+def test_tier_low_for_cross_domain_area_mate():
+    """v1.5.44: cross-domain area-mate without coactivation = LOW tier
+    (collapsed under 'Show more' in the card UI)."""
+    result = build_candidate_entities(
+        required_entity_ids={"light.kitchen_main"},
+        area_of={
+            "light.kitchen_main": "kitchen",
+            "media_player.kitchen_tv": "kitchen",
+        },
+        device_of={
+            "light.kitchen_main": "dev_a",
+            "media_player.kitchen_tv": "dev_b",
+        },
+        entities_in_area={
+            "kitchen": frozenset({
+                "light.kitchen_main",
+                "media_player.kitchen_tv",
+            }),
+        },
+        entities_on_device={
+            "dev_a": frozenset({"light.kitchen_main"}),
+            "dev_b": frozenset({"media_player.kitchen_tv"}),
+        },
+    )
+    tv_cand = next(
+        c for c in result.area_mates if c.entity_id == "media_player.kitchen_tv"
+    )
+    assert tv_cand.tier == "LOW"
+
+
+def test_tier_high_for_same_domain_device_mate():
+    """RGB strip ships two channels on the same device — both lights.
+    Strong signal: both belong together by topology."""
+    result = build_candidate_entities(
+        required_entity_ids={"light.kitchen_main"},
+        area_of={
+            "light.kitchen_main": "kitchen",
+            "light.kitchen_under_cabinet": "kitchen",
+        },
+        device_of={
+            "light.kitchen_main": "dev_a",
+            "light.kitchen_under_cabinet": "dev_a",  # same device
+        },
+        entities_in_area={
+            "kitchen": frozenset({
+                "light.kitchen_main",
+                "light.kitchen_under_cabinet",
+            }),
+        },
+        entities_on_device={
+            "dev_a": frozenset({
+                "light.kitchen_main",
+                "light.kitchen_under_cabinet",
+            }),
+        },
+    )
+    uc_cand = next(
+        c for c in result.device_mates if c.entity_id == "light.kitchen_under_cabinet"
+    )
+    assert uc_cand.tier == "HIGH"
 
 
 def test_all_entity_ids_returns_union():
