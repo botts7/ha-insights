@@ -4,6 +4,54 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+## [1.5.46] — 2026-05-17
+
+### Added
+
+- **Retire lifecycle alongside Dismiss / Snooze.** The card and panel
+  already had Dismiss (one-off "not relevant") and Snooze (temporary
+  suppression). Retire is the third option: *"I have consciously
+  decided NOT to automate this pattern, even though the detector
+  keeps seeing it."* Future re-detections of the same fingerprint
+  stay suppressed until the user explicitly un-retires.
+
+  New surface:
+  - DB schema migration v5 — `retired_at REAL` column on `insights`.
+  - `InsightStore.retire_insight(id)` / `clear_retired(id)` methods,
+    mirroring the existing `dismiss_insight` / `snooze_insight`
+    shape. Notify "retired" / "unretired" events stream through the
+    existing subscribe channel.
+  - `home_insights/retire` + `home_insights/unretire` WS endpoints
+    (admin-gated through the same path as snooze).
+  - `home_insights/list` now accepts `include_retired: bool`
+    (defaults `False`). The default list view stays clean; the
+    history / management view opts in.
+  - Existing UPSERT path's "DELIBERATELY NOT TOUCHED" list now
+    includes `retired_at`, so a re-detection of the same insight
+    doesn't wipe the user's retire decision.
+
+- **Logbook entry emitted on every Apply.** When `home_insights/apply`
+  succeeds, the integration fires a `logbook.async_log_entry` with
+  `entity_id=automation.<id>`. The apply now shows up in HA's
+  standard activity timeline alongside the `automation_reloaded`
+  events the writer already triggers. Message tags Apply vs
+  Apply-Refined vs Extended (the three apply variants) so the user
+  can scan their Logbook history and see at a glance which insights
+  they applied as-is versus refined-via-LLM versus extended via the
+  Suggested-Additions modal.
+
+  Best-effort: a logbook-not-loaded environment falls through
+  silently — the apply itself never fails because the activity log
+  couldn't write.
+
+### Fixed
+
+- `ws_suggest_additions` was defined in v1.5.44 but never registered
+  via `async_register_command`. The smoke harness only checked the
+  handler existed, not that it was wired into the WS router — the
+  bug shipped silently. v1.5.46 adds the missing registration plus
+  a smoke test that verifies registration alongside definition.
+
 ## [1.5.45] — 2026-05-16
 
 ### Added

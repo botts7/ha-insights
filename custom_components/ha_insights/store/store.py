@@ -183,8 +183,11 @@ class InsightStore:
                 target_user_id = excluded.target_user_id,
                 target_user_id_confidence = excluded.target_user_id_confidence
                 -- DELIBERATELY NOT TOUCHED: dismissed_at, applied_at,
-                -- applied_artifact_id. These represent user actions
-                -- and must survive re-emission of the same pattern.
+                -- applied_artifact_id, retired_at. These represent user
+                -- actions and must survive re-emission of the same
+                -- pattern. v1.5.46 added retired_at to this set —
+                -- retiring an insight is a permanent "don't auto-
+                -- suggest" decision that must persist across re-detects.
             """,
             (
                 insight.id,
@@ -235,6 +238,7 @@ class InsightStore:
         include_dismissed: bool = False,
         include_applied: bool = False,
         include_snoozed: bool = False,
+        include_retired: bool = False,
     ) -> list[Insight]:
         clauses: list[str] = []
         params: list[float] = []
@@ -245,6 +249,11 @@ class InsightStore:
         if not include_snoozed:
             clauses.append("(i.snoozed_until IS NULL OR i.snoozed_until <= ?)")
             params.append(datetime.now(tz=UTC).timestamp())
+        # v1.5.46: retired = permanent "don't auto-suggest" decision.
+        # Filtered out by default same as dismissed; the history view
+        # opts in via include_retired=True.
+        if not include_retired:
+            clauses.append("i.retired_at IS NULL")
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         async with self._c.execute(
             f"{self._SELECT_INSIGHTS} {where} ORDER BY i.created_at DESC", params
@@ -274,6 +283,38 @@ class InsightStore:
         await self._c.commit()
         if cur.rowcount > 0:
             self._notify("snoozed", await self.get_insight(insight_id))
+            return True
+        return False
+
+    async def retire_insight(
+        self, insight_id: str, *, when: datetime | None = None
+    ) -> bool:
+        """Mark an insight as retired — the user has decided NOT to
+        automate this pattern. Filtered from ws_list by default same
+        as dismissed; surfaced under include_retired=True for the
+        history / management view. Reversible via clear_retired.
+        """
+        ts = (when or datetime.now(tz=UTC)).timestamp()
+        cur = await self._c.execute(
+            "UPDATE insights SET retired_at = ? WHERE id = ?",
+            (ts, insight_id),
+        )
+        await self._c.commit()
+        if cur.rowcount > 0:
+            self._notify("retired", await self.get_insight(insight_id))
+            return True
+        return False
+
+    async def clear_retired(self, insight_id: str) -> bool:
+        """Un-retire an insight. Returns True if a row was un-retired."""
+        cur = await self._c.execute(
+            "UPDATE insights SET retired_at = NULL WHERE id = ? "
+            "AND retired_at IS NOT NULL",
+            (insight_id,),
+        )
+        await self._c.commit()
+        if cur.rowcount > 0:
+            self._notify("unretired", await self.get_insight(insight_id))
             return True
         return False
 
@@ -663,6 +704,11 @@ class InsightStore:
             dismissed_at=(
                 datetime.fromtimestamp(row["dismissed_at"], tz=UTC)
                 if "dismissed_at" in row.keys() and row["dismissed_at"]
+                else None
+            ),
+            retired_at=(
+                datetime.fromtimestamp(row["retired_at"], tz=UTC)
+                if "retired_at" in row.keys() and row["retired_at"]
                 else None
             ),
         )

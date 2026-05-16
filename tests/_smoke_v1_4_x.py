@@ -115,7 +115,8 @@ def _():
 @t("schema v4: ALTER TABLE adds three new columns")
 def _():
     src = _read("custom_components/ha_insights/store/schema.py")
-    assert "CURRENT_VERSION = 4" in src
+    # v1.5.46 bumped CURRENT_VERSION to 5; the v4 migration STEP must
+    # still be in MIGRATIONS so existing v3 → v4 → v5 upgrades work.
     assert "ALTER TABLE insights ADD COLUMN vendor TEXT" in src
     assert "ALTER TABLE insights ADD COLUMN target_user_id TEXT" in src
     assert (
@@ -3030,6 +3031,88 @@ def _():
     assert ".date()" in src
     # days_by_entity → set so a date counts once
     assert "set[date]" in src or "set[\"date\"]" in src
+
+
+# ---- v1.5.46: Retire lifecycle + Logbook on Apply ----
+
+
+@t("v1.5.46: schema v5 adds retired_at column")
+def _():
+    src = _read("custom_components/ha_insights/store/schema.py")
+    assert "CURRENT_VERSION = 5" in src
+    assert "ALTER TABLE insights ADD COLUMN retired_at REAL" in src
+    # Migration step bumps the schema_version row so partial-upgrade
+    # paths can resume cleanly.
+    assert "INSERT OR REPLACE INTO schema_version (version) VALUES (5)" in src
+
+
+@t("v1.5.46: store has retire_insight + clear_retired methods")
+def _():
+    src = _read("custom_components/ha_insights/store/store.py")
+    assert "async def retire_insight(" in src
+    assert "async def clear_retired(" in src
+    # UPSERT path's preserve-on-conflict list must include retired_at
+    # or a re-detection of the same insight would wipe the retire
+    # decision on every scan.
+    assert "DELIBERATELY NOT TOUCHED" in src
+    assert "retired_at" in src
+    # Notify channels for subscribers
+    assert '"retired"' in src
+    assert '"unretired"' in src
+
+
+@t("v1.5.46: Insight dataclass exposes retired_at on to_dict")
+def _():
+    src = _read("custom_components/ha_insights/insight.py")
+    assert "retired_at: datetime | None = None" in src
+    assert '"retired_at":' in src
+
+
+@t("v1.5.46: list_insights accepts include_retired flag")
+def _():
+    src = _read("custom_components/ha_insights/store/store.py")
+    assert "include_retired: bool = False" in src
+    assert "i.retired_at IS NULL" in src
+
+
+@t("v1.5.46: WS endpoints home_insights/retire + /unretire registered")
+def _():
+    src = _read("custom_components/ha_insights/ws_api.py")
+    # Method names listed
+    assert '"retire"' in src
+    assert '"unretire"' in src
+    # Handler shapes
+    assert 'vol.Required("type"): "home_insights/retire"' in src
+    assert 'vol.Required("type"): "home_insights/unretire"' in src
+    assert "async def ws_retire(" in src
+    assert "async def ws_unretire(" in src
+    # And actually wired to the router (the bug v1.5.44 hit on
+    # ws_suggest_additions). Both endpoints AND the legacy
+    # suggest_additions registration must be present.
+    assert "async_register_command(hass, ws_retire)" in src
+    assert "async_register_command(hass, ws_unretire)" in src
+    assert "async_register_command(hass, ws_suggest_additions)" in src
+
+
+@t("v1.5.46: ws_list passes include_retired through to the store")
+def _():
+    src = _read("custom_components/ha_insights/ws_api.py")
+    assert 'vol.Optional("include_retired", default=False): bool' in src
+    assert "include_retired=msg[\"include_retired\"]" in src
+
+
+@t("v1.5.46: ws_apply emits a logbook entry on success")
+def _():
+    src = _read("custom_components/ha_insights/ws_api.py")
+    assert "from homeassistant.components import logbook" in src
+    assert "logbook.async_log_entry(" in src
+    # Attached to the resulting automation so it shows on that row
+    # in the Logbook UI
+    assert 'entity_id=f"automation.{auto_id}"' in src
+    # Distinguish Apply / Refined / Extended in the message body
+    assert '"Extended"' in src
+    assert '"Applied (refined)"' in src
+    assert '"Applied"' in src
 
 
 # ---- Run + report ----

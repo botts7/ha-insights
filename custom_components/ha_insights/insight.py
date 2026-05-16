@@ -103,6 +103,18 @@ class Insight:
     # dataclass so it can compute dismiss-rate without an extra
     # round-trip. None for active / applied insights.
     dismissed_at: datetime | None = None
+    # v1.5.46: lifecycle status alongside Dismiss / Snooze.
+    # Retired = the user has consciously decided NOT to automate
+    # this pattern even though the detector keeps seeing it. Different
+    # semantics from Dismiss (one-off "not relevant") — a Retire
+    # decision should persist across re-detections of the same
+    # fingerprint until the user explicitly un-retires.
+    #
+    # The card surfaces a "Retire" action alongside "Snooze" on
+    # insights the user has reviewed multiple times. List endpoints
+    # filter retired rows out by default; an explicit `include_retired`
+    # flag surfaces them for the history / management view.
+    retired_at: datetime | None = None
     # How confident the detector is that `target_user_id` is the
     # right owner of this pattern. Independent of the pattern's own
     # `confidence` field (which measures signal strength). Examples:
@@ -161,6 +173,9 @@ class Insight:
             "target_user_id_confidence": self.target_user_id_confidence,
             "dismissed_at": (
                 self.dismissed_at.isoformat() if self.dismissed_at else None
+            ),
+            "retired_at": (
+                self.retired_at.isoformat() if self.retired_at else None
             ),
         }
 
