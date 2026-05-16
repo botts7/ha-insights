@@ -4,6 +4,31 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+## [1.5.49] — 2026-05-17
+
+### Fixed
+
+- **Hassfest CI failure: missing `after_dependencies` entries.**
+  v1.5.46 added `from homeassistant.components import logbook` and the
+  audit module has long used `homeassistant.components.trace`, but
+  neither was declared in `manifest.json`. Hassfest fails the build
+  with `[ERROR] [DEPENDENCIES] Using component <name> but it's not in
+  'dependencies' or 'after_dependencies'`. Both added to
+  `after_dependencies` (we don't HARD-require them — the logbook
+  emission falls back gracefully when logbook isn't loaded, and the
+  audit detector skips its trace observations when trace isn't
+  available — so `after_dependencies` is the right severity).
+- **HACS validation failure: extra `description` key.** `hacs.json`
+  doesn't accept `description` — the field is intended for
+  `manifest.json` only on integrations. Dropped from the HACS manifest;
+  the same copy lives in the README which HACS renders inline thanks
+  to `render_readme: true`.
+
+These two failures kept the integration's CI red for every release
+since v1.5.46. The HACS catalog PR ([hacs/default#7682](https://github.com/hacs/default/pull/7682))
+needs a green CI run on the latest release, so v1.5.49 unblocks
+resubmission.
+
 ## [1.5.48] — 2026-05-17
 
 ### Added
