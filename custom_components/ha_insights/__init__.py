@@ -1455,7 +1455,7 @@ async def _async_register_panel(hass: HomeAssistant) -> None:
 
         manifest = await hass.async_add_executor_job(
             lambda: __import__("json").load(
-                open(  # noqa: ASYNC230 — open() runs inside the executor lambda
+                open(
                     os.path.join(
                         os.path.dirname(__file__), "manifest.json"
                     ),
