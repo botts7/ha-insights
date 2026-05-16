@@ -4,6 +4,101 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+## [1.5.44] — 2026-05-16
+
+### Added
+
+- **Suggested Additions — local-first candidate-entity discovery.**
+  When you're looking at an automation insight, HA Insights can now
+  surface entities you might want to extend the automation's action
+  block with — picked from observed evidence and topology, not
+  hallucinated by an LLM. Pairs with companion card v1.2.27+ for the
+  visible checkbox-modal surface; the WS contracts are in place in
+  v1.5.44 so the card update unlocks the UX cleanly.
+
+  Four signal categories, each tier-classified (HIGH / MEDIUM / LOW):
+
+  - **Coactivator** (HIGH): observed to fire within ±5 s of the
+    trigger across multiple days. Strongest evidence; rationalises
+    cross-domain candidates (e.g. *"you manually flip the coffee
+    switch within 2 min of the motion trigger 12 of 14 days"*).
+    The `coactivation_days` input wires through `EventBuffer` and
+    `ManualHabitDetector` signals. *Engine accepts the input; the
+    WS handler populates it in v1.5.45.*
+  - **Device-mate** (HIGH / MEDIUM): same device as an existing
+    target. RGB strips with sub-entities, multi-channel switches.
+  - **Area-mate** (MEDIUM / LOW): same `area_id` as an existing
+    target. Lights in the same room.
+  - **Domain-sibling** (MEDIUM): same domain as existing targets,
+    anywhere on the install. Capped tightest to avoid prompt bloat.
+
+  Cross-domain candidates are tagged with explicit reason strings
+  (`"different domain (media_player.*)"`) and sorted last within each
+  category. Without coactivation evidence, cross-domain candidates
+  land in the LOW tier — collapsed under "Show more" in the card.
+  The TV-on-with-lights case is filtered out by default.
+
+  **Action-target compatibility filter**: candidates suggested for
+  an automation's action block must be in actionable domains
+  (`light`, `switch`, `fan`, `media_player`, `climate`, `cover`,
+  `lock`, `vacuum`, `automation`, `scene`, `script`, `input_boolean`,
+  `input_button`, `notify`, `remote`, `humidifier`, `water_heater`,
+  `siren`, `valve`, `lawn_mower`, `button`). Sensors / binary_sensors
+  / device_trackers / persons / zones / sun / weather are silently
+  dropped — you can't `turn_on` a binary_sensor.
+
+  Per-entity opt-out (`blocked_entities` in OptionsFlow) is honored
+  by the engine — blocked entities never appear as candidates.
+
+- **New WS endpoint `home_insights/suggest_additions`** — returns the
+  flat candidate list with `tier`, `reasons`, `category` per candidate.
+  Deterministic, local-only, no LLM tokens. Companion card opens
+  a checkbox modal populated from this endpoint.
+
+- **`home_insights/apply` extended with `additional_entity_ids`** —
+  optional list of entity_ids the user picked from Suggested Additions.
+  Server runs `lib/automation_yaml.append_entities_to_action_block` on
+  the payload BEFORE the existing L1/L2 validators + AutomationWriter
+  pipeline. Same validation, same writer, same undo flow. Cross-domain
+  candidates not in a known turn_on/off domain return as
+  `unhandled_entity_ids` in the response so the card can offer
+  escalation to LLM Refine for the right service call.
+
+- **`build_refine_prompt` extended with `candidate_block` kwarg** —
+  when present, the LLM Refine prompt switches from the legacy
+  *"Use ONLY these entity_ids"* single-tier constraint to a two-tier
+  REQUIRED / OPTIONAL phrasing with explicit action-type consistency
+  instructions. When absent, the prompt is byte-identical to v1.5.43.
+  Backward-compat preserved for any caller that hasn't migrated.
+
+- **`lib/candidate_entities.py`** — new pure-Python (HA-core-adoptable,
+  no HA imports) module with `build_candidate_entities()` and the
+  `CandidateEntities` / `CandidateEntity` dataclasses. 22 unit tests
+  covering priority logic, action-target filter, tier classification,
+  cross-domain handling, blocked-entity opt-out, deterministic
+  ordering, prompt formatting.
+
+- **`lib/automation_yaml.py`** — new pure-Python (no HA imports) YAML
+  transform helper. `append_entities_to_action_block(payload, eids)`
+  finds the matching action item by service-domain match, promotes
+  scalar `entity_id` to list, appends, dedupes. Handles all three
+  legacy field shapes (`target.entity_id`, top-level `entity_id`,
+  `data.entity_id`). Creates a new action item with
+  `<domain>.turn_on` service for cross-domain additions in 21 known
+  turn-on/off domains. 14 unit tests.
+
+### Notes
+
+The card-side UX (pill, checkbox modal, deterministic apply button,
+LLM Refine escalation for cross-domain) ships in **ha-insights-card
+v1.2.27** as a follow-up. The integration-side contracts in v1.5.44
+are stable; the card can opt in when it's built.
+
+This release is **purely additive** — every existing WS endpoint,
+detector, and lifecycle path behaves identically to v1.5.43 unless
+a caller explicitly opts into the new fields. Backward-compat
+verified via snapshot tests in `tests/test_refiner_prompt_candidates.py`.
+
 ## [1.5.43] — 2026-05-16
 
 ### Changed

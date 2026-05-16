@@ -83,6 +83,11 @@ SUPPORTED_METHODS = (
     "list_ha_users",
     "get_user_overrides",
     "set_user_override",
+    # v1.5.44: Suggested-Additions deterministic surface — server builds
+    # candidate entities from Hierarchy + EventBuffer + ManualHabit, card
+    # shows checkbox modal, user picks, apply via existing
+    # `home_insights/apply` with new `additional_entity_ids` field.
+    "suggest_additions",
 )
 
 
@@ -1066,6 +1071,13 @@ async def ws_dismiss(
         vol.Required("type"): "home_insights/apply",
         vol.Required("insight_id"): str,
         vol.Optional("payload_override"): dict,
+        # v1.5.44: Suggested-Additions deterministic path. Card POSTs a
+        # list of entity_ids the user picked from the checkbox modal;
+        # server runs append_entities_to_action_block on the payload
+        # before validation, so the apply pipeline is unchanged (still
+        # goes through L1 + L2 validators + AutomationWriter + Undo
+        # snapshot). When unset, behavior is identical to v1.5.43.
+        vol.Optional("additional_entity_ids"): [str],
     }
 )
 @websocket_api.require_admin
@@ -1082,6 +1094,14 @@ async def ws_apply(
     stamped with `description: "Refined by HA Insights"` so the lineage is
     visible in HA's automation editor.
 
+    `additional_entity_ids` (added v1.5.44) is the deterministic path for
+    Suggested-Additions. When supplied, server appends those entity_ids
+    to the matching action item(s) via lib.automation_yaml before the
+    existing validation pipeline runs. Same L1/L2 validators, same
+    writer, same undo. Cross-domain additions in unknown service
+    families come back as `unhandled_entity_ids` in the response so
+    the card can route them to LLM Refine instead.
+
     Validation runs in two layers:
       L1 — offline schema check (required keys, types, mode enum)
       L2 — HA's own automation config validator (services exist,
@@ -1096,6 +1116,7 @@ async def ws_apply(
         validate_automation,
         validate_automation_online,
     )
+    from .lib.automation_yaml import append_entities_to_action_block
 
     store = _get_store(hass)
     if store is None:
@@ -1123,6 +1144,22 @@ async def ws_apply(
         payload.setdefault("description", "Refined by HA Insights")
     else:
         payload = insight.payload
+
+    # v1.5.44: deterministic Suggested-Additions path. When the card
+    # sent a list of additional entity_ids, run the YAML transform
+    # BEFORE validation so the L1/L2 validators see the post-append
+    # automation. Cross-domain candidates that don't fit the turn_on
+    # pattern come back as unhandled — we surface that count in the
+    # response so the card can offer to escalate them to LLM Refine.
+    unhandled_additions: list[str] = []
+    additional = msg.get("additional_entity_ids")
+    if isinstance(additional, list) and additional:
+        payload, unhandled_additions = append_entities_to_action_block(
+            payload, [str(eid) for eid in additional]
+        )
+        # Mark lineage even on the deterministic path, so the user can
+        # tell in HA's automation editor that we touched it.
+        payload.setdefault("description", "Extended by HA Insights")
 
     # v1.0 review #10: serialize the validate -> write -> record_applied
     # pipeline so two near-simultaneous applies on overlapping entities
@@ -1158,7 +1195,134 @@ async def ws_apply(
         )
     connection.send_result(
         msg["id"],
-        {"automation_id": auto_id, "refined": override is not None},
+        {
+            "automation_id": auto_id,
+            "refined": override is not None,
+            # v1.5.44: surface unhandled additions so the card can offer
+            # "X candidates need LLM Refine to add" follow-up flow.
+            "unhandled_entity_ids": unhandled_additions,
+        },
+    )
+
+
+# ---------------------------------------------------------------------------
+# v1.5.44 — Suggested-Additions deterministic surface
+# ---------------------------------------------------------------------------
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "home_insights/suggest_additions",
+        vol.Required("insight_id"): str,
+    }
+)
+@websocket_api.async_response
+async def ws_suggest_additions(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Build deterministic candidate-entity additions for an automation insight.
+
+    Pure-local feature — no LLM required. The card opens a checkbox modal
+    populated from this endpoint's response; user picks candidates; apply
+    flows through `home_insights/apply` with the chosen entity_ids in
+    `additional_entity_ids`.
+
+    Strategy (per lib.candidate_entities):
+      - Required entity_ids extracted from the insight's payload action block
+      - Area-mates from `Hierarchy.entities_in_area`
+      - Device-mates from `Hierarchy.entities_on_device`
+      - Domain-siblings filtered by required-entity domains
+      - Coactivators left empty in v1.5.44 (planned for v1.5.45 — needs
+        EventBuffer ±5 s window query per required entity)
+      - Action-target filter on (default-on, only actionable domains
+        surface — sensors etc. silently dropped)
+      - Per-entity opt-out (blocked_entities) honored
+      - Tier classification (HIGH / MEDIUM / LOW) per CandidateEntity
+        drives default-select state in the card UI
+
+    Returns a flat list of candidate dicts with `entity_id`, `tier`,
+    `reasons`, `category` fields so the card doesn't need to know the
+    library's grouping structure.
+    """
+    from .config_flow import get_blocked_entities
+    from .detectors.hierarchy import build_hierarchy
+    from .llm.candidate_entities import build_candidate_entities
+    from .llm.refiner import _collect_entity_ids
+
+    store = _get_store(hass)
+    if store is None:
+        connection.send_error(msg["id"], "not_set_up", "Store not initialized")
+        return
+    insight = await store.get_insight(msg["insight_id"])
+    if insight is None:
+        connection.send_error(
+            msg["id"], "not_found", f"No insight {msg['insight_id']!r}"
+        )
+        return
+    if insight.payload_format != "automation":
+        connection.send_error(
+            msg["id"],
+            "unsupported_format",
+            f"suggest_additions only supports payload_format='automation' "
+            f"(got {insight.payload_format!r})",
+        )
+        return
+
+    # Extract required entity_ids from the insight's automation YAML —
+    # these are the entities the LLM/user MUST preserve, never appear as
+    # candidates. Reuse the refiner's collector so we apply the same
+    # field-recognition logic everywhere.
+    required: set[str] = set()
+    _collect_entity_ids(insight.payload, required)
+
+    hierarchy = build_hierarchy(hass)
+    blocked = _resolve_blocked_entities(hass, get_blocked_entities)
+
+    # Full registry list is used for domain-sibling matching. Reuse
+    # Hierarchy.area_of keys — that's every entity_id in the registry
+    # (Hierarchy walked the entity registry to build it).
+    all_eids = set(hierarchy.area_of.keys())
+
+    candidates = build_candidate_entities(
+        required_entity_ids=required,
+        area_of=hierarchy.area_of,
+        device_of=hierarchy.device_of,
+        entities_in_area=hierarchy.entities_in_area,
+        entities_on_device=hierarchy.entities_on_device,
+        all_entity_ids=all_eids,
+        coactivation_days=None,  # v1.5.45 will populate from EventBuffer
+        blocked_entity_ids=blocked,
+        action_target_only=True,
+    )
+
+    # Flatten the per-category groups into one list with a category tag.
+    # The card sorts/groups its own way (typically by tier, with category
+    # in the row chrome).
+    flat: list[dict[str, Any]] = []
+    for category, group in (
+        ("coactivator", candidates.coactivators),
+        ("device_mate", candidates.device_mates),
+        ("area_mate", candidates.area_mates),
+        ("domain_sibling", candidates.domain_siblings),
+    ):
+        for c in group:
+            flat.append({
+                "entity_id": c.entity_id,
+                "tier": c.tier,
+                "reasons": list(c.reasons),
+                "category": category,
+            })
+
+    connection.send_result(
+        msg["id"],
+        {
+            "insight_id": insight.id,
+            "candidates": flat,
+            "required_entity_ids": sorted(required),
+            "total_count": candidates.total_count,
+        },
     )
 
 

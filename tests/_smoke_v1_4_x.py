@@ -2912,6 +2912,78 @@ def _():
         assert k in adv, f"advanced step missing data label: {k}"
 
 
+# ---- v1.5.44: Suggested-Additions ----
+
+
+@t("v1.5.44: lib/candidate_entities exists with tier classification + action filter")
+def _():
+    src = _read("custom_components/ha_insights/llm/candidate_entities.py")
+    assert "def build_candidate_entities" in src
+    assert "_ACTIONABLE_DOMAIN" in src
+    assert "action_target_only" in src
+    # Tiers
+    assert '"HIGH"' in src
+    assert '"MEDIUM"' in src
+    assert '"LOW"' in src
+    # No HA imports — pure-Python lib
+    assert "from homeassistant" not in src
+    assert "import homeassistant" not in src
+
+
+@t("v1.5.44: lib/automation_yaml exists with append_entities_to_action_block")
+def _():
+    src = _read("custom_components/ha_insights/lib/automation_yaml.py")
+    assert "def append_entities_to_action_block" in src
+    # No HA imports — pure-Python lib, HA-core-adoptable
+    assert "from homeassistant" not in src
+    assert "import homeassistant" not in src
+
+
+@t("v1.5.44: build_refine_prompt accepts optional candidate_block kwarg")
+def _():
+    src = _read("custom_components/ha_insights/llm/refiner.py")
+    # New kwarg signature
+    assert "candidate_block: str | None = None" in src
+    # Two-tier prompt template for the candidates path
+    assert "_REFINE_PROMPT_WITH_CANDIDATES_TMPL" in src
+    assert "REQUIRED entity_ids" in src
+    assert "OPTIONAL candidates" in src
+    # Action-consistency instruction guards against TV-with-lights pattern
+    assert "Action-type consistency" in src
+    # Legacy template still in place — backward-compat for callers that
+    # don't pass candidate_block
+    assert "_REFINE_PROMPT_TMPL = (" in src
+
+
+@t("v1.5.44: WS endpoint home_insights/suggest_additions registered")
+def _():
+    src = _read("custom_components/ha_insights/ws_api.py")
+    assert '"suggest_additions"' in src  # SUPPORTED_METHODS registration
+    assert 'vol.Required("type"): "home_insights/suggest_additions"' in src
+    assert "async def ws_suggest_additions(" in src
+    # Calls into the engine
+    assert "build_candidate_entities" in src
+    # Routes to actionable-domain filter on by default
+    assert "action_target_only=True" in src
+    # Honors blocked entities
+    assert "blocked_entity_ids=blocked" in src
+
+
+@t("v1.5.44: home_insights/apply accepts additional_entity_ids for deterministic add")
+def _():
+    src = _read("custom_components/ha_insights/ws_api.py")
+    # New optional field on the apply schema
+    assert 'vol.Optional("additional_entity_ids"): [str]' in src
+    # Uses the lib helper (not a hand-rolled YAML mutator)
+    assert "from .lib.automation_yaml import append_entities_to_action_block" in src
+    assert "append_entities_to_action_block(" in src
+    # Response surfaces unhandled cross-domain candidates
+    assert '"unhandled_entity_ids"' in src
+    # Lineage: post-add payload is marked so user sees the integration
+    # touched it in HA's automation editor
+    assert "Extended by HA Insights" in src
+
+
 # ---- Run + report ----
 
 passed = sum(1 for _, s, _ in results if s == "PASS")
