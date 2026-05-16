@@ -1445,16 +1445,30 @@ async def _async_register_panel(hass: HomeAssistant) -> None:
 
     def _resolve_panel() -> tuple[str, str]:
         """Return (filesystem_path, module_url) for the panel bundle.
-        Prefers the HACS-managed path. Falls back to the legacy /www/
-        path if HACS isn't installed yet. If neither file exists, we
-        register the HACS path anyway — HACS will land the bundle on
-        next install and the URL stays stable."""
+
+        Resolution order:
+          1. HACS-managed path if the file exists on disk.
+          2. Legacy /www/ path if the file exists there (manual installs).
+          3. HACS path anyway — HACS will land the bundle on next
+             install and the URL stays stable; the panel registration
+             succeeds and `_read_signature` falls through to the
+             version-only cache-bust until the file appears.
+        """
         if os.path.exists(panel_path_hacs):
             return (
                 panel_path_hacs,
                 "/local/community/ha-insights-card/ha-insights-panel.js",
             )
-        return (panel_path_legacy, "/local/ha-insights-panel.js")
+        if os.path.exists(panel_path_legacy):
+            return (panel_path_legacy, "/local/ha-insights-panel.js")
+        # v1.5.42: brand-new HACS install where the tarball hasn't
+        # finished extracting → both files missing momentarily.
+        # Default to HACS path (the post-v1.5.32 preferred location)
+        # so the panel URL stays stable after the bundle lands.
+        return (
+            panel_path_hacs,
+            "/local/community/ha-insights-card/ha-insights-panel.js",
+        )
 
     panel_path, panel_module_path = await hass.async_add_executor_job(
         _resolve_panel

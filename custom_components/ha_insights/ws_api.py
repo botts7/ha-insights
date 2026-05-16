@@ -18,6 +18,9 @@ from homeassistant.components import websocket_api
 from homeassistant.core import HomeAssistant, callback
 
 from .const import DOMAIN
+from .lib.title_cleanup import (
+    strip_already_automated_cta as _strip_already_automated_cta,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -753,27 +756,11 @@ async def ws_list(
 # ---------------------------------------------------------------------------
 
 
-# v1.5.31: trailing call-to-action patterns the detectors emit and the
-# 🔁-already-automated check should strip. Pre-compiled for the hot path
-# (every insight in the list call gets checked). Case-insensitive,
-# whitespace-tolerant; matches at end-of-string only so it can't
-# accidentally chew up earlier text.
-import re as _re
-
-_ALREADY_AUTOMATED_CTA_RE = _re.compile(
-    r"\s*(?:Automate\s+(?:this|it)\??|Build\s+automation\??)\s*$",
-    _re.IGNORECASE,
-)
-
-
-def _strip_already_automated_cta(title: str) -> str:
-    """Drop the trailing 'Automate this?' / 'Automate it?' / 'Build
-    automation?' from titles where the conflict scanner already
-    matched an existing automation. Pure string transform — no side
-    effects on storage. See `_ALREADY_AUTOMATED_CTA_RE` for patterns."""
-    if not title:
-        return title
-    return _ALREADY_AUTOMATED_CTA_RE.sub("", title).rstrip()
+# v1.5.42: strip is canonical at detector-emission time (see
+# detectors/__init__.py — applied after find_conflicts before
+# store.add_insight). The call inside `ws_list` above stays as
+# defense in depth for stored insights that pre-date v1.5.42.
+# Helper imported from `lib.title_cleanup`.
 
 
 def _normalize_title_for_dedup(title: str, eids: list[str]) -> str:

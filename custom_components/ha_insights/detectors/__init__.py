@@ -500,8 +500,26 @@ async def run_all_detectors(
                 )
                 if conflicts:
                     suppressed_as_duplicate += 1
+                    # v1.5.42: strip the trailing "Automate this?" CTA
+                    # on shadowed insights at emission time so the
+                    # canonical stored title reads cleanly for every
+                    # downstream consumer — WS list, persistent_
+                    # notification toast, mobile push, daily digest.
+                    # The previous WS-layer strip ran post-cohort-
+                    # merge with an end-anchored regex; cohort-merged
+                    # titles ended in "(+N similar entities: ...)" and
+                    # the regex no-op'd, leaking the contradictory CTA
+                    # to every notification path. `strip_already_
+                    # automated_cta` from lib/title_cleanup is suffix-
+                    # aware.
+                    from ..lib.title_cleanup import (
+                        strip_already_automated_cta,
+                    )
+
                     insight = replace(
-                        insight, conflicts_with=tuple(conflicts)
+                        insight,
+                        conflicts_with=tuple(conflicts),
+                        title=strip_already_automated_cta(insight.title),
                     )
             await store.add_insight(insight)
             emitted_ids.add(insight.id)

@@ -66,18 +66,18 @@ class CooccurrenceClass(str, Enum):
     """Coarse classification of surrounding-event density."""
 
     HUMAN_CONTEXT = "human_context"
-    """≥ 3 other entity state changes within ±window_seconds on average —
-    the home was busy around each event. Multimodal signature."""
+    """Median nearby-event count ≥ 3 within ±window_seconds — the home
+    was typically busy around each event. Multimodal signature."""
 
     AMBIGUOUS = "ambiguous"
-    """1-2 surrounding events on average. Could be a related sensor
-    on the same device (battery, signal strength) firing alongside,
-    not necessarily human presence."""
+    """Median nearby-event count of 1-2. Could be a related sensor on
+    the same device (battery, signal strength) firing alongside, not
+    necessarily human presence."""
 
     ISOLATED = "isolated"
-    """< 0.5 surrounding events on average. Entity fires in silence —
-    consistent with a device internal timer that has no human or
-    sibling-sensor activity nearby."""
+    """Median nearby-event count < 1 — entity typically fires in
+    silence. Consistent with a device internal timer that has no
+    human or sibling-sensor activity nearby."""
 
     INSUFFICIENT_DATA = "insufficient_data"
     """< _MIN_SAMPLES events. Not enough cluster events to assess
