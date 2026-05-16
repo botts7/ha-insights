@@ -70,9 +70,10 @@ class PersistenceClass(str, Enum):
     tight delay) or a polite device that varies slightly."""
 
     FIXED_CYCLE = "fixed_cycle"
-    """CV < 5% across ≥ 4 sessions. The entity holds state for the same
-    duration every time within sub-second precision — definitive
-    device internal timer."""
+    """CV < 5% across ≥ 3 sessions (the `_MIN_SAMPLES` floor lowered
+    from 4 in v1.5.39 so 3-day streaks get graded). The entity holds
+    state for the same duration every time within sub-second
+    precision — definitive device internal timer."""
 
     INSUFFICIENT_DATA = "insufficient_data"
     """< _MIN_SAMPLES durations available. Some cluster events haven't

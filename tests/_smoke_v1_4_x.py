@@ -2383,23 +2383,33 @@ def _():
     assert "{panel_module_path}?v={cache_bust}" in src
 
 
-@t("v1.5.31: ws_api strips trailing 'Automate this?' CTA on shadowed insights")
+@t("v1.5.42: strip 'Automate this?' CTA at detector emission, shared lib, defense-in-depth WS")
 def _():
-    """A client-side strip in card v1.2.11 proved unreliable under
-    HA's service-worker caching of Lit templates — incognito tabs
-    still saw the old title. Moving the strip server-side at WS-list
-    time (after conflicts_with has been computed) guarantees every
-    consumer — panel, dashboard card, persistent_notification, mobile
-    push, daily digest — gets the de-CTA'd title."""
-    src = _read("custom_components/ha_insights/ws_api.py")
-    assert "_strip_already_automated_cta" in src
-    assert "_ALREADY_AUTOMATED_CTA_RE" in src
-    # Helper applied conditionally on conflicts_with
-    assert "if ins.conflicts_with:" in src
-    assert "_strip_already_automated_cta(d.get(\"title\", \"\"))" in src
-    # Regex covers all three known CTAs
-    assert "Automate" in src
-    assert "Build" in src
+    """v1.5.31 moved the strip server-side after a client-side strip
+    proved unreliable under HA's service-worker caching. v1.5.42
+    moved it earlier — to detector emission, before `store.add_insight`
+    — because cohort dedup appended '(+N similar entities: ...)' to
+    titles, leaving the end-anchored regex a no-op on cohort-merged
+    shadowed insights. Now the canonical stored title is CTA-stripped
+    for every consumer (panel, persistent_notification, mobile push,
+    daily digest). The WS pass remains as defense-in-depth for
+    stored insights that pre-date v1.5.42."""
+    # Shared lib carries the suffix-aware strip implementation
+    lib_src = _read("custom_components/ha_insights/lib/title_cleanup.py")
+    assert "strip_already_automated_cta" in lib_src
+    assert "_ALREADY_AUTOMATED_CTA_RE" in lib_src
+    assert "_COHORT_SUFFIX_RE" in lib_src
+    assert "Automate" in lib_src
+    assert "Build" in lib_src
+    # ws_api still applies on conflicts_with for stored insights pre-v1.5.42
+    ws_src = _read("custom_components/ha_insights/ws_api.py")
+    assert "from .lib.title_cleanup import" in ws_src
+    assert "_strip_already_automated_cta" in ws_src
+    assert "if ins.conflicts_with:" in ws_src
+    # Canonical strip at emission time before store.add_insight
+    det_src = _read("custom_components/ha_insights/detectors/__init__.py")
+    assert "from ..lib.title_cleanup import" in det_src
+    assert "strip_already_automated_cta(insight.title)" in det_src
 
 
 @t("v1.5.28: ws_api emits `labels` per insight from hierarchy.labels_of")

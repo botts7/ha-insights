@@ -4,6 +4,33 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+## [1.5.42] — 2026-05-16
+
+### Fixed
+
+- **`Automate this?` CTA stripped at storage time, canonical for every
+  consumer.** Pre-v1.5.42 the strip ran only in the WS list pipeline
+  AFTER cohort dedup appended `(+N similar entities: …)` to titles —
+  the end-anchored regex no-op'd and the CTA leaked through to the
+  persistent_notification toast, mobile push, and daily digest on
+  shadowed insights. Strip now runs in the detector emission loop
+  right after `conflicts_with` is set, before `store.add_insight`.
+  Shared `lib/title_cleanup.py` is suffix-aware (splits off the
+  cohort tail, strips the prefix CTA, rejoins).
+- **`_resolve_panel` defaults to HACS path when neither file exists.**
+  Brand-new HACS install where the card tarball hasn't finished
+  extracting → both panel files momentarily missing → resolver was
+  returning the legacy `/local/ha-insights-panel.js` URL, which 404s
+  until the user reloads the UI. Now defaults to the HACS URL so the
+  panel registration stays stable across the extraction window.
+- **Docstring drift in grader libs.**
+  - `lib/persistence_likelihood.py::FIXED_CYCLE` said "≥ 4 sessions";
+    `_MIN_SAMPLES` has been 3 since v1.5.39.
+  - `lib/cooccurrence_likelihood.py` class docstrings said "on
+    average" (mean); code classifies on the median, and ISOLATED
+    now reads "< 1" not "< 0.5".
+  - Matters because these libs are explicitly marked HA-core-adoptable.
+
 ## [1.5.41] — 2026-05-16
 
 ### Fixed
