@@ -348,14 +348,14 @@ A per-month USD budget can be set in OptionsFlow for cloud agents; the backgroun
 
 ## Status & contributing
 
-**v1.5.42** — early public release. What that means in practice:
+**v1.5.43** — first public release. What that means in practice:
 
 | Area | Status |
 |---|---|
-| Integration core (detectors, audit, redactor, store, WS API) | **Stable** — months on a real HA install, 75 lib + 157 smoke tests passing |
-| Privacy controls (opt-in LLM, pseudonymization, audit log, "what gets sent?") | **Stable** — privacy contract is a hard rule, not a feature flag |
-| Panel UI | **Hardening** — known regression: blank-on-tab-return after long backgrounding, recovery is automatic but slow. See [#TODO open issue link] |
-| Mobile push throttling, daily-digest cadence | **Hardening** — anti-spam works, fine-tuning the defaults |
+| Integration core (detectors, audit, redactor, store, WS API) | **Test-covered** — 75 lib + 157 smoke tests passing. Hasn't seen wide community use yet. |
+| Privacy controls (opt-in LLM, pseudonymization, audit log, "what gets sent?") | **Test-covered** — privacy contract is a hard rule, not a feature flag |
+| Panel UI | **Under active investigation** — in-flight blank-on-tab-return bug. v1.2.24/v1.2.25 in the card chased part of the cause; a second root cause is still being tracked. |
+| Mobile push throttling, daily-digest cadence | **Untested at scale** — anti-spam logic exists; defaults will likely need tuning based on community feedback |
 | HAWatcher shadow-execution (v1.6 roadmap) | **Not started** — research direction; contributors welcome |
 
 ### How to report something broken

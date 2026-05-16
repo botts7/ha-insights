@@ -1,12 +1,14 @@
 # HA Insights
 
-> ⚠️ **Early public release (v1.5.42).** The integration core — detectors,
-> audit pipeline, redactor, store, WS API — has been running on a real HA
-> install for months and is stable. The **panel UI is still hardening**
-> (blank-on-tab-return is a known regression we're chasing). If anything
-> looks broken, please [open an issue](https://github.com/botts7/ha-insights/issues/new/choose)
-> with your HA + integration versions and browser; PRs welcome. Soft
-> launch ahead of the WTH window — your reports drive the priority list.
+> ⚠️ **Early public release (v1.5.43).** This is the first public-facing
+> version. The core pipeline (detectors, audit, redactor, store, WS API)
+> is test-covered (75 lib + 157 smoke tests pass) but hasn't seen wide
+> community use yet. The **panel UI is still hardening** — there's an
+> in-flight blank-on-tab-return bug under active investigation. **Things
+> will break; please report what you find.**
+> [Open an issue](https://github.com/botts7/ha-insights/issues/new/choose)
+> with your HA + integration versions, browser, and any console output.
+> PRs welcome.
 
 **Audits the automations you've already written + spots new ones — proactive pattern detection with AI-assisted refinement.**
 
