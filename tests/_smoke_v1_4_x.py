@@ -3115,6 +3115,60 @@ def _():
     assert '"Applied"' in src
 
 
+# ---- v1.5.48: HabitualOverrideDetector ----
+
+
+@t("v1.5.48: lib/habitual_override exists with find_habitual_overrides")
+def _():
+    src = _read("custom_components/ha_insights/lib/habitual_override.py")
+    assert "def find_habitual_overrides(" in src
+    # Forward-only window — distinct from coactivation's symmetric one
+    assert "window_seconds: float = 120.0" in src
+    assert "lookback_days: int = 14" in src
+    assert "min_days: int = 3" in src
+    # Reuses the same manual / automation classification semantics
+    assert "_is_manual" in src
+    assert "_is_automation_driven" in src
+    # Pure-lib invariant
+    assert "homeassistant" not in src
+    # Returns the OverrideStat shape
+    assert "class OverrideStat" in src
+    assert "days_count" in src
+    assert "median_lag_seconds" in src
+
+
+@t("v1.5.48: HabitualOverrideDetector registered + wraps the lib")
+def _():
+    src = _read(
+        "custom_components/ha_insights/detectors/habitual_override.py"
+    )
+    # Decorated registration
+    assert "@register_detector" in src
+    assert "class HabitualOverrideDetector(Detector):" in src
+    # Identity + maturity
+    assert 'name = "habitual_override"' in src
+    assert "kind = InsightKind.PATTERN_OBSERVATION" in src
+    assert "maturity = Maturity.BETA" in src
+    # Calls the lib + honors blocked_entities
+    assert "find_habitual_overrides(" in src
+    assert "ctx.blocked_entities" in src
+    # Description present (surfaced in OptionsFlow)
+    assert "description = " in src
+
+
+@t("v1.5.48: habitual_override insights serialize as PATTERN_OBSERVATION+report")
+def _():
+    """The detector emits PATTERN_OBSERVATION (not AUTOMATION_PROPOSAL)
+    with payload_format='report' — it's a finding, not a one-click
+    proposed YAML. Guards against accidental drift to a different
+    kind/format that would make the card try to render Apply on it."""
+    src = _read(
+        "custom_components/ha_insights/detectors/habitual_override.py"
+    )
+    assert 'payload_format="report"' in src
+    assert "InsightKind.PATTERN_OBSERVATION" in src
+
+
 # ---- Run + report ----
 
 passed = sum(1 for _, s, _ in results if s == "PASS")

@@ -4,6 +4,38 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+## [1.5.48] — 2026-05-17
+
+### Added
+
+- **`HabitualOverrideDetector` — surface automations the user keeps
+  correcting.** When an automation sets `light.hallway` to `on` and
+  within two minutes you manually flip it `off`, ONCE is noise.
+  THREE TIMES across 14 days, on different days, is a habit — the
+  automation likely needs revising.
+
+  Surfaces a `PATTERN_OBSERVATION` insight per detected (entity,
+  automation_state, manual_state) tuple where the user reverses an
+  automation's effect within 120 s on at least 3 distinct days. NOT
+  one-click applicable — the user owns their own automation and may
+  want to remove the action, add a condition, or flip the target
+  state. We surface the observation; they choose the fix.
+
+  - New pure lib `lib/habitual_override.py` exposing
+    `find_habitual_overrides(events, …) -> list[OverrideStat]`. Forward-
+    only window, same-entity reversal detection, only-first-reversal-
+    counts logic so later "corrections of own corrections" don't
+    inflate sample size. Zero HA imports. 15 unit tests covering
+    window boundaries, equal-state non-reversals, cross-entity
+    isolation, bootstrap exclusion, automation-vs-automation handoff,
+    and physical-switch-as-manual classification.
+  - New detector `detectors/habitual_override.py` wrapping the lib.
+    Maturity `BETA`. Auto-registered via the sibling-module discovery
+    pattern. Honors per-entity opt-out via `blocked_entities`.
+  - Re-uses the v1.5.45 manual/automation classification (`_is_manual`,
+    `_is_automation_driven`) — the same unifying-signal foundation
+    that drives Suggested Additions in the other direction.
+
 ## [1.5.47] — 2026-05-17
 
 ### Added
