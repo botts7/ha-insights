@@ -64,6 +64,55 @@ _REFINE_PROMPT_TMPL = (
 )
 
 
+# v1.5.44: extended prompt template that surfaces candidate entities
+# the LLM may add. The {candidate_block} placeholder receives a
+# pseudonymized multi-line listing (one entity per line with HIGH/
+# MEDIUM/LOW tier + reasons in parens) — see CandidateEntities
+# .format_for_prompt() in lib/candidate_entities.py.
+#
+# Used only when the caller (WS refine handler) chose to pass candidates
+# through. When no candidates, the v1.5.43 _REFINE_PROMPT_TMPL is used
+# verbatim — same byte output as before. Backward-compat preserved
+# for any third-party callers that haven't migrated.
+_REFINE_PROMPT_WITH_CANDIDATES_TMPL = (
+    "Refine this Home Assistant automation. Add a debounce, condition, or "
+    "mode change as appropriate. Be terse — keep the YAML minimal.\n\n"
+    "Budget discipline (CRITICAL):\n"
+    "- Output should be reasonably tight, but you MUST emit a complete\n"
+    "  valid YAML refinement that preserves every entity_id and every\n"
+    "  load-bearing field from the current automation.\n"
+    "- If your agent's max_output_tokens is so low that you cannot fit a\n"
+    "  complete YAML rewrite, output exactly this single line and NOTHING\n"
+    "  ELSE: INSUFFICIENT_BUDGET\n"
+    "- Do NOT start emitting YAML you cannot finish — truncated YAML is\n"
+    "  worse than admitting the budget is too tight.\n"
+    "- Do NOT emit INSUFFICIENT_BUDGET because you THINK 250 tokens is\n"
+    "  the limit. Trust your actual token budget; only bail out when\n"
+    "  there is genuinely no room for the rewrite.\n\n"
+    "Otherwise, output exactly two sections (no markdown fences, no extra\n"
+    "commentary):\n"
+    "RATIONALE: <one short sentence>\n"
+    "YAML:\n"
+    "alias: ...\n"
+    "trigger: [...]\n"
+    "action: [...]\n"
+    "mode: ...\n\n"
+    "Constraints (strict):\n"
+    "- REQUIRED entity_ids (must preserve): {entity_list}\n"
+    "- OPTIONAL candidates (add only if the user feedback explicitly\n"
+    "  asks for additions OR there is clear evidence of coactivation):\n"
+    "{candidate_block}\n"
+    "- Action-type consistency: prefer same-domain candidates. Only\n"
+    "  suggest cross-domain candidates when there is clear evidence\n"
+    "  (a coactivation reason in parens) or the user explicitly asks.\n"
+    "- Do NOT invent entity_ids that are not in either list above.\n"
+    "- Output must be complete valid YAML (close all quotes/brackets)\n\n"
+    "Current automation:\n"
+    "{current_yaml}\n\n"
+    "Considerations: {considerations}\n"
+)
+
+
 # Sentinel the LLM emits when it can't fit a complete refinement in budget.
 # We instruct it explicitly above; reliable enough on Gemini Pro / Flash,
 # Claude, GPT-4, Llama 3.x. Cheaper rule-based agents won't emit it but
@@ -248,7 +297,19 @@ def build_refine_prompt(
     *,
     prior_explanation: str | None,
     feedback: str | None = None,
+    candidate_block: str | None = None,
 ) -> str:
+    """Build the LLM Refine prompt.
+
+    `candidate_block` is an optional pre-formatted multi-line string of
+    candidate entity_ids (the caller pseudonymized them through the
+    same Redactor + RedactionMap as the payload so the LLM sees
+    consistent names). When provided, the prompt's entity-constraint
+    section becomes two-tier (REQUIRED + OPTIONAL candidates) and
+    instructs the LLM to prefer same-domain additions. When `None`
+    (the v1.5.43 path), the prompt is byte-identical to before — no
+    behavior change for callers that don't opt in.
+    """
     entities: set[str] = set()
     _collect_entity_ids(redacted_payload, entities)
     parts: list[str] = []
@@ -260,6 +321,13 @@ def build_refine_prompt(
     if not parts:
         parts.append("(infer common-sense caveats)")
     considerations = "\n".join(parts)
+    if candidate_block:
+        return _REFINE_PROMPT_WITH_CANDIDATES_TMPL.format(
+            entity_list=", ".join(sorted(entities)) or "(none)",
+            candidate_block=candidate_block,
+            current_yaml=_yaml_dump(redacted_payload),
+            considerations=considerations,
+        )
     return _REFINE_PROMPT_TMPL.format(
         entity_list=", ".join(sorted(entities)) or "(none)",
         current_yaml=_yaml_dump(redacted_payload),
