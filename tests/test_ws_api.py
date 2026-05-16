@@ -15,10 +15,26 @@ from custom_components.ha_insights.config_flow import (
 from custom_components.ha_insights.const import DOMAIN
 from custom_components.ha_insights.insight import Insight, InsightKind
 from custom_components.ha_insights.ws_api import (
-    INTEGRATION_VERSION,
     SUPPORTED_METHODS,
     WS_PROTOCOL_VERSION,
 )
+
+
+def _integration_version() -> str:
+    """Read manifest.json the same way ws_hello does at runtime."""
+    import json
+    from pathlib import Path
+
+    manifest = (
+        Path(__file__).parent.parent
+        / "custom_components"
+        / "ha_insights"
+        / "manifest.json"
+    )
+    return json.loads(manifest.read_text(encoding="utf-8"))["version"]
+
+
+INTEGRATION_VERSION = _integration_version()
 
 
 def _make_insight(insight_id: str = "abc123", **overrides) -> Insight:
