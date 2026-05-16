@@ -18,8 +18,7 @@ venv/
 .idea/
 .vscode/
 
-# Local-only contributor / agent docs (not published)
-CLAUDE.md
+# Local-only developer workflow notes (not published)
 .dev/
 
 # OS
