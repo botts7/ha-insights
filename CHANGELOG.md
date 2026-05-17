@@ -4,6 +4,75 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+## [1.12.0] — 2026-05-17
+
+### Added — BLE live-find backend (Find My Device, axis 3)
+
+The v1.10 Find-My-Device feature covers two capability axes:
+🔆 identify-capable (active devices) and 👆 perturbation
+(passive sensors). v1.12 adds the third: **📡 BLE-trackable**
+— real-time RSSI scope ("warmer/colder" UX) using HA's
+bluetooth integration.
+
+#### Why BLE is the only "warmer/colder" signal that works
+
+- **WiFi RSSI**: device→AP, doesn't change as you walk. Useless.
+- **Zigbee LQI**: device→coordinator, same problem. Useless.
+- **Matter/Thread**: mesh-based, same problem.
+- **BLE**: bidirectional + short-range (~10 m). When the user's
+  phone (companion app's BLE scanner) or a portable proxy is the
+  receiver, RSSI tracks the user's movement.
+
+#### `lib/ble_capability.py`
+
+Pure: given an entity, derive whether it's BLE-trackable and
+what its address is.
+- Primary signal: `("bluetooth", "AA:BB:..")` in
+  `device.connections`
+- Fallback: `bluetooth_address` / `mac` / `address` in state
+  attributes (for BTHome and similar)
+- Normalization: all addresses canonicalized to
+  `AA:BB:CC:DD:EE:FF` regardless of input separator/case
+- Rejects Zigbee IEEE (8-byte) addresses to avoid
+  misclassification
+
+12 unit tests covering format normalization, attribute
+fallback, Zigbee IEEE rejection, pluralization corners.
+
+#### WS endpoints
+
+- `home_insights/ble_capability` — read-only batch query.
+  Returns per-entity `{is_trackable, bluetooth_address,
+  seen_by_proxies, reason}`. Card uses this to know which rows
+  should show the 📡 button.
+- `home_insights/ble_live_find` — admin-gated streaming
+  subscription. Opens a server-side BLE advertisement callback
+  for the given address; forwards each advertisement received
+  to the WS client with raw + EMA-smoothed RSSI (~3 s effective
+  window) + which proxy saw it. Auto-unsubscribes when the
+  client disconnects via HA's WS framework.
+
+#### What's next
+
+- v1.12.5 / card v1.10.0 — UI for the 📡 button + live RSSI
+  scope (warm/cold buckets, trend arrows, optional haptic via
+  companion app, multi-proxy triangulation view for users with
+  several ESPHome BLE proxies)
+
+### Roadmap progress
+
+- v1.10 Phase A + B (identify + perturbation) ✅
+- v1.10.3 + .4 static dedup hint ✅
+- v1.11.0 correlation-based dedup ✅
+- v1.11.5 location proposal ✅
+- **v1.12.0 BLE live-find backend** ✅ (THIS)
+- v1.12.5 BLE live-find UI (card v1.10.0) — next
+- v1.13 survival analysis (lifelines AFT)
+- v1.14 sequence mining (prefixspan)
+- v1.15 HardwareSuggestionDetector
+- v1.16 AdaptiveFeedbackDetector
+- v2.0 per-person presence (with MRAR / Gamut PHD primitives)
+
 ## [1.11.5] — 2026-05-17
 
 ### Added — LocationProposalDetector
