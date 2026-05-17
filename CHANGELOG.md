@@ -4,6 +4,76 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+## [1.12.10] — 2026-05-17
+
+### Fixed — setup_quality "Manage" links + low-confidence filler
+
+Two real-install UX issues from user testing on v1.12.9.
+
+#### 1. `setup_quality` Manage buttons now go to in-HA pages
+
+**Reported**: in the PhoneActivity feature card at GREAT tier,
+the "Manage" button pointed at
+`https://companion.home-assistant.io/` — the public marketing
+site. Useful for a user who DOESN'T have the app yet, dead
+weight for one who does (the case this user was in).
+
+**Fixed**:
+- `phone_activity` recipe now links to
+  `/config/integrations/integration/mobile_app`. That URL works
+  for both states — opens HA's mobile_app integration page for
+  installed users (manage devices, re-pair) and surfaces the
+  add-integration dialog for users without it. Label changed
+  from "Get the Companion App" to "Manage mobile devices."
+- `manual_habit` recipe previously had `setup_url: None` because
+  the remedy is behavioural ("use HA for a week"). User
+  reported the missing button felt like a dead end — there was
+  nowhere to GO to watch the feature work. Now links to
+  `/ha-insights` (the panel itself) so users can watch
+  manual_habit insights surface as the buffer fills. Label:
+  "View HA Insights panel."
+
+#### 2. Suppress low-confidence already-automated / device-managed insights
+
+**Reported**: panel showed ~5 filler insights at 10-15%
+confidence, all marked `🔁 already automated` or
+`🤖 device-managed`. Specifically:
+- `switch.main_room_led_bar → off 8 days at ~23:27` (10% conf,
+  already automated)
+- `light.back_garden_lights → off 5 days at ~23:27` (11% conf,
+  device-managed)
+- `switch.inverter_*_switch → on 3 days at ~07:22` (10% conf,
+  device-managed)
+
+None had action value: the pattern is either already automated
+or device-internal logic, AND the detector wasn't even confident
+in the pattern itself.
+
+**Fixed**: new `_is_low_confidence_filler` filter in
+`detectors/__init__.py::run_all_detectors`. Drops insights where
+`confidence < 0.50` **AND** (either `conflicts_with` non-empty
+**OR** `_timing_assessment.timing_class == "device_likely"`).
+
+Tested both edges:
+- High-confidence shadowed insights (≥ 0.50) preserved (user
+  might want to refine/replace the existing automation)
+- TIGHT_PATTERN timing class preserved (different signal from
+  DEVICE_LIKELY — indicates coincident user routine, not
+  device-internal logic)
+- Low-confidence insights WITHOUT filler signals preserved
+  (some legitimate emerging patterns start at low confidence)
+
+13 unit tests in `test_low_confidence_filler_filter.py`.
+
+### After this update + scan
+
+User's panel should drop ~5 noise insights:
+- All low-conf state_shift on newly-added entities (v1.12.9 fix)
+- All low-conf `🔁 already automated` schedule/streak filler
+- All low-conf `🤖 device-managed` schedule/streak filler
+
+Net effect: 28 insights → ~18 actionable. Higher signal-to-noise.
+
 ## [1.12.9] — 2026-05-17
 
 ### Fixed — real-install false positives (StateShiftDetector)
