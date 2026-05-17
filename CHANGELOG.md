@@ -4,6 +4,79 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+## [1.9.1] — 2026-05-17
+
+### Added
+
+- **LaggedCorrelationDetector: transfer-entropy direction check**.
+  Wires v1.9.0's `lib/transfer_entropy.py` into the BETA detector.
+  Temporal ordering ("Y fires after X") is necessary but not
+  sufficient for "X causes Y": two entities both driven by sunset,
+  by a manual ritual, or by an unseen third factor produce
+  identical-looking temporal-lag patterns. TE measures whether X's
+  past actually reduces uncertainty about Y's future beyond Y's own
+  past.
+
+  Per-pair behaviour:
+  - **Reversed direction** (TE(Y→X) dominates) → confidence × 0.5.
+    Heavy demotion — the proposal is backwards; the follower is
+    actually the leader. Usually drops the insight below
+    `MIN_CONFIDENCE_TO_EMIT` (0.55).
+  - **Symmetric flow** with non-zero magnitude → confidence × 0.85.
+    Mild demotion; both directions have flow, suggesting both are
+    driven by a third factor.
+  - **Uninformative** (both TEs below noise floor) → no demotion.
+    Sparse data; don't penalize what we can't measure.
+  - **Confirmed direction** (TE(X→Y) dominates) → no demotion.
+
+  Bin width is matched to the observed lag (`avg(deltas)` clamped
+  to [60s, 300s]) so single-step TE picks up the coupling. A 180s
+  lag with 60s bins places transitions three bins apart and TE
+  picks up nothing; matching the bin to the lag puts related
+  transitions one step apart.
+
+  Per-entity event streams are computed ONCE per scan (O(N)),
+  cached on the detector, and reused across all pair evaluations.
+  Stream cache is cleared in a `finally` block to prevent
+  cross-scan leakage.
+
+### Card-facing
+
+- Every lagged_correlation insight now carries a `_directionality`
+  payload key. Shape:
+  ```json
+  {
+    "assessed": true,
+    "direction": "x_to_y" | "y_to_x" | "symmetric",
+    "te_x_to_y": 0.9,
+    "te_y_to_x": 0.05,
+    "asymmetry": 0.85,
+    "confidence": 0.95,
+    "n_samples": 200
+  }
+  ```
+  When TE wasn't run (no events, sparse pair), `{"assessed": false}`.
+  The card UI for a 🔀 "verified direction" badge lands in a follow-up
+  card release.
+
+### Tests
+
+- `tests/test_lagged_correlation_directionality.py` — 11 new tests
+  covering: factor selection by direction × confidence × signal
+  strength, payload helper structure, end-to-end synthetic flows
+  (real X→Y, reversed, missing entity), payload stamp on emitted
+  insights, and stream-cache cleanup between scans.
+
+### Roadmap progress
+
+- v1.8.0 — changepoint lib ✅
+- v1.8.1 — FrequencyAnomalyDetector wiring ✅
+- v1.8.2 — StateShiftDetector ✅
+- v1.9.0 — transfer entropy lib ✅
+- **v1.9.1 — wire into LaggedCorrelationDetector** ✅ (THIS)
+- v1.10 — survival analysis (lifelines AFT)
+- v1.11 — sequence mining (prefixspan)
+
 ## [1.9.0] — 2026-05-17
 
 ### Added
