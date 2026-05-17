@@ -251,6 +251,21 @@ class BulkAreaAssignDialog extends i {
          *  Map: entity_id → { score (0-1), tier, chosen_name }.
          *  Empty map = enrichment didn't run or returned no data. */
         this._nameQuality = new Map();
+        /** v1.6.0 — Per-entity identify capability (from the same
+         *  home_insights/identify_capability response that populates
+         *  _nameQuality). When `supported === true` we render a 🔆 button
+         *  the user can click to fire `home_insights/identify_entity`. */
+        this._identifyCaps = new Map();
+        /** v1.6.0 — Per-entity identify-request lifecycle state.
+         *
+         *  - "idle": no request in flight, button is clickable
+         *  - "pending": request fired, awaiting response (button disabled)
+         *  - "success": last request succeeded — show ✓ confirmation
+         *  - "failed": last request errored — show ✗ + error message
+         *
+         *  Success / failed states auto-clear after 3s so the user can
+         *  click again. */
+        this._identifyState = new Map();
         /** v1.2.7 — Structured filters in addition to free-text search.
          *  Empty string = "all". Populated from the actual data on fetch
          *  so users only see options they have. */
@@ -333,17 +348,26 @@ class BulkAreaAssignDialog extends i {
                 type: "home_insights/identify_capability",
                 entity_ids: candidates,
             });
-            const next = new Map();
+            const nextNq = new Map();
+            const nextCaps = new Map();
             for (const [eid, cap] of Object.entries(resp.capabilities ?? {})) {
                 if (cap.name_quality) {
-                    next.set(eid, {
+                    nextNq.set(eid, {
                         score: cap.name_quality.score,
                         tier: cap.name_quality.tier,
                         chosen_name: cap.name_quality.chosen_name,
                     });
                 }
+                if (cap.method && cap.description !== undefined) {
+                    nextCaps.set(eid, {
+                        method: cap.method,
+                        description: cap.description,
+                        supported: !!cap.supported,
+                    });
+                }
             }
-            this._nameQuality = next;
+            this._nameQuality = nextNq;
+            this._identifyCaps = nextCaps;
         }
         catch {
             // HA Insights not installed, or older version without the
@@ -436,6 +460,107 @@ class BulkAreaAssignDialog extends i {
       title="${title}"
       >${icon}</span
     >`;
+    }
+    /** v1.6.0 — render the 🔆 identify button for one entity row.
+     *
+     *  Only renders when the integration says the entity supports an
+     *  identify signal (flash_light / strobe_light / play_chime /
+     *  siren_chirp / switch_toggle). For unsupported entities (passive
+     *  sensors, etc.) returns nothing — Phase B perturbation testing
+     *  is the future answer there.
+     *
+     *  Button state is per-entity (see `_identifyState`):
+     *    idle    → 🔆 clickable
+     *    pending → ⏳ disabled, "calling…"
+     *    success → ✓ "<description>", auto-clears after 3 s
+     *    failed  → ✗ "<error>", auto-clears after 3 s
+     */
+    _renderIdentifyButton(entity_id) {
+        const cap = this._identifyCaps.get(entity_id);
+        if (!cap || !cap.supported)
+            return A;
+        const st = this._identifyState.get(entity_id) ?? { status: "idle" };
+        let label = "🔆";
+        let title = `Identify: ${cap.description}`;
+        let disabled = false;
+        let cls = "identify-btn identify-btn-idle";
+        switch (st.status) {
+            case "pending":
+                label = "⏳";
+                title = "Sending identify…";
+                disabled = true;
+                cls = "identify-btn identify-btn-pending";
+                break;
+            case "success":
+                label = "✓";
+                title = st.message ?? cap.description;
+                cls = "identify-btn identify-btn-success";
+                break;
+            case "failed":
+                label = "✗";
+                title = st.message ?? "Identify failed";
+                cls = "identify-btn identify-btn-failed";
+                break;
+        }
+        return b `<button
+      class="${cls}"
+      ?disabled=${disabled}
+      aria-label="${title}"
+      title="${title}"
+      @click=${(e) => {
+            e.stopPropagation();
+            void this._fireIdentify(entity_id);
+        }}
+    >
+      ${label}
+    </button>`;
+    }
+    /** v1.6.0 — call home_insights/identify_entity for one entity.
+     *  Manages the per-entity lifecycle state map. */
+    async _fireIdentify(entity_id) {
+        if (!this.hass)
+            return;
+        // Don't re-fire while a request is in flight for this entity.
+        const current = this._identifyState.get(entity_id);
+        if (current?.status === "pending")
+            return;
+        this._setIdentifyState(entity_id, { status: "pending" });
+        try {
+            const resp = await this.hass.connection.sendMessagePromise({
+                type: "home_insights/identify_entity",
+                entity_id,
+            });
+            this._setIdentifyState(entity_id, {
+                status: "success",
+                message: `Done: ${resp.description} (${resp.calls_made} call${resp.calls_made === 1 ? "" : "s"})`,
+            });
+            // Auto-clear the success state after 3 s so the button is
+            // clickable again if the user wants to try a second time
+            // (e.g., they missed the flash).
+            setTimeout(() => {
+                const st = this._identifyState.get(entity_id);
+                if (st?.status === "success") {
+                    this._setIdentifyState(entity_id, { status: "idle" });
+                }
+            }, 3000);
+        }
+        catch (err) {
+            this._setIdentifyState(entity_id, {
+                status: "failed",
+                message: this._errMsg(err),
+            });
+            setTimeout(() => {
+                const st = this._identifyState.get(entity_id);
+                if (st?.status === "failed") {
+                    this._setIdentifyState(entity_id, { status: "idle" });
+                }
+            }, 3000);
+        }
+    }
+    _setIdentifyState(entity_id, state) {
+        const next = new Map(this._identifyState);
+        next.set(entity_id, state);
+        this._identifyState = next;
     }
     _areaNameById(area_id) {
         if (!area_id)
@@ -741,6 +866,7 @@ class BulkAreaAssignDialog extends i {
                 <td class="name">
                   <div>
                     ${this._renderNameQualityBadge(nq)}${this._entityLabel(e)}
+                    ${this._renderIdentifyButton(e.entity_id)}
                   </div>
                   <div class="meta">${e.entity_id}</div>
                 </td>
@@ -1075,6 +1201,40 @@ class BulkAreaAssignDialog extends i {
     .name-quality-mfr_model {
       opacity: 0.55;
     }
+    /* v1.6.0 — identify button. Small inline button; per-state color
+     * swap gives clear feedback without claiming a row. */
+    .identify-btn {
+      margin-left: 8px;
+      padding: 1px 6px;
+      border: 1px solid var(--divider-color, #e0e0e0);
+      border-radius: 4px;
+      background: var(--card-background-color, transparent);
+      cursor: pointer;
+      font-size: 0.9em;
+      line-height: 1.4;
+      vertical-align: middle;
+    }
+    .identify-btn:disabled {
+      cursor: progress;
+    }
+    .identify-btn-idle:hover {
+      background: var(--primary-color, #03a9f4);
+      color: var(--text-primary-color, white);
+      border-color: var(--primary-color, #03a9f4);
+    }
+    .identify-btn-success {
+      background: var(--success-color, #4caf50);
+      color: var(--text-primary-color, white);
+      border-color: var(--success-color, #4caf50);
+    }
+    .identify-btn-failed {
+      background: var(--error-color, #f44336);
+      color: var(--text-primary-color, white);
+      border-color: var(--error-color, #f44336);
+    }
+    .identify-btn-pending {
+      opacity: 0.7;
+    }
     .area-picker {
       width: 100%;
       padding: 5px 8px;
@@ -1229,6 +1389,12 @@ __decorate([
 __decorate([
     r()
 ], BulkAreaAssignDialog.prototype, "_nameQuality", void 0);
+__decorate([
+    r()
+], BulkAreaAssignDialog.prototype, "_identifyCaps", void 0);
+__decorate([
+    r()
+], BulkAreaAssignDialog.prototype, "_identifyState", void 0);
 __decorate([
     r()
 ], BulkAreaAssignDialog.prototype, "_filterIntegration", void 0);
