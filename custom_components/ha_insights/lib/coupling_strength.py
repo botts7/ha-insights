@@ -156,13 +156,13 @@ def apply_tier_demotion(confidence: float, tier: CouplingTier) -> float:
 
 
 __all__ = [
-    "CouplingScore",
-    "CouplingTier",
+    "LOOSE_MEDIAN_LAG_MS",
+    "LOOSE_MIN_CONSISTENCY",
     "TIGHT_CONFIDENCE_FACTOR",
     "TIGHT_MEDIAN_LAG_MS",
     "TIGHT_MIN_CONSISTENCY",
-    "LOOSE_MEDIAN_LAG_MS",
-    "LOOSE_MIN_CONSISTENCY",
+    "CouplingScore",
+    "CouplingTier",
     "apply_tier_demotion",
     "compute_coupling",
     "coupling_payload",

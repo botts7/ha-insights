@@ -3,10 +3,8 @@ from __future__ import annotations
 
 from custom_components.ha_insights.lib.coupling_strength import (
     LOOSE_MEDIAN_LAG_MS,
-    LOOSE_MIN_CONSISTENCY,
     TIGHT_CONFIDENCE_FACTOR,
     TIGHT_MEDIAN_LAG_MS,
-    TIGHT_MIN_CONSISTENCY,
     apply_tier_demotion,
     compute_coupling,
     coupling_payload,
