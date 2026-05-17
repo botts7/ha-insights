@@ -4,6 +4,61 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+## [1.12.8] — 2026-05-17
+
+### Added — card-renderer + test backfill (agent review pt. 2)
+
+Second half of the agent-review fix pass. v1.12.7 covered the
+critical privacy + composition + math issues; this release
+handles the remaining rendering + test gaps.
+
+#### Bundle card v1.10.2 panel.js — specialized renderers
+
+Card v1.10.2 adds `_renderCardBody()` with per-payload-key
+dispatch for the v1.7+ detectors that were rendering as raw JSON:
+
+- `_state_shift` (v1.8.2 StateShiftDetector) → "Routine shift
+  detected" body with date, pre/post means, magnitude
+- `_physical_device_link` (v1.11.0 + v1.12.7) → "These look like
+  the same physical device" body with entity pair, Pearson r,
+  lag explanation. Reads both new `entity_id`/`peer_entity_id`
+  AND legacy `entity_a`/`entity_b` for cached-insight back-compat
+- `_location_proposal` (v1.11.5) → "Probably / Almost certainly
+  in <area>" with alternative areas + advisory-only callout
+
+Integration-only panel users get the rendering improvements for
+free via this bundle. See `ha-insights-card` v1.10.2 changelog
+for full UI details.
+
+#### `tests/test_lib_identify_capability.py` — test backfill
+
+The v1.10.0 `identify_capability` lib shipped with no dedicated
+test file despite being used by two WS handlers. Added 17 tests
+covering each tier (FLASH_LIGHT, STROBE_LIGHT, PLAY_CHIME,
+SIREN_CHIRP, SWITCH_TOGGLE, NONE), bitwise feature checking,
+defensive handling of malformed attributes, and stability of the
+`IdentifyMethod` enum values that the WS contract serializes.
+
+### Roadmap status after this release
+
+**Agent-review tracks A-E fixes:**
+- ✅ Track A (math) — TE noise floor raised; perturbation
+  STDDEV_FLOOR unit-coupling noted as v1.13 calibration item;
+  ChangepointKind.VARIANCE_SHIFT docstring TODO
+- ✅ Track B (composition) — physical_device_link fingerprint
+  renamed; managed_externally walker now picks up; setup_quality
+  recipe wording fixed
+- ✅ Track C (modal) — specialized card renderers added for
+  v1.7+ payloads; raw-JSON-in-modal regression closed
+- ✅ Track D (privacy) — identify_capability + ble_capability now
+  admin-gated; payload-field privacy review confirmed clean
+- ✅ Track E (tests) — identify_capability + physical_device_link
+  + state_shift lib/detector tests added; WS endpoint integration
+  tests deferred to v1.13 (needs pytest-homeassistant-custom-
+  component setup)
+
+**Ready for beta announcement** after real-install validation.
+
 ## [1.12.7] — 2026-05-17
 
 ### Fixed — agent-review pass before beta launch
