@@ -224,12 +224,19 @@ a deliberate simplification suited to running on-device against HA's
   as device-vs-human signal. Direct inspiration for the second + third
   grader libraries.
 - **Fu 2021 (HAWatcher)** — shadow-execution + correlation rules; 97 %
-  precision claim. Reserved as v1.6 roadmap: detect rules that should
-  be firing but aren't, by maintaining a parallel state model and
-  comparing against actuals.
-- **PELT (Killick 2012)** — change-point detection. Used in the
-  seasonality + frequency-anomaly detectors for "behavior shifted on
+  precision claim. Queued for v1.15+: detect rules that should be firing
+  but aren't, by maintaining a parallel state model and comparing
+  against actuals.
+- **PELT (Killick 2012)** — change-point detection. Shipped in v1.8.0
+  as `lib/changepoint_detection.py` (ruptures backend + pure-Python
+  fallback); used by FrequencyAnomalyDetector for changepoint-aware
+  baselines and by StateShiftDetector for "your routine shifted on
   date X" findings.
+- **Schreiber 2000 (Transfer entropy)** — directional information
+  flow. Shipped in v1.9.0 as `lib/transfer_entropy.py`; wired into
+  LaggedCorrelationDetector in v1.9.1 to demote temporally-correlated
+  pairs whose flow is reversed or symmetric (both directions = both
+  driven by a third factor, not causal).
 
 What we deliberately don't ship: vector embeddings of entity history
 (memory cost grows with the install — see `docs/ARCHITECTURE.md` for
@@ -348,15 +355,17 @@ A per-month USD budget can be set in OptionsFlow for cloud agents; the backgroun
 
 ## Status & contributing
 
-**v1.5.43** — first public release. What that means in practice:
+**v1.9.1** — current release. What that means in practice:
 
 | Area | Status |
 |---|---|
-| Integration core (detectors, audit, redactor, store, WS API) | **Test-covered** — 75 lib + 157 smoke tests passing. Hasn't seen wide community use yet. |
+| Integration core (detectors, audit, redactor, store, WS API) | **Test-covered** — full unit + smoke suite green on CI per release. Community use ramping. |
 | Privacy controls (opt-in LLM, pseudonymization, audit log, "what gets sent?") | **Test-covered** — privacy contract is a hard rule, not a feature flag |
-| Panel UI | **Under active investigation** — in-flight blank-on-tab-return bug. v1.2.24/v1.2.25 in the card chased part of the cause; a second root cause is still being tracked. |
+| Panel UI | **Stabilized** — v1.7.7 600 ms grace-then-force-mount addresses the upstream `<ha-panel-custom>.update()` deep-equal short-circuit. See `docs/panel-troubleshooting.md` for self-serve diagnostics. |
 | Mobile push throttling, daily-digest cadence | **Untested at scale** — anti-spam logic exists; defaults will likely need tuning based on community feedback |
-| HAWatcher shadow-execution (v1.6 roadmap) | **Not started** — research direction; contributors welcome |
+| Research-backed detector library (v1.8 changepoint, v1.9 transfer entropy) | **Shipped + tested** — used by FrequencyAnomalyDetector, StateShiftDetector, LaggedCorrelationDetector. Calibration thresholds will refine with field data. |
+| Find My Device (identify + perturbation + BLE live-find) | **v1.10–v1.12 roadmap** — planned; not started. See `docs/ARCHITECTURE.md` "Future roadmap." |
+| HAWatcher shadow-execution | **v1.15+ research direction** — contributors welcome |
 
 ### How to report something broken
 
