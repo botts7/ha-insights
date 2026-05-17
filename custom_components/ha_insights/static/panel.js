@@ -6396,6 +6396,27 @@ if (!window.customCards.some((c) => c.type === "ha-insights-card")) {
     });
 }
 
+// v1.3.4: register a panel-bundled alias of the card so the panel
+// ALWAYS uses the version of HaInsightsCard built INTO this bundle —
+// never the (possibly stale) HACS-installed `ha-insights-card` whose
+// class registered first and won the `ha-insights-card` name.
+//
+// Real-install diagnostic on 2026-05-17 confirmed: card v1.3.0+
+// added the 🔗 coupling badge to _renderRow, but users on the side
+// panel never saw it because the HACS-loaded card (registered first)
+// owned the `ha-insights-card` element name. The panel embedded that
+// stale class. customElements doesn't allow re-defining a name once
+// taken, so the fresh bundled class was silently discarded.
+//
+// Solution: panel uses `ha-insights-card-bundled`, registered as a
+// trivial subclass of the freshly-built HaInsightsCard from this
+// bundle. Always current with the integration's panel.js, regardless
+// of what HACS has done with the dashboard card.
+const PANEL_CARD_TAG = "ha-insights-card-bundled";
+if (!customElements.get(PANEL_CARD_TAG)) {
+    customElements.define(PANEL_CARD_TAG, class extends HaInsightsCard {
+    });
+}
 class HaInsightsPanel extends i {
     constructor() {
         super(...arguments);
@@ -7890,11 +7911,15 @@ class HaInsightsPanel extends i {
         // which destroyed the card's internal state mid-refine (modal closed,
         // result discarded). Lit's html template diffs by tag + position; same
         // tag in the same slot = same element preserved.
+        // v1.3.4: use the panel-bundled alias (ha-insights-card-bundled)
+        // so the panel ALWAYS uses the freshly-built class from this
+        // bundle — never a stale HACS-installed ha-insights-card that
+        // claimed the element name first.
         return b `
-      <ha-insights-card
+      <ha-insights-card-bundled
         .hass=${this.hass}
         .config=${this._embeddedCardConfig}
-      ></ha-insights-card>
+      ></ha-insights-card-bundled>
     `;
     }
 }
