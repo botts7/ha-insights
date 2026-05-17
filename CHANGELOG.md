@@ -4,6 +4,23 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+## [1.10.2] — 2026-05-17
+
+### Changed
+
+- **Bundle card v1.6.0 panel.js** — picks up the 🔆 identify
+  button in the bulk-area-assign dialog. With this bundle,
+  integration-only users (no standalone HACS card) can click the
+  button to fire the v1.10.0 `home_insights/identify_entity`
+  endpoint and physically locate orphans.
+
+  Closes the v1.10 Phase A user-facing loop. Backend libs +
+  WS endpoints shipped in v1.10.0; name_quality sorting +
+  identification button now both visible in the bundled panel.
+
+  Bundle-only change. Card source of truth: ha-insights-card
+  v1.6.0.
+
 ## [1.10.1] — 2026-05-17
 
 ### Changed
