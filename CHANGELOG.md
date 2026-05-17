@@ -4,6 +4,30 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+## [1.7.1] — 2026-05-17
+
+### Added
+
+- **TIGHT-coupled example fixture** — `inject_examples` now produces a
+  Z-Wave-scene-controller cooccurrence insight whose payload carries
+  `_coupling: {tier: "TIGHT", median_lag_ms: 180, consistency: 0.94}`,
+  so users (and developers) can see the 🔗 badge render without
+  waiting for organic device-binding patterns to surface on their
+  install. Also retrofitted the existing minute-scale example with a
+  NONE-tier stamp so its payload is honest about why no badge appears.
+
+  Closes the verification gap reported on real install: v1.7.0
+  shipped the badge code but the example fixtures predated v1.7
+  and didn't include `_coupling`, so `inject_examples` couldn't
+  demonstrate the feature.
+
+### Removed
+
+- Leading 🔗 emoji from the office-monitor example's title text —
+  that was decorative pre-v1.7 chrome; the actual coupling badge
+  is now a separate visual element, so the title-emoji was
+  ambiguous ("is this the badge or just text?").
+
 ## [1.7.0] — 2026-05-17
 
 ### Added

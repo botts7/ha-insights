@@ -108,7 +108,7 @@ def build_example_insights() -> list[Insight]:
             kind=InsightKind.AUTOMATION_PROPOSAL,
             detector="cooccurrence",
             title=(
-                "🔗 'Office desk lamp' usually turns on within 2 minutes "
+                "'Office desk lamp' usually turns on within 2 minutes "
                 "of 'Office monitor' (43 of last 50 days). Worth automating?"
             ),
             confidence=0.88,
@@ -133,8 +133,59 @@ def build_example_insights() -> list[Insight]:
                     }
                 ],
                 "mode": "single",
+                # v1.7.1: NONE-tier coupling for the minute-scale example.
+                # A 2-minute lag is well above the TIGHT/LOOSE thresholds,
+                # so no 🔗 badge — the user IS the cause here, not a
+                # device binding.
+                "_coupling": {
+                    "tier": "NONE",
+                    "median_lag_ms": 118500.0,
+                    "consistency": 0.86,
+                },
             },
             age_hours=6,
+        ),
+        # v1.7.1: TIGHT-coupled example so users can see the 🔗 badge
+        # render without waiting for an organic device-binding pair.
+        # Models the textbook case from the agent memory: a Z-Wave
+        # central scene controller fires its consequent action via
+        # binding within ~180ms, near-zero stddev across 47 of 50 fires.
+        _ex(
+            kind=InsightKind.AUTOMATION_PROPOSAL,
+            detector="cooccurrence",
+            title=(
+                "Pressing 'Kitchen scene controller (single press)' → "
+                "kitchen pendant lights ON within ~180ms (47 of 50 fires). "
+                "Worth automating?"
+            ),
+            confidence=0.85,  # already demoted from 1.0 by the TIGHT factor
+            fingerprint={
+                "kind": "cooccurrence",
+                "leader": "event.example_kitchen_scene_controller",
+                "follower": "light.example_kitchen_pendants",
+            },
+            payload={
+                "alias": "[EXAMPLE] Kitchen scene controller binding",
+                "trigger": [
+                    {
+                        "platform": "state",
+                        "entity_id": "event.example_kitchen_scene_controller",
+                    }
+                ],
+                "action": [
+                    {
+                        "service": "light.turn_on",
+                        "target": {"entity_id": "light.example_kitchen_pendants"},
+                    }
+                ],
+                "mode": "single",
+                "_coupling": {
+                    "tier": "TIGHT",
+                    "median_lag_ms": 180.0,
+                    "consistency": 0.94,
+                },
+            },
+            age_hours=4,
         ),
         _ex(
             kind=InsightKind.ANOMALY,
