@@ -4,6 +4,83 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+## [1.11.5] — 2026-05-17
+
+### Added — LocationProposalDetector
+
+The detector pair to v1.11.0's dedup work. Same correlation
+primitives (`lib/correlation_primitives.py`), different
+application: instead of finding entities that look like the same
+physical device, find the AREA an unassigned entity probably
+belongs to by similarity to that area's tagged siblings.
+
+> **Probably in Living Room**: `sensor.bt_a4c138_temperature`
+> matches 3 tagged temperature siblings at median r=0.91.
+
+#### Why it works
+
+Spatial correlation in environmental signals is strong:
+
+- Two temp sensors in the same room share the same air column;
+  their diurnal curves track within minutes.
+- Two humidity sensors react to the same cooking / shower event.
+- Two illuminance sensors near the same window track sunrise + cloud
+  passage together.
+
+For each unassigned sensor, the detector computes correlation
+against every already-tagged sibling of the same `device_class`,
+groups by area, and picks the area with the highest median r. Above
+a 0.75 threshold → emit PATTERN_OBSERVATION; above 0.90 → label
+"almost certainly in X" instead of "probably in X."
+
+#### `detectors/location_proposal.py`
+
+BETA. Pre-filters:
+
+- Only `sensor` domain (binary domains use cooccurrence / timing
+  detectors instead)
+- Only entities without an `area_id`
+- Only when the entity's `device_class` has ≥ 2 area-tagged
+  siblings in some area (otherwise no comparison data)
+- ≥ 30 events per entity in the 7-day lookback
+- Hard cap 10 proposals per scan
+
+Median r per area (robust to one window-side outlier) over Pearson
+of time-aligned 10-min bins, lag-tolerant within ±2 bins.
+
+#### Insight payload
+
+`_location_proposal` block with:
+- `proposed_area_id`, `proposed_area_name`, `median_r`, `n_siblings`
+- `alternatives: [{area_id, median_r, n_siblings}]` — top 3
+  next-best candidates so the user can see they're picking the
+  best of several rather than the only one above threshold.
+
+**Advisory only.** Never auto-assigns. User opens the insight,
+sees the candidate area + alternatives, and either confirms
+(applies through the area-assign flow) or overrides.
+
+### What's still open for v1.12+
+
+- Cross-modal inference: a humidity sensor that doesn't match any
+  humidity siblings might still match the temp siblings in
+  `Bathroom` because the cooking/shower events happen in the same
+  place. v1.12 future work.
+- "I'm not sure" surface: when no area scores above threshold,
+  could emit a softer "couldn't auto-locate this; try touch test"
+  insight pointing at v1.10 Phase B. v1.12.x.
+
+### Roadmap progress
+
+- v1.10 Phase A + B (identify + perturbation) ✅
+- v1.10.3 + v1.10.4 static dedup hint + 🔗 pill ✅
+- v1.11.0 correlation-based dedup ✅
+- **v1.11.5 location inference** ✅ (THIS)
+- v1.12 BLE live-find
+- v1.13 survival analysis
+- v1.14 sequence mining
+- v1.15 HardwareSuggestionDetector
+
 ## [1.11.0] — 2026-05-17
 
 ### Added — PhysicalDeviceLinkDetector (correlation-based dedup)
