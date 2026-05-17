@@ -4,6 +4,67 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+## [1.8.2] — 2026-05-17
+
+### Added
+
+- **`StateShiftDetector`** — new BETA detector that surfaces
+  "your routine shifted on YYYY-MM-DD" as PATTERN_OBSERVATION
+  insights. Uses v1.8.0's changepoint detection.
+
+  Different from v1.8.1's `FrequencyAnomalyDetector` wiring:
+  - v1.8.1 uses changepoints INTERNALLY (to compute a smarter
+    baseline for anomaly detection).
+  - v1.8.2 EXPOSES changepoints to the user as their own visible
+    insight type — "I noticed your daily activity for X shifted
+    on date Y, here are the numbers."
+
+  ### Why this matters
+
+  When life changes (new job, baby, school start, device added
+  to a routine), patterns shift across many entities at once.
+  Without flagging this, the schedule / streak / frequency
+  detectors treat post-shift data as noise → weaker insights or
+  silence. Users staring at the panel can't tell whether HA
+  Insights is broken or their pattern actually changed.
+
+  Title shape:
+  > `binary_sensor.coffee_maker activity shifted ~5 days ago
+  >  (2026-05-12): ~2.4/day → ~5.8/day.`
+
+  Payload includes pre/post means, magnitude, shift date, and
+  the backend that detected it (PELT vs fallback — affects
+  confidence weighting). Card format = `card` (history-graph)
+  pointing at the 14-day window so the user can visually
+  confirm the shift.
+
+  ### Filters
+
+  - Lookback: 14 days (matches FrequencyAnomalyDetector).
+  - Recency: 2–10 days ago (older shifts the user already
+    noticed; newer shifts lack post-shift stability).
+  - Min events per entity: 20 in window (very sparse signals
+    can't yield reliable changepoints).
+  - Min magnitude: 5.0 units (filters trivial wobbles).
+  - Cap: 10 insights per scan (cohort dedup typically reduces
+    much further).
+  - Excludes bursty domains (device_tracker, media_player when
+    media-bursty, person) per the existing `_RELEVANT_DOMAINS`
+    set.
+
+  ### Cohort dedup applies
+
+  10 lights shifting from 06:00 to 07:00 on the same day get
+  collapsed into one merged insight via the standard
+  `_dedup_grouped_insights` pipeline.
+
+### Roadmap progress
+
+- v1.8.0 — changepoint lib ✅
+- v1.8.1 — FrequencyAnomalyDetector integration ✅
+- **v1.8.2 — StateShiftDetector** ✅ (THIS)
+- v1.9 — transfer entropy (next)
+
 ## [1.8.1] — 2026-05-17
 
 ### Changed
