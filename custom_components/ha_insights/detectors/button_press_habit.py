@@ -402,11 +402,19 @@ class ButtonPressHabitDetector(Detector):
             triggers = auto.get("trigger") or []
             if not isinstance(triggers, list):
                 triggers = [triggers]
-            triggers_match = any(
-                isinstance(t, dict)
-                and t.get("entity_id") == event_eid
-                for t in triggers
-            )
+            triggers_match = False
+            for t in triggers:
+                if not isinstance(t, dict):
+                    continue
+                t_eid = t.get("entity_id")
+                # HA state triggers accept entity_id as either a string
+                # or a list of strings — match both forms.
+                if t_eid == event_eid:
+                    triggers_match = True
+                    break
+                if isinstance(t_eid, list) and event_eid in t_eid:
+                    triggers_match = True
+                    break
             if not triggers_match:
                 continue
             actions = auto.get("action") or []

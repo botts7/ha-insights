@@ -8,6 +8,14 @@ All notable changes to this project are documented in this file. Format follows 
 
 ### Fixed
 
+- **BETA-detector audit (issue #11 follow-up).**
+  `ButtonPressHabitDetector._already_automated` only matched scalar
+  `entity_id` on existing triggers. HA state triggers accept either a
+  string or a list of strings; the list form (`entity_id: [a, b, c]`)
+  silently fell through, so the detector could propose a "press X →
+  do Y" automation even when an existing automation triggered on `[X,
+  other]`. Fix iterates list-form entity_ids.
+
 - **Pre-existing test failures surfaced by v1.5.50.** v1.5.50 cleared the
   ruff backlog and pytest collection started running — which immediately
   exposed ~10 tests that had been broken across multiple versions but
