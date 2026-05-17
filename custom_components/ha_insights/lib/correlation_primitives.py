@@ -211,7 +211,13 @@ def time_aligned_correlation(
     best_r = 0.0
     best_lag = 0
     best_n = 0
-    for lag in range(-max_lag_bins, max_lag_bins + 1):
+    # Scan lag=0 first; on ties, lag=0 wins. Identical streams
+    # correlate equally at all lags — the meaningful answer is
+    # "no shift," not whatever lag the loop happened to test first.
+    lag_order = [0] + [
+        x for x in range(-max_lag_bins, max_lag_bins + 1) if x != 0
+    ]
+    for lag in lag_order:
         xs, ys = _align_with_lag(a_binned, b_binned, lag)
         if len(xs) < MIN_SAMPLES_FOR_CORR:
             continue
