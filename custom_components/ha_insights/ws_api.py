@@ -4237,6 +4237,10 @@ async def ws_identify_capability(
     )
     from .lib.identify_capability import identify_capability_for
     from .lib.name_quality import score_name_quality
+    from .lib.perturbation_capability import (
+        is_perturbation_unsupported,
+        perturbation_guide_for,
+    )
 
     e_reg = er.async_get(hass)
     d_reg = dr.async_get(hass)
@@ -4337,10 +4341,33 @@ async def ws_identify_capability(
             ),
         )
 
+        # v1.10.7 — surface device_class + perturbability so the card
+        # doesn't have to maintain a parallel hardcoded list. Single
+        # source of truth: lib/perturbation_capability.py.
+        device_class_attr = (
+            state.attributes.get("device_class") if state is not None else None
+        )
+        device_class = (
+            device_class_attr.lower()
+            if isinstance(device_class_attr, str)
+            else None
+        )
+        perturbable = perturbation_guide_for(device_class) is not None
+        perturbation_state: str
+        if perturbable:
+            perturbation_state = "supported"
+        elif is_perturbation_unsupported(device_class):
+            perturbation_state = "explicitly_unsupported"
+        else:
+            perturbation_state = "unknown"
+
         capabilities[eid] = {
             "method": cap.method.value,
             "description": cap.description,
             "supported": cap.method.value != "none",
+            "device_class": device_class,
+            "perturbable": perturbable,
+            "perturbation_state": perturbation_state,
             "name_quality": {
                 "tier": nq.tier.value,
                 "score": nq.score,
