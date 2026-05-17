@@ -4,6 +4,60 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+## [1.9.0] — 2026-05-17
+
+### Added
+
+- **`lib/transfer_entropy.py`** — pure-stdlib transfer entropy
+  (Schreiber 2000) on discrete state sequences. Next building
+  block of the v1.8+ research-backed detector roadmap.
+
+  Quantifies DIRECTIONAL information flow between two time
+  series. `TE(X→Y)` measures how much knowing X's past reduces
+  uncertainty about Y's future, BEYOND what Y's own past already
+  tells you. This is the signal LaggedCorrelationDetector needs
+  to separate "Y follows X temporally" from "Y is actually
+  driven by X."
+
+  API:
+  ```python
+  transfer_entropy(x_seq, y_seq) -> TransferEntropyAssessment(
+      te_x_to_y, te_y_to_x, asymmetry, dominant_direction,
+      n_samples, confidence,
+  )
+
+  # Convenience for callers binning event streams:
+  discretize_event_stream(events, bin_size, total_duration)
+  ```
+
+  Pure stdlib (collections.Counter, math.log2). pyinform has the
+  math but development stalled in 2018; rolling our own keeps
+  the dep footprint zero and the math auditable.
+
+  Performance: 50–500 sample inputs finish in single-digit
+  milliseconds. Asymptotic O(N) per direction.
+
+### Use cases (not yet wired into any detector — that's v1.9.1+)
+
+- **LaggedCorrelationDetector confidence demotion**: high temporal
+  correlation but near-zero TE → pair is likely coincident (both
+  driven by time of day, not causal).
+- **Cooccurrence direction check**: TE(X→Y) vs TE(Y→X) tells
+  whether motion drives the light or vice versa.
+- **General sanity check on cohorts**: a "10 lights all fire at
+  17:30" cohort with no TE between any pair is likely scene-
+  driven, not behaviour-driven.
+
+### Roadmap progress
+
+- v1.8.0 — changepoint lib ✅
+- v1.8.1 — FrequencyAnomalyDetector wiring ✅
+- v1.8.2 — StateShiftDetector ✅
+- **v1.9.0 — transfer entropy lib** ✅ (THIS)
+- v1.9.1 — wire into LaggedCorrelationDetector (next)
+- v1.10 — survival analysis
+- v1.11 — sequence mining
+
 ## [1.8.2] — 2026-05-17
 
 ### Added
