@@ -4,6 +4,63 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+## [1.7.8] — 2026-05-17
+
+### Added
+
+- **Per-device "managed externally" flag** — Strategy 2 from the
+  device-internal-logic memory. The user can mark any device "this
+  handles its own logic" and HA Insights stops surfacing patterns
+  from it entirely. Different from the existing automatic 🤖
+  device-managed pill (statistical inference) and 🏷️ managed-
+  externally pill (integration-platform whitelist): this is the
+  explicit user assertion.
+
+- **`lib/managed_externally.py`** — pure suppression library:
+  - `collect_referenced_entities(fingerprint, payload)` walks an
+    insight and gathers every entity_id referenced via
+    entity-id-bearing fields. Safer than enumerating per-detector
+    fingerprint keys.
+  - `is_suppressed(...)` returns True when any referenced entity
+    belongs to a managed device.
+  - `filter_insights(...)` splits an insight list into
+    (kept, suppressed) for the detector pipeline. Zero-cost fast
+    path when no devices are flagged.
+
+- **Detector pipeline integration** — `run_all_detectors` reads
+  `managed_externally_devices` from entry options and filters each
+  detector's output before dedup. Suppressed insights never enter
+  the store. Stale active insights from a newly-flagged device get
+  cleaned up by the next scan's stale-sweep.
+
+- **WS endpoints**:
+  - `home_insights/list_managed_devices` — returns
+    `[{device_id, name, manufacturer, model, entity_count, deleted}]`
+    for currently-flagged devices. Admin-only.
+  - `home_insights/set_device_managed {device_id, managed}` — add or
+    remove from the flagged set. Idempotent. Admin-only.
+
+- **WS list enrichment** — every insight returned by
+  `home_insights/list` now carries `referenced_devices: [{device_id,
+  name, managed}]` so the card can render per-device toggles
+  without walking payloads itself.
+
+- **OptionsFlow management screen** — new "Managed-externally
+  devices" menu entry showing all currently-flagged devices with
+  a multi-select to restore any (uncheck to clear the flag).
+  Empty-state shows discovery hint.
+
+- **Config option** `CONF_MANAGED_EXTERNALLY_DEVICES =
+  "managed_externally_devices"`. Stored as `list[str]` of device
+  registry IDs in entry options.
+
+### Pairs with
+
+Card v1.3.5 adds the per-device toggle to the insight detail
+dialog. Without the card update, the backend works (flags can be
+managed via OptionsFlow); with it, the in-context per-insight
+toggle is the discoverable path.
+
 ## [1.7.6] — 2026-05-17
 
 ### Fixed
