@@ -4,6 +4,59 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+## [1.8.0] — 2026-05-17
+
+### Added
+
+- **`lib/changepoint_detection.py`** — pure-function changepoint
+  detection on univariate time series. First building block of the
+  v1.8+ research-backed detector roadmap (per agent memory
+  `ha_insights_research_answers_v1`).
+
+  Use cases targeted (not yet wired into any detector — that's
+  v1.8.1+):
+  - Morning routine moves from 06:50 to 08:30 (new job).
+  - A binary_sensor's daily firing count drops to zero (battery
+    dying / device retired — distinct from "orphan/silent").
+  - A weekday-07:15 schedule starts firing at 09:00.
+
+  Without this, the schedule / streak / frequency detectors treat
+  post-shift data as noise that pollutes the pattern — a 4-month
+  routine that just shifted last week looks like "weak signal"
+  rather than "strong signal that recently shifted."
+
+  API:
+  - `detect_changepoints(timestamps, values) -> list[ChangepointAssessment]`
+  - `ChangepointAssessment(detected_at, kind, magnitude, confidence, backend)`
+  - `backend_in_use() -> ChangepointBackend` for one-shot logging.
+
+  Backend: prefers `ruptures.Pelt` (Pruned Exact Linear Time,
+  Killick 2012) when the optional dependency is installed; falls
+  back to a pure-Python cumulative-mean-shift detector otherwise.
+  Both emit the same `ChangepointAssessment` shape. Fallback
+  catches the dominant single-shift case at worse sensitivity;
+  detectors should treat fallback-backend results as lower
+  confidence (the `backend` field on the assessment surfaces this).
+
+  **Not adding `ruptures` to requirements yet.** The fallback is
+  honest and adequate for v1.8.0; adding the dep would force
+  install on every HACS user. Users wanting better sensitivity
+  can `pip install ruptures` in their HA Python env; integration
+  picks it up automatically on next load.
+
+### Roadmap context
+
+This is the v1.7-target lib that got skipped while v1.7.x focused
+on the coupling badge. v1.8.x picks up the research roadmap:
+- v1.8.0 — changepoint detection lib (THIS RELEASE)
+- v1.8.1 — wire into FrequencyAnomalyDetector / SeasonalityDetector
+  to demote insights spanning a changepoint
+- v1.8.2 — new `StateShiftDetector` emitting "your routine shifted
+  on YYYY-MM-DD" meta-insights
+- v1.9 — `lib/transfer_entropy.py` (custom NumPy)
+- v1.10 — `lib/survival_likelihood.py` (lifelines AFT)
+- v1.11 — `lib/sequence_mining.py` (prefixspan)
+
 ## [1.7.8] — 2026-05-17
 
 ### Added
