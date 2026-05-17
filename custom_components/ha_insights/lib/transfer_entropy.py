@@ -86,7 +86,10 @@ class TransferEntropyAssessment:
 
 # Weak-signal threshold (bits). Below this, TE is statistically
 # indistinguishable from sampling noise on small (~100 sample) inputs.
-_NOISE_FLOOR_BITS: float = 0.05
+# Exported so callers can apply the same "uninformative" cutoff when
+# deciding whether to act on an assessment.
+NOISE_FLOOR_BITS: float = 0.05
+_NOISE_FLOOR_BITS: float = NOISE_FLOOR_BITS  # internal alias retained
 
 # Minimum samples for a meaningful estimate. Below this the
 # probability tables are too sparse; confidence drops to 0.
@@ -254,6 +257,7 @@ def discretize_event_stream(
 
 
 __all__ = [
+    "NOISE_FLOOR_BITS",
     "TransferEntropyAssessment",
     "discretize_event_stream",
     "transfer_entropy",
