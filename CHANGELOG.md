@@ -4,6 +4,20 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+## [1.10.8] — 2026-05-17
+
+### Changed
+
+- **Bundle card v1.9.0 panel.js** — picks up the polish pass
+  paired with v1.10.7's new `perturbable` field. Integration-only
+  users (no standalone HACS card) get the server-authoritative
+  perturbable-check, the `unit_of_measurement`-aware touch-test
+  result, and the z-index fix that prevents the touch-test modal
+  from rendering behind the parent dialog.
+
+  Bundle-only change. Card source of truth: ha-insights-card
+  v1.9.0.
+
 ## [1.10.7] — 2026-05-17
 
 ### Changed
