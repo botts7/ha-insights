@@ -3449,6 +3449,71 @@ class HaInsightsCard extends i {
       font-style: italic;
       line-height: 1.5;
     }
+    /* v1.12.8 — Specialized card-body renderers (state_shift,
+     * physical_device_link, location_proposal). Replaces the
+     * generic JSON dump for these v1.7+ insight payloads. */
+    .state-shift-summary {
+      margin: 12px 0;
+      padding: 12px;
+      border: 1px solid var(--divider-color, #e0e0e0);
+      border-radius: 4px;
+    }
+    .state-shift-line {
+      display: flex;
+      gap: 12px;
+      padding: 4px 0;
+    }
+    .state-shift-label {
+      min-width: 140px;
+      color: var(--secondary-text-color);
+      font-weight: 600;
+    }
+    .state-shift-value {
+      font-family: monospace;
+    }
+    .device-link-pair {
+      margin: 12px 0;
+      padding: 16px;
+      background: var(--secondary-background-color, rgba(0, 0, 0, 0.02));
+      border-radius: 4px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+    }
+    .device-link-eid {
+      font-family: monospace;
+      padding: 4px 8px;
+      background: var(--card-background-color, white);
+      border: 1px solid var(--divider-color, #e0e0e0);
+      border-radius: 3px;
+    }
+    .device-link-arrow {
+      font-size: 1.4em;
+      color: var(--primary-color);
+    }
+    .location-proposal-summary {
+      margin: 12px 0;
+      padding: 12px;
+      background: var(--secondary-background-color, rgba(0, 0, 0, 0.02));
+      border-radius: 4px;
+      line-height: 1.5;
+    }
+    .location-alt-list {
+      margin: 8px 0 0;
+      padding-left: 20px;
+    }
+    .location-alt-list li {
+      padding: 2px 0;
+    }
+    .location-proposal-note {
+      margin-top: 12px;
+      padding: 8px 12px;
+      background: rgba(33, 150, 243, 0.1);
+      border-left: 3px solid var(--info-color, #2196f3);
+      border-radius: 3px;
+      font-size: 0.9em;
+    }
     .explain-row {
       display: flex;
       gap: 8px;
@@ -7252,6 +7317,198 @@ class HaInsightsCard extends i {
      *  for the "fix it manually" path. Raw payload moves behind a
      *  <details> disclosure for power users. Apply ─ which is a no-op
      *  for an observation-only audit ─ is hidden entirely. */
+    /** v1.12.8 — Specialized body renderer for v1.7+ detectors that
+     *  use `payload_format="card"` but were previously falling through
+     *  to the generic _renderPayloadView (raw JSON dump in the modal).
+     *
+     *  Dispatches on payload key (`_state_shift` / `_physical_device_link`
+     *  / `_location_proposal`) to a per-type formatted body. New
+     *  detectors that add a `_<name>` key to their payload should get a
+     *  matching branch added here. Returns `nothing` when no
+     *  specialized renderer matches — caller falls back to generic.
+     *
+     *  Why dispatch on payload key vs detector name: detector renaming
+     *  shouldn't break the renderer, and the payload key is the
+     *  contract the integration's CHANGELOG advertises (e.g. v1.11.0
+     *  added "_physical_device_link" block).
+     */
+    _hasSpecializedCardRenderer(insight) {
+        const payload = (insight.payload ?? {});
+        return !!(payload._state_shift ||
+            payload._physical_device_link ||
+            payload._location_proposal);
+    }
+    _renderCardBody(insight) {
+        const payload = (insight.payload ?? {});
+        if (payload._state_shift) {
+            return this._renderStateShiftBody(insight, payload._state_shift);
+        }
+        if (payload._physical_device_link) {
+            return this._renderPhysicalDeviceLinkBody(insight, payload._physical_device_link);
+        }
+        if (payload._location_proposal) {
+            return this._renderLocationProposalBody(insight, payload._location_proposal);
+        }
+        return A;
+    }
+    /** v1.8.2 StateShiftDetector — "Daily-count for X shifted on YYYY-MM-DD." */
+    _renderStateShiftBody(insight, block) {
+        const shiftDate = block.shift_date ?? "(unknown date)";
+        const preMean = block.pre_shift_mean_per_day;
+        const postMean = block.post_shift_mean_per_day;
+        const daysAgo = block.days_ago;
+        const magnitude = block.magnitude;
+        const confidencePct = Math.round(insight.confidence * 100);
+        return b `
+      <div class="dialog-body">
+        ${this._renderModalError()}
+        <div class="row-meta">
+          <span class="pill">confidence ${confidencePct}%</span>
+          <span class="pill">state shift</span>
+          ${insight.maturity === "beta"
+            ? b `<span class="pill" style="color: var(--warning-color)">🟡 BETA</span>`
+            : A}
+        </div>
+        <h4>Routine shift detected</h4>
+        <div class="state-shift-summary">
+          <div class="state-shift-line">
+            <span class="state-shift-label">Date:</span>
+            <span class="state-shift-value">${shiftDate}${daysAgo != null ? b ` (~${daysAgo} days ago)` : A}</span>
+          </div>
+          <div class="state-shift-line">
+            <span class="state-shift-label">Before:</span>
+            <span class="state-shift-value">${preMean != null ? b `~${preMean.toFixed(1)}/day` : "—"}</span>
+          </div>
+          <div class="state-shift-line">
+            <span class="state-shift-label">After:</span>
+            <span class="state-shift-value">${postMean != null ? b `~${postMean.toFixed(1)}/day` : "—"}</span>
+          </div>
+          ${magnitude != null
+            ? b `<div class="state-shift-line">
+                <span class="state-shift-label">Shift magnitude:</span>
+                <span class="state-shift-value">${magnitude.toFixed(1)}</span>
+              </div>`
+            : A}
+        </div>
+        ${insight.explanation
+            ? b `<div class="explanation">${insight.explanation}</div>`
+            : A}
+      </div>
+    `;
+    }
+    /** v1.11.0 PhysicalDeviceLinkDetector — "X and Y look like the same physical device." */
+    _renderPhysicalDeviceLinkBody(insight, block) {
+        // v1.12.7 rename: entity_id / peer_entity_id (canonical sort).
+        // Older insights stored entity_a / entity_b — handle both for
+        // backward compat with cached insights from pre-v1.12.7 server.
+        const entityId = block.entity_id ??
+            block.entity_a ??
+            "?";
+        const peerEntityId = block.peer_entity_id ??
+            block.entity_b ??
+            "?";
+        const r = block.pearson_r;
+        const nSamples = block.n_aligned_samples;
+        const bestLagBins = block.best_lag_bins;
+        const deviceClass = block.device_class ?? "—";
+        const lookbackDays = block.lookback_days;
+        const confidencePct = Math.round(insight.confidence * 100);
+        return b `
+      <div class="dialog-body">
+        ${this._renderModalError()}
+        <div class="row-meta">
+          <span class="pill">confidence ${confidencePct}%</span>
+          <span class="pill">device link</span>
+          ${insight.maturity === "beta"
+            ? b `<span class="pill" style="color: var(--warning-color)">🟡 BETA</span>`
+            : A}
+        </div>
+        <h4>These look like the same physical device</h4>
+        <div class="device-link-pair">
+          <code class="device-link-eid">${entityId}</code>
+          <span class="device-link-arrow">↔</span>
+          <code class="device-link-eid">${peerEntityId}</code>
+        </div>
+        <div class="state-shift-summary">
+          <div class="state-shift-line">
+            <span class="state-shift-label">Pearson r:</span>
+            <span class="state-shift-value">${r != null ? r.toFixed(3) : "—"}</span>
+          </div>
+          <div class="state-shift-line">
+            <span class="state-shift-label">Aligned samples:</span>
+            <span class="state-shift-value">${nSamples ?? "—"} (${lookbackDays ?? "?"}-day lookback)</span>
+          </div>
+          <div class="state-shift-line">
+            <span class="state-shift-label">Device class:</span>
+            <span class="state-shift-value">${deviceClass}</span>
+          </div>
+          ${bestLagBins != null && bestLagBins !== 0
+            ? b `<div class="state-shift-line">
+                <span class="state-shift-label">Detected at lag:</span>
+                <span class="state-shift-value">${bestLagBins} bin${bestLagBins === 1 || bestLagBins === -1 ? "" : "s"} (likely clock drift between integrations)</span>
+              </div>`
+            : A}
+        </div>
+        ${insight.explanation
+            ? b `<div class="explanation">${insight.explanation}</div>`
+            : A}
+      </div>
+    `;
+    }
+    /** v1.11.5 LocationProposalDetector — "X is probably in Living Room." */
+    _renderLocationProposalBody(insight, block) {
+        const entityId = block.entity_id ?? "?";
+        const areaName = block.proposed_area_name ?? "?";
+        const medianR = block.median_r;
+        const nSiblings = block.n_siblings;
+        const deviceClass = block.device_class ?? "—";
+        const alternatives = block.alternatives ?? [];
+        const confidencePct = Math.round(insight.confidence * 100);
+        const strength = medianR != null && medianR >= 0.9 ? "Almost certainly" : "Probably";
+        return b `
+      <div class="dialog-body">
+        ${this._renderModalError()}
+        <div class="row-meta">
+          <span class="pill">confidence ${confidencePct}%</span>
+          <span class="pill">location proposal</span>
+          ${insight.maturity === "beta"
+            ? b `<span class="pill" style="color: var(--warning-color)">🟡 BETA</span>`
+            : A}
+        </div>
+        <h4>${strength} in ${areaName}</h4>
+        <div class="location-proposal-summary">
+          <div>
+            <code>${entityId}</code> matches
+            ${nSiblings ?? "?"} tagged ${deviceClass}
+            ${nSiblings === 1 ? "sibling" : "siblings"} at median
+            r=${medianR != null ? medianR.toFixed(2) : "?"}.
+          </div>
+        </div>
+        ${alternatives.length > 0
+            ? b `
+              <h4>Alternative areas considered</h4>
+              <ul class="location-alt-list">
+                ${alternatives.map((alt) => b `
+                    <li>
+                      <code>${alt.area_id ?? "?"}</code> —
+                      r=${alt.median_r != null ? alt.median_r.toFixed(2) : "?"}
+                      across ${alt.n_siblings ?? "?"} sibling${alt.n_siblings === 1 ? "" : "s"}
+                    </li>
+                  `)}
+              </ul>
+            `
+            : A}
+        ${insight.explanation
+            ? b `<div class="explanation">${insight.explanation}</div>`
+            : A}
+        <p class="location-proposal-note">
+          <strong>Advisory only.</strong> This detector never auto-assigns areas.
+          Confirm the suggestion via the bulk-area-assign dialog or override
+          with a different area.
+        </p>
+      </div>
+    `;
+    }
     _renderAuditBody(insight) {
         const busy = this._busyId === insight.id || this._auditSuggestBusy === insight.id;
         const confidencePct = Math.round(insight.confidence * 100);
@@ -7593,7 +7850,9 @@ class HaInsightsCard extends i {
                 : insight.detector === "automation_audit"
                     && insight.payload_format !== "automation"
                     ? this._renderAuditBody(insight)
-                    : b `
+                    : this._hasSpecializedCardRenderer(insight)
+                        ? this._renderCardBody(insight)
+                        : b `
                 <div class="dialog-body">
                   ${this._renderModalError()}
                   ${this._renderTestResults()}
@@ -7602,29 +7861,29 @@ class HaInsightsCard extends i {
                     <span class="pill">${insight.detector}</span>
                     ${insight.area_id ? b `<span class="pill">${insight.area_id}</span>` : A}
                     ${insight.conflicts_with.length > 0
-                        ? b `<span class="pill" style="color: var(--warning-color)">conflicts</span>`
-                        : A}
+                            ? b `<span class="pill" style="color: var(--warning-color)">conflicts</span>`
+                            : A}
                   </div>
                   <h4>${this._payloadHeading(insight.payload_format)}</h4>
                   ${this._renderPayloadView(insight)}
                   ${insight.explanation
-                        ? b `<div class="explanation">${insight.explanation}</div>`
-                        : A}
+                            ? b `<div class="explanation">${insight.explanation}</div>`
+                            : A}
                   ${this._hypothesisById.has(insight.id)
-                        ? b `<div class="explanation hypothesis">
+                            ? b `<div class="explanation hypothesis">
                         <strong>Likely causes:</strong>
                         ${this._hypothesisById.get(insight.id)}
                       </div>`
-                        : A}
+                            : A}
                   ${this._renderManagedDevicesSection(insight)}
                   ${this._renderPreview(insight)}
                   ${this._renderRename(insight, undefined)}
                   ${llmEnabled
-                        ? this._renderFeedbackInput(insight, "Notes for the LLM (optional, used by Refine)")
-                        : A}
+                            ? this._renderFeedbackInput(insight, "Notes for the LLM (optional, used by Refine)")
+                            : A}
                   <div class="explain-row">
                     ${llmEnabled && !insight.explanation
-                        ? b `
+                            ? b `
                           <button
                             class="action ${this._explainBusy ? "busy-pulse" : ""}"
                             ?disabled=${this._explainBusy}
@@ -7633,39 +7892,39 @@ class HaInsightsCard extends i {
                             ${this._explainBusy ? "💭 thinking…" : "Explain with LLM"}
                           </button>
                         `
-                        : A}
+                            : A}
                     ${llmEnabled && insight.payload_format === "automation"
-                        ? b `
+                            ? b `
                           <button
                             class="action ${this._refineBusy ? "busy-pulse" : ""}"
                             ?disabled=${this._refineBusy}
                             title="${this._refineConversationById.has(insight.id)
-                            ? "Continue the LLM conversation with new feedback"
-                            : "Ask the LLM to refine this automation"}"
+                                ? "Continue the LLM conversation with new feedback"
+                                : "Ask the LLM to refine this automation"}"
                             @click=${() => this._refine(insight)}
                           >
                             ${this._refineBusy
-                            ? "💭 refining…"
-                            : this._refineConversationById.has(insight.id)
-                                ? `✨ Refine again (turn ${(this._refineTurnsById.get(insight.id) ?? 0) + 1})`
-                                : "✨ Refine with LLM"}
+                                ? "💭 refining…"
+                                : this._refineConversationById.has(insight.id)
+                                    ? `✨ Refine again (turn ${(this._refineTurnsById.get(insight.id) ?? 0) + 1})`
+                                    : "✨ Refine with LLM"}
                           </button>
                           ${this._refineConversationById.has(insight.id)
-                            ? b `<button
+                                ? b `<button
                                 class="action"
                                 title="Forget the prior conversation and start a fresh refine thread"
                                 @click=${() => {
-                                this._resetRefineConversation(insight.id);
-                                this._toast = "Refine conversation reset";
-                            }}
+                                    this._resetRefineConversation(insight.id);
+                                    this._toast = "Refine conversation reset";
+                                }}
                               >
                                 🔁 Reset conversation
                               </button>`
-                            : A}
+                                : A}
                         `
-                        : A}
+                            : A}
                     ${llmEnabled
-                        ? b `
+                            ? b `
                           <button
                             class="action"
                             ?disabled=${this._previewBusy}
@@ -7673,15 +7932,15 @@ class HaInsightsCard extends i {
                             @click=${() => this._previewRedaction(insight)}
                           >
                             ${this._previewBusy
-                            ? "loading…"
-                            : this._previewById.has(insight.id)
-                                ? "🛡️ Hide preview"
-                                : "🛡️ What gets sent?"}
+                                ? "loading…"
+                                : this._previewById.has(insight.id)
+                                    ? "🛡️ Hide preview"
+                                    : "🛡️ What gets sent?"}
                           </button>
                         `
-                        : A}
+                            : A}
                     ${llmEnabled && insight.kind === "anomaly"
-                        ? b `
+                            ? b `
                           <button
                             class="action ${this._hypothesizeBusy ? "busy-pulse" : ""}"
                             ?disabled=${this._hypothesizeBusy}
@@ -7689,15 +7948,15 @@ class HaInsightsCard extends i {
                             @click=${() => this._hypothesize(insight)}
                           >
                             ${this._hypothesizeBusy
-                            ? "💭 thinking…"
-                            : this._hypothesisById.has(insight.id)
-                                ? "🔍 Re-hypothesize"
-                                : "🔍 Get hypothesis"}
+                                ? "💭 thinking…"
+                                : this._hypothesisById.has(insight.id)
+                                    ? "🔍 Re-hypothesize"
+                                    : "🔍 Get hypothesis"}
                           </button>
                         `
-                        : A}
+                            : A}
                     ${ttsConfigured && insight.explanation
-                        ? b `
+                            ? b `
                           <button
                             class="action"
                             ?disabled=${this._ttsBusy}
@@ -7707,9 +7966,9 @@ class HaInsightsCard extends i {
                             ${this._ttsBusy ? "speaking…" : "🔊 Read aloud"}
                           </button>
                         `
-                        : A}
+                            : A}
                     ${insight.payload_format === "automation"
-                        ? b `<button
+                            ? b `<button
                           class="action"
                           ?disabled=${this._testBusy}
                           title="Fire the action(s) for real"
@@ -7717,22 +7976,22 @@ class HaInsightsCard extends i {
                         >
                           ${this._testBusy ? "testing…" : "🔥 Test actions"}
                         </button>`
-                        : A}
+                            : A}
                   </div>
                   ${!llmEnabled
-                        ? b `<div class="subtitle" style="margin-top: 12px;">
+                            ? b `<div class="subtitle" style="margin-top: 12px;">
                         LLM Explain / Refine disabled — enable Local or Cloud mode in
                         Settings → Devices & Services.
                       </div>`
-                        : A}
+                            : A}
                 </div>
                 <div class="dialog-footer">
                   <button class="action" ?disabled=${busy} @click=${() => this._dismiss(insight)}>
                     Dismiss
                   </button>
                   ${insight.applied_at
-                        ? A
-                        : b `<button
+                            ? A
+                            : b `<button
                         class="action"
                         ?disabled=${busy}
                         @click=${() => this._snooze(insight)}
@@ -7740,8 +7999,8 @@ class HaInsightsCard extends i {
                         Snooze 7d
                       </button>`}
                   ${insight.applied_at || insight.retired_at
-                        ? A
-                        : b `<button
+                            ? A
+                            : b `<button
                         class="action retire"
                         ?disabled=${busy}
                         title="Permanently retire this suggestion — won't appear again unless un-retired from the history view"
@@ -7750,7 +8009,7 @@ class HaInsightsCard extends i {
                         Retire
                       </button>`}
                   ${insight.retired_at
-                        ? b `<button
+                            ? b `<button
                         class="action"
                         ?disabled=${busy}
                         title="Reverse the retire decision — this insight goes back into the active queue"
@@ -7758,9 +8017,9 @@ class HaInsightsCard extends i {
                       >
                         ↺ Un-retire
                       </button>`
-                        : A}
+                            : A}
                   ${insight.applied_at
-                        ? b `<button
+                            ? b `<button
                         class="action primary"
                         ?disabled=${busy}
                         title="Remove the automation and revert this insight to active"
@@ -7768,15 +8027,15 @@ class HaInsightsCard extends i {
                       >
                         ${busy ? "undoing…" : "↶ Undo apply"}
                       </button>`
-                        : insight.payload_format === "automation"
-                            ? b `<button
+                            : insight.payload_format === "automation"
+                                ? b `<button
                           class="action primary"
                           ?disabled=${busy}
                           @click=${() => this._apply(insight)}
                         >
                           ${busy ? "applying…" : "Apply"}
                         </button>`
-                            : A}
+                                : A}
                 </div>
               `}
         </div>
