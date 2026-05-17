@@ -109,18 +109,20 @@ def test_skip_labeled_automations_excluded_from_rotation() -> None:
     """Skip-labeled automations are filtered before rotation, so the
     user-facing cap applies to eligible automations only."""
     autos = _automations(50)
+    skip_ids: set[str] = set()
     # Mark every other one as skip-labeled
     for i, a in enumerate(autos):
         if i % 2 == 0:
             a["description"] = f"important {_SKIP_LABEL} excluded"
+            skip_ids.add(a["id"])
     detector = AutomationAuditDetector()
-    seen: set[str] = set()
     # 25 eligible automations remain — should fit in one scan
     batch = detector._select_audit_targets(autos)
-    seen.update(a["id"] for a in batch)
+    seen = {a["id"] for a in batch}
     # No skip-labeled ID should be in the batch
-    skip_ids = {a["id"] for a in autos if i % 2 == 0 for i in [autos.index(a)]}
     assert not (seen & skip_ids)
+    # And all 25 eligible should be returned
+    assert len(seen) == 25
 
 
 def test_offset_resets_cleanly_for_grown_list() -> None:
