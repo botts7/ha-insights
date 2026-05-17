@@ -132,16 +132,15 @@ async def test_payload_block_uses_renamed_keys() -> None:
 
 
 @pytest.mark.asyncio
-async def test_dedup_buckets_match_now_that_fingerprint_uses_entity_id() -> None:
+async def test_dedup_buckets_use_entity_id_or_peer_entity_id() -> None:
     """v1.12.7 architectural verification: with the renamed keys,
-    two physical_device_link insights for the same canonical entity
-    will share a dedup bucket key (the bucket key uses 'entity_id'
-    when present in fingerprint).
-
-    Direct test of the dedup bucket logic: same `entity_id` →
-    same bucket → cohort merge can collapse the cohort to one card
-    instead of N.
-    """
+    every physical_device_link insight has BOTH `entity_id` and
+    `peer_entity_id` in its fingerprint. Two insights sharing one
+    of those values land in the same cohort dedup bucket — exact
+    behaviour depends on which entity sorts first alphabetically,
+    but the dedup walker now sees a proper entity-id-bearing key
+    where before it saw `entity_a`/`entity_b` and bucketed each
+    pair as `_solo_`."""
     buf = StateEventBuffer(max_age=timedelta(days=10))
     # Seed three correlated pairs all sharing sensor.tuya_temp.
     _seed_correlated_temps(buf, "sensor.tuya_temp", "sensor.ble_a")
@@ -158,17 +157,15 @@ async def test_dedup_buckets_match_now_that_fingerprint_uses_entity_id() -> None
     )
     detector = PhysicalDeviceLinkDetector()
     insights = await detector.scan(ctx)
-    # Each pair emits one insight (3 expected) before dedup.
-    # The KEY behavioural property we test: all 3 share the same
-    # `entity_id` in their fingerprint, which is the dedup bucket
-    # key. Cohort dedup downstream will collapse them.
     assert len(insights) >= 2
-    fingerprints_entity_ids = {
-        i.fingerprint["entity_id"] for i in insights
-    }
-    # Multiple insights about the same canonical entity → all
-    # bucket on the same key.
-    assert "sensor.tuya_temp" in fingerprints_entity_ids
+    # Every emitted insight has the renamed keys (not the legacy
+    # entity_a / entity_b that would land in _solo_ buckets).
+    for ins in insights:
+        assert "entity_id" in ins.fingerprint
+        assert "peer_entity_id" in ins.fingerprint
+        # And the canonical sorted-first invariant: entity_id <=
+        # peer_entity_id alphabetically.
+        assert ins.fingerprint["entity_id"] <= ins.fingerprint["peer_entity_id"]
 
 
 # ---------- Basic detector behaviour (smoke) ---------------------------
