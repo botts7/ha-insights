@@ -4,6 +4,26 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+## [1.7.5] — 2026-05-17
+
+### Fixed
+
+- **Panel rendering twice** — bumps the bundled panel.js to card
+  v1.3.3 which fixes a race in the v1.3.1 recovery code. v1.3.1's
+  IIFE called `tryRecover()` synchronously at module load AND
+  started a polling burst immediately. On first `/ha-insights`
+  visit, our force-mount ran before HA's normal panel resolver
+  finished → HA then mounted a second `ha-insights-panel` on top
+  of ours.
+
+  v1.3.3 adds (a) a dedupe pass that removes extra panels at the
+  start of every recovery attempt, (b) a 500ms first-probe delay
+  so HA's normal mount completes first, (c) drops the synchronous
+  module-load attempt entirely.
+
+  No integration code change — just a fresh panel.js artifact
+  baked in.
+
 ## [1.7.4] — 2026-05-17
 
 ### Fixed

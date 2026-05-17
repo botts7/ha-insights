@@ -8076,6 +8076,22 @@ if (!customElements.get("ha-insights-panel")) {
     const onRoute = () => {
         return window.location.pathname.startsWith("/ha-insights");
     };
+    // v1.3.3: dedupe pass. If two ha-insights-panel ended up siblings
+    // (HA's normal resolver + our recovery both fired), keep the first
+    // and remove the rest. Idempotent.
+    const dedupePanels = (wrap) => {
+        const panels = wrap.querySelectorAll("ha-insights-panel");
+        if (panels.length <= 1)
+            return 0;
+        let removed = 0;
+        for (let i = 1; i < panels.length; i++) {
+            panels[i].remove();
+            removed += 1;
+        }
+        // eslint-disable-next-line no-console
+        console.info(`[ha-insights] removed ${removed} duplicate panel element(s)`);
+        return removed;
+    };
     const tryRecover = () => {
         state.attempts += 1;
         state.lastAttemptAt = Date.now();
@@ -8084,6 +8100,9 @@ if (!customElements.get("ha-insights-panel")) {
         const wrap = findWrapper();
         if (!wrap)
             return;
+        // v1.3.3: always dedupe first. If HA's resolver mounted alongside
+        // our recovery (race), clean up before deciding whether to mount.
+        dedupePanels(wrap);
         if (wrap.querySelector("ha-insights-panel"))
             return;
         if (!customElements.get("ha-insights-panel"))
@@ -8133,6 +8152,10 @@ if (!customElements.get("ha-insights-panel")) {
     // 5 seconds × 250ms = 20 chances to catch and recover. Lightweight;
     // tryRecover bails immediately if route doesn't match or wrapper
     // already mounted.
+    //
+    // v1.3.3: first iteration is delayed 500ms so HA's normal mount has
+    // time to complete first. v1.3.1 raced HA — both mounted, resulting
+    // in two stacked panels until the user dedupe-d manually.
     const burstOnNav = () => {
         if (!onRoute())
             return;
@@ -8142,6 +8165,10 @@ if (!customElements.get("ha-insights-panel")) {
                 window.clearInterval(burst);
                 return;
             }
+            // Skip the first 500ms — give HA's resolver the chance to mount
+            // normally. Only force-mount after that window.
+            if (Date.now() - navStart < 500)
+                return;
             tryRecover();
         }, 250);
     };
@@ -8157,9 +8184,13 @@ if (!customElements.get("ha-insights-panel")) {
     window.addEventListener("ha-insights:navigated", burstOnNav);
     window.addEventListener("popstate", burstOnNav);
     window.addEventListener("hashchange", burstOnNav);
-    // Initial attempts. tryRecover() once now (covers same-session
-    // navigation), and start a burst (covers AbortError on first load).
-    tryRecover();
+    // v1.3.3: skip the immediate-at-module-load tryRecover() (v1.3.1
+    // ran one synchronously, which raced HA's normal mount on the very
+    // first /ha-insights visit and produced two stacked panels). The
+    // burst starts immediately but its first probe is delayed 500ms,
+    // giving HA the chance to mount normally. If HA succeeds, the
+    // dedupe + early-return guard skip our mount entirely. If HA
+    // fails, recovery kicks in after the delay.
     burstOnNav();
 })();
 
