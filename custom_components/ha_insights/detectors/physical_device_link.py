@@ -233,17 +233,86 @@ class PhysicalDeviceLinkDetector(Detector):
     ) -> bool:
         """True when both entities share a device_id in HA's
         registry. We never flag those as 'same physical device' —
-        HA already groups them."""
+        HA already groups them.
+
+        Defensive: wraps the whole lookup in try/except because
+        non-HA `hass` objects (test mocks, dev-mode shells) will
+        produce confusing failures otherwise — MagicMock.async_get
+        returns a child mock whose `.device_id` is also a mock that
+        compares equal to itself for every entity, falsely
+        suppressing every candidate pair.
+        """
         try:
             from homeassistant.helpers import entity_registry as er
+
+            e_reg = er.async_get(ctx.hass)
+            a = e_reg.async_get(eid_a)
+            b = e_reg.async_get(eid_b)
+            if a is None or b is None:
+                return False
+            # Use isinstance to guard against mock objects that
+            # return non-string device_ids that compare equal to
+            # themselves spuriously.
+            if not (
+                isinstance(a.device_id, str)
+                and isinstance(b.device_id, str)
+            ):
+                return False
+            return a.device_id == b.device_id
+        except (ImportError, AttributeError, TypeError):
+            return False
+
+    def _collect_static_dedup_pairs(
+        self, ctx: DetectorContext
+    ) -> set[tuple[str, str]]:
+        """Build the (a, b) pair set that v1.10.3's static-signal
+        dedup would catch. Avoids running the v1.10.3 path for every
+        pair (which would query the registry inside the inner loop).
+
+        Defensive — same reasoning as `_same_device`: non-HA hass
+        objects produce confusing iteration over MagicMock attribute
+        proxies that fabricate phantom pairs and over-filter."""
+        try:
+            from homeassistant.helpers import device_registry as dr
+            from homeassistant.helpers import entity_registry as er
         except ImportError:
-            return False
-        e_reg = er.async_get(ctx.hass)
-        a = e_reg.async_get(eid_a)
-        b = e_reg.async_get(eid_b)
-        if a is None or b is None:
-            return False
-        return a.device_id is not None and a.device_id == b.device_id
+            return set()
+        try:
+            e_reg = er.async_get(ctx.hass)
+            d_reg = dr.async_get(ctx.hass)
+            # Validate the registry is a real registry, not a mock —
+            # check that `.entities.values()` yields entries with
+            # string entity_ids.
+            entities_iter = e_reg.entities.values()
+        except (AttributeError, TypeError):
+            return set()
+        by_signal: dict[tuple[str, str], list[str]] = defaultdict(list)
+        try:
+            for ent in entities_iter:
+                if not isinstance(ent.entity_id, str):
+                    return set()  # not a real registry
+                if ent.device_id is None:
+                    continue
+                dev = d_reg.async_get(ent.device_id)
+                if dev is None:
+                    continue
+                for ct, cv in (dev.connections or set()):
+                    if isinstance(ct, str) and isinstance(cv, str) and cv:
+                        by_signal[(ct, cv.lower())].append(ent.entity_id)
+                for ct, cv in (dev.identifiers or set()):
+                    if isinstance(ct, str) and isinstance(cv, str) and cv:
+                        by_signal[(f"id:{ct}", cv)].append(ent.entity_id)
+        except (AttributeError, TypeError):
+            return set()
+        pairs: set[tuple[str, str]] = set()
+        for eids in by_signal.values():
+            if len(eids) < 2:
+                continue
+            for i in range(len(eids)):
+                for j in range(i + 1, len(eids)):
+                    a, b = sorted([eids[i], eids[j]])
+                    pairs.add((a, b))
+        return pairs
 
     def _collect_static_dedup_pairs(
         self, ctx: DetectorContext
