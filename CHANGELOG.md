@@ -4,6 +4,78 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+## [1.11.0] — 2026-05-17
+
+### Added — PhysicalDeviceLinkDetector (correlation-based dedup)
+
+v1.10.3 catches duplicate entities via **static identifiers** —
+shared MAC, Bluetooth address, Zigbee IEEE, etc. That covers
+roughly 50–70 % of typical duplicates. The rest hide:
+
+- Govee Cloud + Govee BLE — different internal IDs in each
+- Aqara via Zigbee2MQTT + same device via ZHA mid-migration
+- HACS custom component + official integration on same hardware
+- ESPHome reflash with the old cloud entry still lingering
+
+For those, the only remaining signal is the values themselves.
+If two temperature sensors report implausibly correlated values
+over a week (r > 0.95 across hundreds of aligned samples), they
+are almost certainly the same physical sensor seen through two
+integrations.
+
+#### `lib/correlation_primitives.py`
+
+Pure functions: Pearson r with zero-variance protection, fixed-
+bin time-alignment of arbitrary-cadence event streams (10 min
+default — absorbs cadence differences while preserving real
+coupling), carry-forward interpolation for stateful sensors,
+small-lag scan (±2 bins) to tolerate clock drift between
+integrations. 18 unit tests.
+
+#### `detectors/physical_device_link.py`
+
+BETA `PATTERN_OBSERVATION` detector. Pre-filters aggressively:
+
+- Same `device_class` only (a temp sensor and a humidity sensor
+  accidentally correlating isn't a duplicate finding)
+- Same-`device_id` pairs skipped (HA already groups those)
+- Pairs already flagged by static dedup skipped (no piling on)
+- Minimum 30 events per entity in 7-day lookback
+- Minimum variance gate (a battery sensor stuck at 100 % would
+  "correlate" with anything)
+- Hard cap of 15 insights per scan
+
+When a pair clears all filters and r > 0.95, emits a
+PATTERN_OBSERVATION explaining the finding, the matching r,
+the lag at which it was found, and the common scenarios
+(Tuya Cloud + BLE, Govee Cloud + Govee BLE, Hue Bridge +
+Matter bridging, etc.). Suggests the user mark one as
+"managed externally" (v1.7.7) or remove the duplicate
+integration.
+
+#### Roadmap progress
+
+- v1.10 Phase A + B (identify + perturbation) ✅
+- v1.10.3 static dedup hint ✅
+- **v1.11.0 correlation-based dedup detector** ✅ (THIS)
+- v1.11.5 LocationProposalDetector (next — uses the same
+  correlation primitives to score unassigned entities against
+  area-tagged siblings)
+- v1.12 BLE live-find
+- v1.13 survival analysis
+- v1.14 sequence mining
+- v1.15 HardwareSuggestionDetector
+
+#### Calibration caveats (Maturity.BETA)
+
+r > 0.95 is the "implausibly high" threshold. Two real sensors
+in the same room typically correlate r ≈ 0.85–0.92 — there's
+room above that band that's genuinely "same physical device"
+territory, but the lower edge will need real-install
+calibration. Pre-filtering (same device_class, same-device_id
+skipped, static-dedup skipped, min variance) keeps false-
+positives manageable; field data will tune the threshold.
+
 ## [1.10.8] — 2026-05-17
 
 ### Changed
