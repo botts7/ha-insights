@@ -2381,7 +2381,67 @@ Connects via WS, backdates entries to recorder. Produces a HA instance that <em>
 <tr>
 <td>v0.7.0</td>
 <td>Detector library doubles</td>
-<td>LongTailDetector, OrphanDeviceDetector, StreakDetector, confidence colors, age, sort/group</td>
+<td>LongTailDetector, OrphanDeviceDetector, StreakDetector, confidence colors, age display, sort/group</td>
+</tr>
+<tr>
+<td>v0.8.0–v0.8.2</td>
+<td>Apply pipeline polish</td>
+<td>Undo applied, online (Layer 2) validator, edit YAML before apply, bulk apply, refine progress, empty-state CTA, persistent panel filters</td>
+</tr>
+<tr>
+<td>v0.9.0</td>
+<td>Smart features</td>
+<td>High-confidence notifications, daily digest, LLM cost estimator, FrequencyAnomaly + Seasonality + LaggedCorrelation detectors, Assist-aware failover, preferred-agent dropdown</td>
+</tr>
+<tr>
+<td>v1.0.0</td>
+<td>Release candidate</td>
+<td>Multi-config-entry, custom detector loading (sandboxed), multi-turn refine, i18n (German), mkdocs site, admin gate on destructive WS handlers, per-field setting descriptions</td>
+</tr>
+<tr>
+<td>v1.1.0–v1.1.4</td>
+<td>Audit + observations</td>
+<td>Short/medium/long-term observation buffers (recorder), AutomationAuditDetector, LLM "🤖 Suggest improvements", side-by-side YAML diff, recorder-window detection, configurable rollup window</td>
+</tr>
+<tr>
+<td>v1.2.0</td>
+<td>Backfill at scale</td>
+<td>Incremental chunked backfill for large datasets, Repairs dual-emit (HACS + core-merge bridge), blank-panel universal recovery (timeout + force-unstuck)</td>
+</tr>
+<tr>
+<td>v1.4.0</td>
+<td>Predictive + comms</td>
+<td>PhoneChargeReminder w/ day-of-week, mobile notifier w/ anti-spam, WeatherCorrelation, community analytics opt-in, three-tier maturity flag, onboarding + refinement wizard</td>
+</tr>
+<tr>
+<td>v1.5.0–v1.5.30</td>
+<td>HA-semantics + cohorts</td>
+<td>context.id batch correlator, unavailable/template filters, recorder-vs-live distinction, cohort dedup (false-merge fix), Labels chip + group_by, goals_json in OptionsFlow, area-assign + bulk-assign in-panel GUI, cross-integration coupling in audit</td>
+</tr>
+<tr>
+<td>v1.5.31–v1.5.51</td>
+<td>Stability sweep</td>
+<td>Predictable-bug-class fixes (settings feedback, gesture eaten, pre-flight checklist), deadlock fixes (<code>_load_iot_classes</code>), CHANGELOG backfill, a11y aria-label sweep, test-mask cleanup</td>
+</tr>
+<tr>
+<td>v1.6.0</td>
+<td>Native button-press</td>
+<td>EventBuffer + ButtonPressHabitDetector (pair <code>event.*</code> firings with consequent state changes via HA's native <code>event</code> platform)</td>
+</tr>
+<tr>
+<td>v1.7.0–v1.7.8</td>
+<td>Coupling + managed-externally</td>
+<td><code>lib/coupling_strength.py</code> + 🔗 card badge, panel rebuild (bundled <code>panel.js</code>, force-mount recovery), per-device "managed externally" flag (Strategy 2) — companion to coupling badge</td>
+</tr>
+<tr>
+<td>v1.8.0–v1.8.2</td>
+<td>Changepoint detection</td>
+<td><code>lib/changepoint_detection.py</code> (PELT via <code>ruptures</code> + pure-Python Welch-pooled fallback), FrequencyAnomalyDetector changepoint-aware baseline truncation, new StateShiftDetector (BETA, PATTERN_OBSERVATION)</td>
+</tr>
+<tr>
+<td>v1.9.0–v1.9.1</td>
+<td>Transfer entropy</td>
+<td><code>lib/transfer_entropy.py</code> (Schreiber 2000, pure stdlib), wired into LaggedCorrelationDetector as direction check — demote reversed flow (0.5×) and symmetric flow (0.85×), preserve when uninformative</td>
 </tr>
 </tbody>
 </table>
@@ -2396,24 +2456,39 @@ Connects via WS, backdates entries to recorder. Produces a HA instance that <em>
 </thead>
 <tbody>
 <tr>
-<td>v0.8</td>
-<td>Apply pipeline polish</td>
-<td>Undo applied, online (Layer 2) validator, edit YAML before apply, bulk apply</td>
+<td>v1.10</td>
+<td><strong>Find My Device — identify + perturbation</strong></td>
+<td><code>lib/identify_capability.py</code> (entity → what physical signal it can emit); <code>lib/perturbation_capability.py</code> (device_class → suggested perturbation: touch/breathe/shine + expected magnitude); <code>lib/perturbation_detection.py</code> (baseline + listening window per candidate → ranked z-scores with elimination); <code>services/identify_service.py</code> (light.flash / media_player.play_media / switch toggle / Zigbee <code>Identify</code> cluster); new "Find my devices" panel mode walking the user through orphans in batches; orphan-card buttons: 🔆 Identify, 🤚 Trigger-wait, 👆 Touch-test. <strong>Killer feature: elimination.</strong> Touch-test ranks all candidates by z-score so the app can say "you touched <code>sensor.kitchen_temp</code>, not <code>sensor.foo</code> — they're mislabeled."</td>
 </tr>
 <tr>
-<td>v0.9</td>
-<td>Smart features</td>
-<td>Notifications, LLM cost estimator, agent failover, AnomalyDetector, SeasonalityDetector, CorrelationDetector</td>
+<td>v1.11</td>
+<td><strong>Passive sensor location inference</strong></td>
+<td><code>lib/location_inference.py</code> (Pearson correlation on 7-day temp/humidity curves vs sibling sensors with known areas; time-of-peak-brightness for illuminance → window orientation → narrows rooms; cyclic-pattern matching for power meters vs known appliance plugs); new <code>LocationProposalDetector</code> emits <code>InsightKind.LOCATION_PROPOSAL</code> with ranked area guesses + confidence; fix-action assigns area + dismisses related orphan insights; <strong>never auto-applies</strong></td>
 </tr>
 <tr>
-<td>v1.0</td>
-<td>Release candidate</td>
-<td>Multi-config-entry, custom detector loading, multi-turn refine, i18n, docs site, HACS default-store PR</td>
+<td>v1.12</td>
+<td><strong>BLE live-find + native Identify clusters</strong></td>
+<td><code>lib/ble_capability.py</code> (entity → BLE address from <code>hass.data["bluetooth"]</code>); <code>ws_api</code> streaming RSSI subscription endpoint; card live signal-strength scope (EMA smoothing ~3 s, trend arrows, warm/cold color buckets, optional haptic pulse via companion app); stationary BLE-proxy triangulation view (sorted RSSI per proxy → narrows to zone); Zigbee + Matter <code>Identify</code> cluster native bindings</td>
+</tr>
+<tr>
+<td>v1.13</td>
+<td><strong>Survival analysis</strong></td>
+<td><code>lib/survival_likelihood.py</code> using <code>lifelines</code> AFT (NOT Cox PH — per research memory); "median time-to-event" insights ("phone normally hits 20% by 23:00 ± 47 min"); PhoneChargeReminder rewrite using AFT priors instead of hand-tuned heuristics</td>
+</tr>
+<tr>
+<td>v1.14</td>
+<td><strong>Sequence mining</strong></td>
+<td><code>lib/sequence_mining.py</code> using <code>prefixspan</code>; cross-window pattern detection beyond pair-level cooccurrence ("door → light → media → motion-away" frequent subsequence); new SequencePatternDetector</td>
+</tr>
+<tr>
+<td>v1.15+</td>
+<td>Polish + research backlog</td>
+<td>Card 🔀 directionality badge (renders v1.9.1 payload); HAWatcher shadow execution (97 % precision validation); 2nd-order Markov + Shannon-entropy AIT approximation; survival-aware reminder cards</td>
 </tr>
 </tbody>
 </table>
 <blockquote>
-<p>The original v0.1 charter envisioned a different shape (vision-LLM, anomaly, cleanup as separate releases). Actual cadence has prioritized refining the hero loop and the privacy story before broadening detector kinds. See git tags for the canonical record.</p>
+<p>The original v0.1 charter envisioned a different shape (vision-LLM, anomaly, cleanup as separate releases). Actual cadence prioritized refining the hero loop and privacy story before broadening detector kinds — then expanded into a research-backed detector library (v1.8+) once the foundation was stable. See git tags for the canonical per-version record; CHANGELOG.md for full per-release notes.</p>
 </blockquote>
 <hr />
 <h2 id="risks">Risks<a class="headerlink" href="#risks" title="Permanent link">&para;</a></h2>
