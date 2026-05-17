@@ -4,6 +4,69 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+## [1.12.1] — 2026-05-17
+
+### Added — setup_quality covers the v1.6+ research detectors
+
+`SetupQualityDetector` previously only reported on 4 features
+(phone_activity, presence_inference, manual_habit, goal_tracker).
+The 15+ detectors added since v1.6 (button_press_habit,
+frequency_anomaly, state_shift, seasonality, lagged_correlation,
+physical_device_link, location_proposal, weather_correlation,
+automation_audit, …) had no setup-quality coverage at all — new
+users could see "your install is GREAT" while ⅔ of the detector
+library couldn't fire.
+
+#### Four new recipes
+
+1. **Research-backed pattern detection** —
+   FrequencyAnomaly, StateShift, Seasonality, LaggedCorrelation.
+   Tiered on recorder retention (7d for basic, 14d for weekly
+   seasonality). Without 7d retention the tier is USELESS with a
+   direct link to HA's recorder docs.
+
+2. **Cross-integration dedup + room inference** —
+   PhysicalDeviceLink (v1.11.0) + LocationProposal (v1.11.5) +
+   Find-My-Device buttons. Tiered on ≥2 area-tagged siblings per
+   device_class (needed for the correlation math to have anything
+   to compare). Links to the device dashboard.
+
+3. **Per-area hardware coverage** — explicit gap analysis: how
+   many areas have motion/temp/contact/lux sensors? Smart-button
+   `event.*` entities? A weather integration? Tier ladder maps
+   directly to detector unlocks. Links to device dashboard.
+
+4. **Automation audit** —
+   AutomationAuditDetector. Tiered on existence of any HA
+   automations + recorder retention for drift detection.
+
+#### Nine new predicates
+
+`_device_class_areas` aggregator + per-class helpers
+(`_has_motion_coverage`, `_has_temp_coverage`,
+`_has_multi_temp_per_class`), entity-presence checks
+(`_has_event_entities`, `_has_weather_integration`,
+`_has_active_automations`), and retention thresholds
+(`_has_recorder_7d`, `_has_recorder_14d`). All return
+`(bool, detail_str)` so the recipe advice can include specifics
+like "5/12 areas with motion sensor."
+
+### Why this matters for the beta-launch story
+
+Per the user's framing: "I'll test fundamentals, beta testers
+will enhance." Setup quality is the first impression — if it
+lies about coverage, beta testers report "the integration says
+it's working but I see nothing happening." With this change,
+new users see exactly which detectors are firing, which ones
+are waiting on data/history, and which ones are blocked by
+hardware gaps the user can choose to fill (or not).
+
+This also lays the foundation for **v1.15
+HardwareSuggestionDetector** — the per-area coverage predicates
+here are the same primitives that detector will use to emit
+actionable "consider adding a motion sensor in living_room"
+insights.
+
 ## [1.12.0] — 2026-05-17
 
 ### Added — BLE live-find backend (Find My Device, axis 3)
