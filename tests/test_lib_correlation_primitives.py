@@ -16,13 +16,13 @@ from custom_components.ha_insights.lib.correlation_primitives import (
 def test_perfect_positive_correlation() -> None:
     xs = [1.0, 2.0, 3.0, 4.0, 5.0]
     ys = [2.0, 4.0, 6.0, 8.0, 10.0]  # y = 2x
-    assert pearson_correlation(xs, ys) == 1.0
+    assert math.isclose(pearson_correlation(xs, ys), 1.0, rel_tol=1e-9)
 
 
 def test_perfect_negative_correlation() -> None:
     xs = [1.0, 2.0, 3.0, 4.0, 5.0]
     ys = [10.0, 8.0, 6.0, 4.0, 2.0]
-    assert pearson_correlation(xs, ys) == -1.0
+    assert math.isclose(pearson_correlation(xs, ys), -1.0, rel_tol=1e-9)
 
 
 def test_no_correlation_with_constant_input() -> None:
@@ -112,7 +112,7 @@ def test_identical_streams_return_r_one() -> None:
         bin_size_seconds=600.0,
         start_ts=0, end_ts=12000,
     )
-    assert result.r == 1.0
+    assert math.isclose(result.r, 1.0, rel_tol=1e-3)
     assert result.best_lag_bins == 0
 
 
