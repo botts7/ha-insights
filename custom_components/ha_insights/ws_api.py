@@ -108,6 +108,14 @@ SUPPORTED_METHODS = (
     # devices with cryptic names before assigning them an area.
     "identify_capability",
     "identify_entity",
+    # v1.10 Phase B: perturbation touch-test for passive sensors.
+    # `perturbation_guide` returns the per-device_class instruction
+    # the card shows ("touch with finger" / "breathe on it");
+    # `perturbation_test` opens a listening window, watches every
+    # entity of the same device_class, and returns ranked z-scores
+    # so the user sees which entity actually spiked.
+    "perturbation_guide",
+    "perturbation_test",
 )
 
 
@@ -156,6 +164,9 @@ def async_register(hass: HomeAssistant) -> None:
     # v1.10 Phase A: Find My Device — identify-capable orphans
     websocket_api.async_register_command(hass, ws_identify_capability)
     websocket_api.async_register_command(hass, ws_identify_entity)
+    # v1.10 Phase B: perturbation touch-test for passive sensors
+    websocket_api.async_register_command(hass, ws_perturbation_guide)
+    websocket_api.async_register_command(hass, ws_perturbation_test)
 
 
 def _get_store(
@@ -4472,5 +4483,220 @@ async def ws_identify_entity(
             "method": cap.method.value,
             "description": cap.description,
             "calls_made": calls_made,
+        },
+    )
+
+
+# v1.10 Phase B — perturbation touch-test ----------------------------
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "home_insights/perturbation_guide",
+        vol.Required("device_class"): str,
+    }
+)
+@websocket_api.async_response
+async def ws_perturbation_guide(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Return the perturbation instruction for one device_class.
+
+    Read-only; not admin-gated. Card calls this when the user clicks
+    the 👆 button for a passive-sensor row to learn what to ask the
+    user to do (touch / breathe / shine light / etc.).
+
+    Response shape:
+      {
+        "supported": true,
+        "instruction": "Place a finger on the sensor...",
+        "expected_delta": 2.0,
+        "listening_window_s": 30,
+        "perturb_duration_s": 15,
+      }
+
+    On unsupported / unknown device_class: `{"supported": false,
+    "reason": "<why>"}`.
+    """
+    from .lib.perturbation_capability import (
+        is_perturbation_unsupported,
+        perturbation_guide_for,
+    )
+
+    device_class = msg["device_class"]
+    guide = perturbation_guide_for(device_class)
+    if guide is not None:
+        connection.send_result(
+            msg["id"],
+            {
+                "supported": True,
+                "device_class": guide.device_class,
+                "instruction": guide.instruction,
+                "expected_delta": guide.expected_delta,
+                "listening_window_s": guide.listening_window_s,
+                "perturb_duration_s": guide.perturb_duration_s,
+            },
+        )
+        return
+    reason = (
+        f"`{device_class}` is a recognized device_class that "
+        "deliberately doesn't support perturbation testing "
+        "(e.g. PM2.5 is too slow; battery can't be perturbed; "
+        "motion has its own 'wait for event' path)."
+        if is_perturbation_unsupported(device_class)
+        else (
+            f"`{device_class}` isn't a recognized perturbable "
+            "device_class. Try statistical correlation inference "
+            "(v1.11) for unknown types."
+        )
+    )
+    connection.send_result(
+        msg["id"],
+        {"supported": False, "reason": reason},
+    )
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "home_insights/perturbation_test",
+        vol.Required("device_class"): str,
+        vol.Required("candidate_entity_ids"): [str],
+        vol.Optional("listening_window_s", default=30): int,
+        vol.Optional("z_threshold", default=3.0): float,
+        vol.Optional("ambiguity_gap", default=1.5): float,
+    }
+)
+@websocket_api.async_response
+async def ws_perturbation_test(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Run a perturbation touch-test.
+
+    Captures a baseline from each candidate's current state and
+    last ~60s of state-change history (from the HA Insights event
+    buffer if available; otherwise just a single sample). Opens a
+    listening window for `listening_window_s` seconds, captures every
+    state change on the candidates, runs the z-score analysis, and
+    returns the ranked result.
+
+    Admin-gated because the test ties up server resources for the
+    duration and shouldn't be invokable by guest tokens.
+
+    Response shape: see PerturbationResult fields, serialized to a
+    dict + a `candidates: [...]` array of CandidateAssessment dicts.
+    """
+    if not _require_admin(hass, connection, msg):
+        return
+
+    import asyncio
+    from datetime import UTC, datetime, timedelta
+
+    from homeassistant.core import Event
+    from homeassistant.helpers.event import async_track_state_change_event
+
+    from .lib.perturbation_detection import analyze_perturbation
+
+    device_class = msg["device_class"]
+    candidate_ids: list[str] = msg["candidate_entity_ids"]
+    window_s: int = msg["listening_window_s"]
+    z_threshold: float = msg["z_threshold"]
+    ambiguity_gap: float = msg["ambiguity_gap"]
+
+    if not candidate_ids:
+        connection.send_error(
+            msg["id"],
+            "no_candidates",
+            "candidate_entity_ids must be non-empty.",
+        )
+        return
+
+    # ----- Baseline collection -----
+    # Prefer the HA Insights event buffer when available (gives us
+    # actual recent samples). Fall back to the current state value
+    # as a single-sample baseline. The detection lib handles both
+    # gracefully via _MIN_BASELINE_SAMPLES.
+    baseline: dict[str, list[float]] = {}
+    buffer_obj = None
+    for entry_data in hass.data.get(DOMAIN, {}).values():
+        if isinstance(entry_data, dict) and "buffer" in entry_data:
+            buffer_obj = entry_data["buffer"]
+            break
+    baseline_cutoff = datetime.now(tz=UTC) - timedelta(seconds=60)
+    for eid in candidate_ids:
+        samples: list[float] = []
+        if buffer_obj is not None:
+            for ev in buffer_obj.query(
+                since=baseline_cutoff,
+                entity_id=eid,
+            ):
+                try:
+                    samples.append(float(ev.new_state))
+                except (TypeError, ValueError):
+                    continue
+        # Augment with the current state so we always have a "now"
+        # reading even if the buffer has no recent activity.
+        state = hass.states.get(eid)
+        if state is not None:
+            try:
+                samples.append(float(state.state))
+            except (TypeError, ValueError):
+                pass
+        baseline[eid] = samples
+
+    # ----- Listening window -----
+    test_samples: dict[str, list[float]] = {eid: [] for eid in candidate_ids}
+
+    @callback
+    def _record(event: Event) -> None:
+        eid = event.data.get("entity_id")
+        new_state = event.data.get("new_state")
+        if eid is None or new_state is None:
+            return
+        try:
+            value = float(new_state.state)
+        except (TypeError, ValueError):
+            return
+        if eid in test_samples:
+            test_samples[eid].append(value)
+
+    unsub = async_track_state_change_event(hass, candidate_ids, _record)
+    try:
+        await asyncio.sleep(window_s)
+    finally:
+        unsub()
+
+    # ----- Analyze -----
+    result = analyze_perturbation(
+        baseline_samples_per_entity=baseline,
+        test_samples_per_entity=test_samples,
+        z_threshold=z_threshold,
+        ambiguity_gap=ambiguity_gap,
+    )
+
+    connection.send_result(
+        msg["id"],
+        {
+            "device_class": device_class,
+            "decision": result.decision,
+            "top_match": result.top_match,
+            "runner_up_gap": result.runner_up_gap,
+            "reason": result.reason,
+            "candidates": [
+                {
+                    "entity_id": c.entity_id,
+                    "baseline_mean": c.baseline_mean,
+                    "baseline_stddev": c.baseline_stddev,
+                    "peak_value": c.peak_value,
+                    "peak_delta": c.peak_delta,
+                    "z_score": c.z_score,
+                    "spike_detected": c.spike_detected,
+                    "sample_count": c.sample_count,
+                }
+                for c in result.candidates
+            ],
         },
     )

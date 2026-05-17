@@ -4,6 +4,101 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+## [1.10.5] — 2026-05-17
+
+### Added — Find My Device, Phase B backend (perturbation touch-test)
+
+Phase A made entities that can announce themselves discoverable
+(🔆 button fires `light.flash` / `media_player.play_media` / etc.).
+Phase B handles the passive sensors that can't — temp, humidity,
+illuminance, CO₂, sound. The user **physically perturbs** the
+sensor (touches it / breathes on it / shines a light), HA Insights
+watches every entity of the same `device_class`, and tells the
+user which entity actually spiked.
+
+**Killer outcome — elimination.** When the user touched what they
+THINK is `sensor.foo` but the spike appears on `sensor.bar`, the
+result says "top_match = sensor.bar." The card can render
+"you touched what you said was foo but bar actually spiked —
+they're probably mislabeled." Mislabeling is endemic in HA
+installs; this is the most powerful moment of the whole
+Find-My-Device feature.
+
+#### `lib/perturbation_capability.py`
+
+Pure function mapping `device_class` → per-class perturbation
+instruction + expected magnitude + listening window:
+
+| device_class | Instruction | Window | Δ |
+|---|---|---|---|
+| `temperature` | Place a finger / cup warm hand | 30 s | ~2 °C |
+| `humidity` | Breathe gently onto it | 20 s | ~10 %RH |
+| `carbon_dioxide` | Breathe out directly onto it | 60 s | ~500 ppm |
+| `illuminance` | Cover with hand or shine flashlight | 10 s | ~200 lx |
+| `sound_pressure` | Clap loudly nearby | 10 s | ~20 dB |
+| `moisture` | Damp finger on probes | 20 s | varies |
+
+Explicitly unsupported (documented with reasons): `pm25`,
+`atmospheric_pressure`, `battery`, `signal_strength`, `voltage`,
+etc. — too slow, fundamentally unperturbable, or already handled
+by Phase A.
+
+#### `lib/perturbation_detection.py`
+
+Pure z-score ranking. For each candidate:
+
+1. Baseline mean + stddev (floored at 0.1 native-units so a
+   perfectly-stable sensor doesn't divide by zero).
+2. Find max-absolute-deviation sample during the test window
+   (works in both directions — illuminance covering → drop is
+   still a "spike").
+3. z-score = |peak - mean| / stddev.
+
+Decision: **clear** (top z > z_threshold AND gap to runner-up >
+ambiguity_gap), **ambiguous** (multiple above threshold within
+the gap — typically multi-function devices like Aqara
+temp+humid+CO₂ on one PCB), or **no_signal** (retry or wrong
+sensor type).
+
+#### WS endpoints
+
+- `home_insights/perturbation_guide` — read-only; returns the
+  per-device_class instruction the card shows
+- `home_insights/perturbation_test` — admin-gated; opens a
+  listening window for N seconds, captures baseline from the HA
+  Insights event buffer (fallback: current state value), records
+  every state change on candidates during the window, runs the
+  detection lib, returns ranked result with decision + reason
+
+#### Tests
+
+`tests/test_lib_perturbation.py` — 19 cases covering each
+device_class guide, the elimination case (top_match ≠ caller's
+expected entity), no-signal handling, ambiguous multi-sensor
+device case, illuminance drops counting as spikes, the stddev
+floor preventing infinity, single-sample baseline fallback, and
+threshold tuning.
+
+#### What's next
+
+- v1.10.6 / card v1.8.0 — card-side 👆 button + countdown modal
+  + results display ("Top match: sensor.kitchen_temp — assign to
+  area? [dropdown]") with elimination prompt when top_match
+  doesn't equal the expected entity.
+
+### Roadmap progress
+
+- v1.10 Phase A (identify-capable) ✅
+- v1.10.3 dedup hint (static signals) ✅
+- v1.10.4 card 🔗 dedup pill ✅
+- **v1.10.5 Phase B backend (perturbation libs + WS)** ✅ (THIS)
+- v1.10.6 / card v1.8.0 — Phase B card UX (next)
+- v1.11 correlation-based dedup + location inference
+- v1.12 BLE live-find
+- v1.13 survival analysis
+- v1.14 sequence mining
+- v1.15 HardwareSuggestionDetector
+
 ## [1.10.4] — 2026-05-17
 
 ### Changed
