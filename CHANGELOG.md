@@ -4,6 +4,17 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+## [1.12.6] — 2026-05-17
+
+### Changed
+
+- **Bundle card v1.10.1 panel.js** — picks up the maturity-badge
+  alignment fix (Find-My-Device buttons now use the existing
+  🟡 BETA / 🧪 EXPERIMENTAL convention instead of the duplicate
+  visual language introduced in v1.10.0).
+
+Bundle-only. Card source of truth: ha-insights-card v1.10.1.
+
 ## [1.12.5] — 2026-05-17
 
 ### Changed
