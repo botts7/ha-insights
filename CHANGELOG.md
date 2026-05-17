@@ -4,6 +4,27 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+## [1.10.7] — 2026-05-17
+
+### Changed
+
+- **`identify_capability` response now includes `device_class`,
+  `perturbable`, and `perturbation_state` per entity.** Card no
+  longer has to maintain a parallel hardcoded list of perturbable
+  device_classes — it just reads `cap.perturbable` to decide
+  whether to render the 👆 touch-test button. Single source of
+  truth is now `lib/perturbation_capability.py`.
+
+  `perturbation_state` is `"supported"`, `"explicitly_unsupported"`
+  (PM2.5/battery/etc — documented reasons), or `"unknown"` (no
+  device_class set or class we don't know about). The card can
+  use this to differentiate "touch test won't help" from "touch
+  test might work, but no instructions yet."
+
+  Additive change — old card versions ignore the new fields with
+  no breakage. Card v1.9.0 will consume them and drop its
+  hardcoded duplicate set.
+
 ## [1.10.6] — 2026-05-17
 
 ### Changed
