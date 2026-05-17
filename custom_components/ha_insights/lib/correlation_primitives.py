@@ -211,18 +211,22 @@ def time_aligned_correlation(
     best_r = 0.0
     best_lag = 0
     best_n = 0
-    # Scan lag=0 first; on ties, lag=0 wins. Identical streams
-    # correlate equally at all lags — the meaningful answer is
-    # "no shift," not whatever lag the loop happened to test first.
+    # Scan lag=0 first; on ties (within float-rounding tolerance),
+    # lag=0 wins. Identical streams correlate equally at all lags —
+    # the meaningful answer is "no shift." Without the epsilon, a
+    # non-zero lag with FEWER aligned samples can compute r=1.0
+    # exactly while lag=0 with more samples lands at 0.9999… due to
+    # rounding, letting the meaningless lag win.
     lag_order = [0] + [
         x for x in range(-max_lag_bins, max_lag_bins + 1) if x != 0
     ]
+    _TIE_EPSILON = 1e-6
     for lag in lag_order:
         xs, ys = _align_with_lag(a_binned, b_binned, lag)
         if len(xs) < MIN_SAMPLES_FOR_CORR:
             continue
         r = pearson_correlation(xs, ys)
-        if abs(r) > abs(best_r):
+        if abs(r) > abs(best_r) + _TIE_EPSILON:
             best_r = r
             best_lag = lag
             best_n = len(xs)
