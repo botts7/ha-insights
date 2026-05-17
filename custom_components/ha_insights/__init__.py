@@ -1396,17 +1396,25 @@ async def _async_register_panel(hass: HomeAssistant) -> None:
         async_remove_panel,
     )
 
-    # v1.5.32: prefer the HACS install path (where most users will
-    # have the bundle thanks to the companion repo `ha-insights-card`).
-    # Fall back to the legacy /www/ha-insights-panel.js path so anyone
-    # who installed by manually copying the file pre-1.5.32 doesn't
-    # break. Whichever path exists wins; if both, HACS path is canonical.
-    #
-    # Background: shipping a new bundle to HACS path but leaving the
-    # legacy path stale meant the integration kept serving an older
-    # bundle even after deploy — manifesting as "had to hit Reload UI"
-    # and "incognito still shows old behavior" (the URL was the same
-    # /local/ha-insights-panel.js, the file behind it was stale).
+    # v1.7.3: bundle panel.js INTO the integration. Pre-v1.7.3 the
+    # panel JS lived at /local/community/ha-insights-card/... (a HACS
+    # card path), so it was only updated when the card repo cut a
+    # release that ALSO attached panel.js. Pre-card-v1.3.2 the card
+    # workflow only attached `ha-insights-card.js`, meaning the
+    # `ha-insights-panel.js` file was frozen at whatever was last
+    # manually committed — leaving users on a pre-v1.2.26 bundle
+    # missing the blank-panel recovery for months. User-supplied
+    # diagnostic on 2026-05-17 caught it: a real install was serving
+    # a 73KB panel.js while the source had been at 326KB+ for many
+    # versions. Bundling into the integration makes panel.js track
+    # the integration version exactly — same lifecycle as the
+    # Python code.
+    bundled_panel_path = os.path.join(
+        os.path.dirname(__file__), "static", "panel.js"
+    )
+    # Fallbacks for users who installed via the old card-path before
+    # this change. Removed in a future major version once enough
+    # installs have migrated.
     panel_path_hacs = hass.config.path(
         "www/community/ha-insights-card/ha-insights-panel.js"
     )
@@ -1415,14 +1423,19 @@ async def _async_register_panel(hass: HomeAssistant) -> None:
     def _resolve_panel() -> tuple[str, str]:
         """Return (filesystem_path, module_url) for the panel bundle.
 
-        Resolution order:
-          1. HACS-managed path if the file exists on disk.
-          2. Legacy /www/ path if the file exists there (manual installs).
-          3. HACS path anyway — HACS will land the bundle on next
-             install and the URL stays stable; the panel registration
-             succeeds and `_read_signature` falls through to the
-             version-only cache-bust until the file appears.
+        Resolution order (v1.7.3+):
+          1. Bundled-in-integration path (custom_components/ha_insights/
+             static/panel.js). Always present in a HACS-installed
+             integration; matches the integration version exactly.
+          2. HACS-card path (legacy from pre-v1.7.3 installs). Kept
+             only as a fallback for users who haven't yet updated.
+          3. Legacy /www/ path (very old manual installs).
         """
+        if os.path.exists(bundled_panel_path):
+            return (
+                bundled_panel_path,
+                "/api/ha_insights/static/panel.js",
+            )
         if os.path.exists(panel_path_hacs):
             return (
                 panel_path_hacs,
@@ -1430,18 +1443,38 @@ async def _async_register_panel(hass: HomeAssistant) -> None:
             )
         if os.path.exists(panel_path_legacy):
             return (panel_path_legacy, "/local/ha-insights-panel.js")
-        # v1.5.42: brand-new HACS install where the tarball hasn't
-        # finished extracting → both files missing momentarily.
-        # Default to HACS path (the post-v1.5.32 preferred location)
-        # so the panel URL stays stable after the bundle lands.
+        # Pathological: bundled file missing despite shipping with the
+        # integration. Default to the new bundled URL anyway so the
+        # registration succeeds; the HTTP serve will 404 until the
+        # file is restored.
         return (
-            panel_path_hacs,
-            "/local/community/ha-insights-card/ha-insights-panel.js",
+            bundled_panel_path,
+            "/api/ha_insights/static/panel.js",
         )
 
     panel_path, panel_module_path = await hass.async_add_executor_job(
         _resolve_panel
     )
+
+    # v1.7.3: register the bundled-static-path HTTP handler so the
+    # frontend can fetch /api/ha_insights/static/panel.js. Idempotent
+    # — HA dedupes on (url_path, path) pair. The cache_max_age is
+    # set to 0 because the cache-bust query string we add below is
+    # the actual cache key; HTTP caching here would just slow down
+    # the integration-version-change path.
+    if panel_module_path == "/api/ha_insights/static/panel.js":
+        try:
+            hass.http.register_static_path(
+                "/api/ha_insights/static/panel.js",
+                bundled_panel_path,
+                cache_headers=False,
+            )
+        except Exception as err:  # pragma: no cover — register-twice
+            # Already registered (e.g., previous setup_entry). HA
+            # raises a RuntimeError; we don't care.
+            _LOGGER.debug(
+                "panel.js static path already registered: %s", err
+            )
 
     # v1.5.41: include the integration version in the cache-bust query.
     # Previously cache-bust was just mtime+size — if HACS landed a new
