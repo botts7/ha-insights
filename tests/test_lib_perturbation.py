@@ -257,11 +257,12 @@ def test_missing_baseline_still_evaluates() -> None:
 
 
 def test_custom_z_threshold_loosens_detection() -> None:
+    """Same data + different z_thresholds → different decisions."""
     baseline = {"sensor.a": _flat_baseline(22.0)}
-    test = {"sensor.a": [22.0, 22.5, 22.8]}  # modest delta
-    result_strict = analyze_perturbation(baseline, test, z_threshold=5.0)
+    # peak_delta = 0.8, stddev_floor = 0.1 → z = 8.0.
+    test = {"sensor.a": [22.0, 22.5, 22.8]}
+    result_strict = analyze_perturbation(baseline, test, z_threshold=20.0)
     result_loose = analyze_perturbation(baseline, test, z_threshold=2.0)
-    # Same data, different thresholds → different decisions.
     assert result_strict.decision == "no_signal"
     assert result_loose.decision == "clear"
 
