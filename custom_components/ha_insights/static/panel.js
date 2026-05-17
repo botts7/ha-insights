@@ -266,6 +266,20 @@ class BulkAreaAssignDialog extends i {
          *  Success / failed states auto-clear after 3s so the user can
          *  click again. */
         this._identifyState = new Map();
+        /** v1.7.0 — Dedup hints from HA Insights v1.10.3+. Each entity's
+         *  `same_as` array enumerates other entity_ids that LOOK like the
+         *  same physical device based on static identifiers (MAC, Bluetooth,
+         *  Zigbee IEEE, IP, identifier overlap, mfr+model+via_device).
+         *
+         *  We threshold at confidence >= 0.7 for the pill — below that the
+         *  signal is too noisy to surface in row context (a tooltip is one
+         *  thing; suggesting "this is the same device" without strong
+         *  evidence undermines trust).
+         *
+         *  Bidirectional: a → b match AND b → a match both surface; the
+         *  user can act on either side. Don't try to deduplicate the
+         *  display — both rows benefit from seeing the link. */
+        this._dedupHints = new Map();
         /** v1.2.7 — Structured filters in addition to free-text search.
          *  Empty string = "all". Populated from the actual data on fetch
          *  so users only see options they have. */
@@ -350,6 +364,7 @@ class BulkAreaAssignDialog extends i {
             });
             const nextNq = new Map();
             const nextCaps = new Map();
+            const nextDedup = new Map();
             for (const [eid, cap] of Object.entries(resp.capabilities ?? {})) {
                 if (cap.name_quality) {
                     nextNq.set(eid, {
@@ -365,9 +380,13 @@ class BulkAreaAssignDialog extends i {
                         supported: !!cap.supported,
                     });
                 }
+                if (Array.isArray(cap.same_as) && cap.same_as.length > 0) {
+                    nextDedup.set(eid, cap.same_as);
+                }
             }
             this._nameQuality = nextNq;
             this._identifyCaps = nextCaps;
+            this._dedupHints = nextDedup;
         }
         catch {
             // HA Insights not installed, or older version without the
@@ -561,6 +580,65 @@ class BulkAreaAssignDialog extends i {
         const next = new Map(this._identifyState);
         next.set(entity_id, state);
         this._identifyState = next;
+    }
+    /** v1.7.0 — render the 🔗 dedup pill for one entity row.
+     *
+     *  Surfaces when HA Insights v1.10.3+ reports a high-confidence
+     *  (>= 0.7) same_as candidate — i.e. another HA entity that looks
+     *  like the SAME physical device via static identifiers (MAC,
+     *  Bluetooth, Zigbee IEEE, IP, identifier overlap).
+     *
+     *  Common scenarios this catches:
+     *    - Tuya plug paired via Tuya cloud AND via BLE scanner
+     *    - Govee Cloud + Govee BLE
+     *    - Hue Bridge + Matter bridging the same Hue light
+     *    - Shelly Cloud + local API
+     *
+     *  When you see the pill, the assignment you make to THIS entity
+     *  should probably mirror to its `same_as` peer (and vice versa).
+     *  The pill's tooltip shows the matching signal so the user can
+     *  judge whether the dedup call is right (MAC = trust it; mfr +
+     *  model + via_device = treat as a hint, verify before acting).
+     *
+     *  Cap: surface only the top candidate to keep the row compact.
+     *  Detail dialog (future) can show the full list.
+     */
+    _renderDedupPill(entity_id) {
+        const hints = this._dedupHints.get(entity_id);
+        if (!hints || hints.length === 0)
+            return A;
+        // hints are pre-sorted server-side, descending by confidence.
+        const top = hints[0];
+        if (top.confidence < 0.7)
+            return A;
+        const otherLabel = this._shortEntityLabel(top.entity_id);
+        const extraCount = hints.length - 1;
+        const extraSuffix = extraCount > 0 ? ` (+ ${extraCount} other)` : "";
+        const confPct = Math.round(top.confidence * 100);
+        const title = `Looks like the same physical device as ${top.entity_id} ` +
+            `— ${top.reason}, ${confPct}% confidence` +
+            `${extraSuffix}. Assignments made here probably want to ` +
+            "mirror to the linked entity (and vice versa).";
+        return b `<span
+      class="dedup-pill"
+      role="img"
+      aria-label="${title}"
+      title="${title}"
+      >🔗 ${otherLabel}${extraSuffix}</span
+    >`;
+    }
+    /** Short label for inline display in the dedup pill.
+     *  Prefer the entity's friendly name when we have it (via the
+     *  entity registry); fall back to its entity_id object_id. */
+    _shortEntityLabel(entity_id) {
+        const e = this._entities.find((x) => x.entity_id === entity_id);
+        if (e) {
+            const lbl = e.name || e.original_name;
+            if (lbl)
+                return lbl;
+        }
+        const dot = entity_id.indexOf(".");
+        return dot > 0 ? entity_id.slice(dot + 1) : entity_id;
     }
     _areaNameById(area_id) {
         if (!area_id)
@@ -867,6 +945,7 @@ class BulkAreaAssignDialog extends i {
                   <div>
                     ${this._renderNameQualityBadge(nq)}${this._entityLabel(e)}
                     ${this._renderIdentifyButton(e.entity_id)}
+                    ${this._renderDedupPill(e.entity_id)}
                   </div>
                   <div class="meta">${e.entity_id}</div>
                 </td>
@@ -1235,6 +1314,22 @@ class BulkAreaAssignDialog extends i {
     .identify-btn-pending {
       opacity: 0.7;
     }
+    /* v1.7.0 — dedup pill. Inline next to the entity label; tooltip
+     * explains the matching signal and which entity it links to.
+     * Visually quiet (no fill, no border accent) to avoid competing
+     * with the name_quality badges and the identify button — this is
+     * a HINT, not a primary action. */
+    .dedup-pill {
+      display: inline-block;
+      margin-left: 8px;
+      padding: 1px 8px;
+      border-radius: 10px;
+      background: var(--secondary-background-color, #f5f5f5);
+      color: var(--secondary-text-color);
+      font-size: 0.85em;
+      vertical-align: middle;
+      cursor: help;
+    }
     .area-picker {
       width: 100%;
       padding: 5px 8px;
@@ -1395,6 +1490,9 @@ __decorate([
 __decorate([
     r()
 ], BulkAreaAssignDialog.prototype, "_identifyState", void 0);
+__decorate([
+    r()
+], BulkAreaAssignDialog.prototype, "_dedupHints", void 0);
 __decorate([
     r()
 ], BulkAreaAssignDialog.prototype, "_filterIntegration", void 0);

@@ -4,6 +4,25 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+## [1.10.4] — 2026-05-17
+
+### Changed
+
+- **Bundle card v1.7.0 panel.js** — picks up the 🔗 dedup pill in
+  the bulk-area-assign dialog. With this bundle, integration-only
+  users (no standalone HACS card) see "🔗 likely same as
+  `<other-entity>`" inline next to rows that match v1.10.3's
+  static-signal dedup at confidence ≥ 0.7.
+
+  **Closes the v1.10 Find-My-Device user-facing loop in the
+  bulk dialog**: sort + tier badge + 🔆 identify button + 🔗 dedup
+  pill all visible per row. Together they answer "what is this
+  entity, where is it, can I make it tell me, and is it actually
+  a duplicate of one I already know?"
+
+  Bundle-only change. Card source of truth: ha-insights-card
+  v1.7.0.
+
 ## [1.10.3] — 2026-05-17
 
 ### Added — Find My Device, phase A.5 (static-signal dedup hint)
