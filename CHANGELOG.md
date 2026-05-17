@@ -4,6 +4,28 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+## [1.7.6] — 2026-05-17
+
+### Fixed
+
+- **Bundled panel.js bumped to card v1.3.4** — fixes the 🔗 coupling
+  badge never rendering on the side panel. Root cause was a
+  custom-element registration collision: when HACS had an older
+  `ha-insights-card.js` (pre-v1.3.0) loaded BEFORE the integration's
+  bundled panel.js ran, the `customElements.define("ha-insights-card",
+  ...)` guard in the bundled card source saw the name already taken
+  and silently discarded the freshly-built class. The panel embedded
+  the stale HACS class — which lacked the badge code.
+
+  Card v1.3.4 registers an `ha-insights-card-bundled` alias (trivial
+  subclass of the freshly-built `HaInsightsCard`) and embeds that
+  inside the panel. The bundled class always wins, regardless of
+  HACS card state.
+
+  No integration code change — just a fresh panel.js artifact baked
+  in. After updating + hard refresh, the 🔗 badge should render on
+  any TIGHT-coupled insight.
+
 ## [1.7.5] — 2026-05-17
 
 ### Fixed
