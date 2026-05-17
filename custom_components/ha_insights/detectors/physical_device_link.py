@@ -296,11 +296,29 @@ class PhysicalDeviceLinkDetector(Detector):
         correlated pair."""
         # Order deterministically for the fingerprint so the same pair
         # always produces the same insight ID across scans.
+        #
+        # **v1.12.7 rename**: keys were `entity_a`/`entity_b` until the
+        # agent review caught two bugs from that schema:
+        #   - `lib/managed_externally.py::_is_entity_field_key` walks
+        #     fingerprints looking for keys matching `entity_id`,
+        #     `*_entity_id`, `*_eid`, etc. `entity_a`/`entity_b` matched
+        #     none of those, so insights from this detector could NOT
+        #     be suppressed by marking either entity's device as
+        #     managed-externally.
+        #   - `detectors/__init__.py::_dedup_grouped_insights` buckets
+        #     by fingerprints containing the literal `entity_id` key.
+        #     Without it, every dup-pair landed in its own `_solo_`
+        #     bucket and the panel got flooded on installs with many
+        #     duplicates.
+        # Using `entity_id` for the canonical (sorted-first) entity
+        # and `peer_entity_id` for the partner gives both walkers the
+        # keys they expect AND keeps semantic clarity for human
+        # readers of the insight payload.
         a, b = sorted([eid_a, eid_b])
         fingerprint = {
             "kind": "physical_device_link",
-            "entity_a": a,
-            "entity_b": b,
+            "entity_id": a,
+            "peer_entity_id": b,
         }
         lag_note = ""
         if result.best_lag_bins != 0:
@@ -321,8 +339,12 @@ class PhysicalDeviceLinkDetector(Detector):
             "entities": [a, b],
             "hours_to_show": 24 * _LOOKBACK_DAYS,
             "_physical_device_link": {
-                "entity_a": a,
-                "entity_b": b,
+                # v1.12.7 — renamed from entity_a/entity_b to match
+                # the fingerprint keys (entity_id is the canonical
+                # sorted-first entity, peer_entity_id its partner).
+                # Card v1.x renderers should switch on these names.
+                "entity_id": a,
+                "peer_entity_id": b,
                 "device_class": device_class,
                 "pearson_r": result.r,
                 "n_aligned_samples": result.n_samples,

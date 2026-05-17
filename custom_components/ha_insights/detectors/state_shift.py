@@ -50,6 +50,13 @@ _MIN_EVENTS_PER_ENTITY = 20
 # Minimum magnitude (absolute mean difference) to emit. Filters out
 # trivial wobbles. Tuned for daily-count series.
 _MIN_MAGNITUDE = 5.0
+# v1.12.7 — Data-window-aware suppression of false positives caused
+# by start-of-collection. If the "pre-shift" segment has < this many
+# days of history AND < this many events, the apparent "shift" is
+# almost certainly "data started here." Set to require at least
+# 5 days + 10 events before declaring a behavioural shift legitimate.
+_MIN_PRE_SHIFT_DAYS = 5
+_MIN_PRE_SHIFT_EVENTS = 10
 # Cap to keep the panel usable when many entities shift simultaneously.
 # Cohort dedup further reduces this; the cap is the last line.
 _MAX_INSIGHTS_PER_SCAN = 10
@@ -127,6 +134,18 @@ class StateShiftDetector(Detector):
             daily[ev.entity_id][local_d] += 1
             total[ev.entity_id] += 1
 
+        # v1.12.7 — Determine the earliest event in the buffer for
+        # the data-availability check below. A user-reported false
+        # positive was: "Daily-count for light.main_bedroom averaged
+        # ~0.0/day before 2026-05-07 and ~48.2/day since." The
+        # device had just been added to the install; "before" was
+        # the recorder's pre-existence window, not a real behavioral
+        # shift. We need to suppress that class of false positive.
+        earliest_event_ts: datetime | None = None
+        for ev in events:
+            if earliest_event_ts is None or ev.timestamp < earliest_event_ts:
+                earliest_event_ts = ev.timestamp
+
         # Build per-entity (timestamps, values) and scan.
         insights: list[Insight] = []
         for entity_id, day_buckets in daily.items():
@@ -155,6 +174,36 @@ class StateShiftDetector(Detector):
             if not recent:
                 continue
             cp = recent[-1]
+
+            # v1.12.7 — Data-window suppression. If the "pre-shift"
+            # segment has fewer than _MIN_PRE_SHIFT_DAYS days of
+            # data ending BEFORE the changepoint, this is almost
+            # certainly start-of-collection, not a real shift. Skip
+            # the insight rather than mislead the user.
+            #
+            # Two checks (both must pass to suppress):
+            #   1. The changepoint is suspiciously close to the
+            #      earliest event timestamp (within a few days).
+            #   2. The pre-shift period contains < _MIN_PRE_SHIFT_EVENTS
+            #      events (legitimate flat-zero periods are rare for
+            #      anything that's about to spike).
+            if earliest_event_ts is not None:
+                days_of_history_before_cp = (
+                    cp.detected_at.date()
+                    - dt_util.as_local(earliest_event_ts).date()
+                ).days
+                pre_shift_event_count = sum(
+                    count
+                    for d, count in day_buckets.items()
+                    if d < cp.detected_at.date()
+                )
+                if (
+                    days_of_history_before_cp < _MIN_PRE_SHIFT_DAYS
+                    and pre_shift_event_count < _MIN_PRE_SHIFT_EVENTS
+                ):
+                    # "Shift" is the device's first observable
+                    # activity, not a behavior change. Suppress.
+                    continue
             insights.append(
                 self._build_insight(
                     entity_id=entity_id,

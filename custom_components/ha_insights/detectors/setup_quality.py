@@ -567,45 +567,67 @@ _RECIPES: list[dict[str, Any]] = [
     {
         "name": "Research-backed pattern detection",
         "feature_key": "research_pattern",
+        # v1.12.7: the user actually has TWO knobs to turn here,
+        # because the detectors split on data source.
+        #
+        #   - StateShift + LaggedCorrelation read the HA Insights
+        #     14-day rolling EVENT BUFFER (no recorder needed).
+        #     Those fire automatically once enough events accumulate.
+        #   - FrequencyAnomaly + Seasonality read the RECORDER for
+        #     their long-term baselines. Those need `purge_keep_days`
+        #     bumped if HA's default is < 14d.
+        #
+        # The "next_step" was previously "increase recorder
+        # retention" — misleading for half the detectors it claimed
+        # to cover. Reworded to say "let the integration accumulate
+        # events" (passive — happens automatically over 7-14 days
+        # of normal HA use) and link to recorder docs only for the
+        # subset that actually depends on it.
         "next_step": (
-            "increase recorder retention to ≥ 14 days "
-            "(recorder.purge_keep_days in configuration.yaml)"
+            "let the event buffer fill (just keep using HA for ~7-14 "
+            "days). For frequency anomaly + seasonality specifically, "
+            "bump recorder.purge_keep_days if it's below 14d."
         ),
         "setup_url": "https://www.home-assistant.io/integrations/recorder/#purge_keep_days",
-        "setup_url_label": "Recorder docs",
+        "setup_url_label": "Recorder docs (only needed for some detectors)",
         "setup_url_external": True,
         "scenarios": [
-            "FrequencyAnomalyDetector (v0.9) flags entities firing "
-            "unusually often/rarely vs their own 7-day baseline",
-            "StateShiftDetector (v1.8.2) flags 'your routine shifted "
-            "on YYYY-MM-DD' so other detectors don't treat the new "
-            "pattern as anomalous",
-            "SeasonalityDetector (v0.9) catches weekly cycles "
-            "(weekday vs weekend) — needs the longer window",
-            "LaggedCorrelationDetector (v0.9) + v1.9.1 transfer-entropy "
-            "direction check — needs enough events per pair",
+            "FrequencyAnomalyDetector (v0.9, uses recorder) flags "
+            "entities firing unusually often/rarely vs their own "
+            "7-day baseline",
+            "StateShiftDetector (v1.8.2, uses event buffer) flags "
+            "'your routine shifted on YYYY-MM-DD' so other detectors "
+            "don't treat the new pattern as anomalous",
+            "SeasonalityDetector (v0.9, uses recorder) catches weekly "
+            "cycles (weekday vs weekend) — needs the longer window",
+            "LaggedCorrelationDetector (v0.9 + v1.9.1, uses event "
+            "buffer) — transfer-entropy direction check on observed "
+            "pair lags",
         ],
         "tiers": [
             (
                 "USELESS",
                 [_has_recorder_7d],
-                "Recorder retention is below 7 days. The newer "
-                "detectors (FrequencyAnomaly, StateShift, Seasonality, "
-                "LaggedCorrelation) need that baseline to distinguish "
-                "real patterns from noise. Bump "
-                "`recorder.purge_keep_days` in configuration.yaml.",
+                "Recorder retention is below 7 days AND the event "
+                "buffer hasn't filled yet. FrequencyAnomaly + "
+                "Seasonality need recorder retention; StateShift + "
+                "LaggedCorrelation just need time for the integration's "
+                "own 14-day event buffer to accumulate. Bump "
+                "`recorder.purge_keep_days` AND give it a week.",
             ),
             (
                 "LIMITED",
                 [_has_recorder_7d],
-                "7+ days of recorder history — FrequencyAnomaly + "
-                "StateShift can fire on entities with ≥30 events.",
+                "7+ days of recorder history — FrequencyAnomaly fires; "
+                "event-buffer-driven detectors (StateShift, "
+                "LaggedCorrelation) fire once they have enough events.",
             ),
             (
                 "GOOD",
                 [_has_recorder_14d],
-                "14+ days — Seasonality detection (weekly cycle) "
-                "becomes reliable.",
+                "14+ days of recorder — Seasonality detection (weekly "
+                "cycle) becomes reliable. Event-buffer detectors "
+                "already at full lookback by this point.",
             ),
             (
                 "GREAT",

@@ -88,7 +88,17 @@ class TransferEntropyAssessment:
 # indistinguishable from sampling noise on small (~100 sample) inputs.
 # Exported so callers can apply the same "uninformative" cutoff when
 # deciding whether to act on an assessment.
-NOISE_FLOOR_BITS: float = 0.05
+#
+# **v1.12.7 calibration**: raised from 0.05 → 0.10 after agent
+# review flagged that the plug-in MLE entropy estimator we use is
+# positively biased on small samples. At n=300 with 4-symbol
+# alphabets (the typical HA event-binned regime), uncorrelated
+# series can produce spurious TE of 0.1-0.3 bits. The previous
+# 0.05 floor was below that bias and produced false-positive
+# direction calls on short traces. 0.10 is still aggressive but
+# captures more of the bias regime; bias-correction (Miller-
+# Madow) is a v1.13 task if needed.
+NOISE_FLOOR_BITS: float = 0.10
 _NOISE_FLOOR_BITS: float = NOISE_FLOOR_BITS  # internal alias retained
 
 # Minimum samples for a meaningful estimate. Below this the

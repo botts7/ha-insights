@@ -4210,8 +4210,14 @@ async def ws_identify_capability(
 ) -> None:
     """Return identify capabilities for a batch of entity_ids.
 
-    Read-only; not admin-gated. The card calls this once per panel
-    open to know which entities can show a 🔆 button.
+    **v1.12.7: now admin-gated.** The response leaks user-chosen
+    friendly names (`name_quality.chosen_name`) AND the dedup
+    `same_as` array (which exposes the home's device topology —
+    which entities the system thinks are duplicates). A non-admin
+    token shouldn't be able to enumerate either. Agent privacy
+    review (2026-05-17) flagged this as the top regression
+    introduced in v1.10.0; the fix is symmetric with
+    `ws_set_device_managed` which has always been admin-only.
 
     Response shape:
       {

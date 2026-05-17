@@ -4,6 +4,94 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+## [1.12.7] — 2026-05-17
+
+### Fixed — agent-review pass before beta launch
+
+Five-track parallel agent review (math / composition / modal /
+privacy / test-coverage) flagged a batch of issues. The
+**critical-severity ones land here**; rendering + remaining test
+backfill follow in v1.12.8.
+
+#### Privacy: admin-gate two unauthenticated WS endpoints (CRITICAL)
+
+- **`home_insights/identify_capability`** was readable by any
+  connected user. Response leaks the home's friendly-name
+  inventory (`name_quality.chosen_name` — "Kitchen Floor Lamp",
+  "Master Bedroom Door") AND the dedup `same_as` array (which
+  entities the system thinks are duplicates of which). Both
+  reveal device topology and naming scheme. Now admin-gated.
+- **`home_insights/ble_capability`** was also readable by any
+  connected user. Response leaks the Bluetooth address of every
+  BLE-tracked device. Now admin-gated.
+
+#### Composition: rename `physical_device_link` fingerprint keys (HIGH)
+
+`entity_a`/`entity_b` matched neither
+`lib/managed_externally.py::_is_entity_field_key` nor the cohort-
+dedup bucket-key logic, so:
+- Insights from this detector could NOT be suppressed via the
+  v1.7.7 "managed externally" device flag.
+- The cohort dedup never grouped multiple duplicates of the same
+  entity — panel flooded on installs with many duplicate pairs.
+
+Renamed to `entity_id` (canonical sorted-first) + `peer_entity_id`
+(suffix matches the `*_entity_id` walker rule). Payload's
+`_physical_device_link` block uses the same names for consistency.
+**New tests in `test_physical_device_link_detector.py`** verify
+the renamed keys + that fingerprints group by `entity_id` for
+correct cohort behaviour.
+
+#### Math: data-window suppression in StateShiftDetector (HIGH)
+
+User-reported false positive:
+> "Daily-count for light.main_bedroom averaged ~0.0/day before
+> 2026-05-07 and ~48.2/day since."
+
+Reality: the recorder only had 10 days of history. The "pre-shift"
+period was just the empty window before the device was added —
+not a behavioral shift.
+
+Added two checks: if the changepoint sits within
+`_MIN_PRE_SHIFT_DAYS=5` days of the buffer's earliest event AND
+the pre-shift period contains < `_MIN_PRE_SHIFT_EVENTS=10` events,
+suppress the insight. Real shifts on devices with enough history
+still emit. **New tests in `test_state_shift_detector.py`** verify
+both directions (start-of-data → suppressed; real shift with
+adequate history → not suppressed).
+
+#### Math: raise transfer-entropy noise floor 0.05 → 0.10 (MEDIUM)
+
+The plug-in MLE entropy estimator is positively biased on small
+samples (Miller-Madow correction unimplemented). At n=300 with
+4-symbol alphabets, uncorrelated streams produce spurious TE of
+0.1–0.3 bits. The previous 0.05 floor was below that bias and
+let MLE noise pass as "directional flow."
+
+Raised to 0.10 in `lib/transfer_entropy.py`. Existing tests still
+pass; the heuristic is more conservative now. Bias-correction is
+a v1.13 task if calibration data shows the new floor is still too
+generous.
+
+#### Composition: setup_quality recipe rewording (MEDIUM)
+
+The "Research-backed pattern detection" recipe (v1.12.1) advised
+"increase recorder retention" — misleading because StateShift +
+LaggedCorrelation use the 14-day event buffer, not the recorder.
+Reworded the `next_step`, scenarios, and tiers to split the two
+data sources: event buffer (passive accumulation) for StateShift +
+LaggedCorrelation; recorder retention for FrequencyAnomaly +
+Seasonality.
+
+### Deferred to v1.12.8 (not blocking the privacy fixes above)
+
+- Card `_renderCardBody()` for `_state_shift`, `_physical_device_link`,
+  `_location_proposal`, `_frequency_anomaly` payload types — currently
+  rendering as raw JSON.
+- Test backfill for `location_proposal`, `identify_capability` lib,
+  and the 3 admin-gated WS endpoints (`identify_entity`,
+  `perturbation_test`, `ble_live_find`).
+
 ## [1.12.6] — 2026-05-17
 
 ### Changed
