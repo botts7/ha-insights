@@ -4,6 +4,48 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+## [1.7.3] — 2026-05-17
+
+### Fixed
+
+- **panel.js now bundled INTO the integration and served via
+  `register_static_path`.** Pre-v1.7.3 the panel JS was loaded from
+  `/local/community/ha-insights-card/ha-insights-panel.js` — a HACS
+  card-managed path. But the companion card's release workflow only
+  attached `ha-insights-card.js` (not `ha-insights-panel.js`) until
+  v1.3.2, meaning `panel.js` was frozen at whatever was last
+  manually committed to the card's `dist/`. Real-install diagnostic
+  on 2026-05-17 caught a user serving a 73KB pre-v1.2.26 bundle
+  despite ten subsequent card releases — every `src/ha-insights-
+  panel.ts` change since then, including v1.2.26's blank-panel
+  recovery and v1.3.1's shadow-DOM observer fix, was dead code.
+
+  v1.7.3 ships `panel.js` as a static asset inside
+  `custom_components/ha_insights/static/panel.js`, served at
+  `/api/ha_insights/static/panel.js`. Panel JS now tracks
+  integration version exactly — same lifecycle as the Python code.
+
+  Resolution order kept as fallback for users mid-migration:
+  bundled path first, then card-HACS path, then legacy `/www/`.
+  Future major version drops the fallbacks.
+
+  This change is invisible to users running healthy installs — the
+  cache-bust query string + register_static_path path are different
+  but the rendered UI is identical. Users who were stuck on the
+  stale 73KB panel get the actual current bundle without needing
+  to manually copy files.
+
+### Notes
+
+The bundled `panel.js` is built from the companion `ha-insights-card`
+repository's `src/ha-insights-panel.ts`. Future updates require:
+1. Card repo: src change → tag → release workflow builds and attaches
+   `ha-insights-panel.js` to the GitHub release.
+2. Integration repo: pull the built artifact, replace
+   `static/panel.js`, bump version, release.
+
+The release pipeline could automate step 2 in a future iteration.
+
 ## [1.7.2] — 2026-05-17
 
 ### Fixed
