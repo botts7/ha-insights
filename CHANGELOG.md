@@ -4,6 +4,27 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+## [1.10.6] — 2026-05-17
+
+### Changed
+
+- **Bundle card v1.8.0 panel.js** — closes the v1.10 Find-My-Device
+  Phase B loop in the integration-only panel surface. Picks up
+  the 👆 touch-test button + modal that fires v1.10.5's
+  `home_insights/perturbation_test`, runs the listening window
+  countdown, and displays the ranked result — including the
+  **elimination banner** when the entity that spiked isn't the
+  one the user clicked.
+
+  Combined with v1.10.4 (🔗 dedup pill) and earlier bundles, the
+  bulk-area-assign dialog now has the complete Find-My-Device
+  UI surface: sorted worst-name-first, tier badges, 🔆 identify
+  for active devices, 👆 touch-test for passive sensors,
+  🔗 dedup pill for likely duplicates.
+
+  Bundle-only change. Card source of truth: ha-insights-card
+  v1.8.0.
+
 ## [1.10.5] — 2026-05-17
 
 ### Added — Find My Device, Phase B backend (perturbation touch-test)
