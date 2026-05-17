@@ -750,7 +750,7 @@ class BulkAreaAssignDialog extends i {
             void this._openTouchTest(entity_id, dc);
         }}
     >
-      👆 <span class="beta-badge">BETA</span>
+      👆 <span class="maturity-badge">🟡 BETA</span>
     </button>`;
     }
     /** Open the touch-test modal for the clicked entity. Fetches the
@@ -913,7 +913,7 @@ class BulkAreaAssignDialog extends i {
             this._openBleFind(entity_id);
         }}
     >
-      📡 <span class="exp-badge">EXP</span>
+      📡 <span class="maturity-badge">🧪 EXP</span>
     </button>`;
     }
     /** Open the BLE-find modal and start the WS subscription. */
@@ -1020,7 +1020,7 @@ class BulkAreaAssignDialog extends i {
           <div class="ble-find-header">
             <span class="ble-find-title">
               📡 BLE Live-Find: ${this._bleFindEntity}
-              <span class="exp-pill">EXPERIMENTAL</span>
+              <span class="maturity-badge maturity-badge-large">🧪 EXPERIMENTAL</span>
             </span>
             <button
               class="ble-find-close"
@@ -2115,7 +2115,7 @@ class BulkAreaAssignDialog extends i {
     .ble-find-btn {
       margin-left: 8px;
       padding: 1px 8px;
-      border: 1px solid var(--info-color, #2196f3);
+      border: 1px solid var(--divider-color, #e0e0e0);
       border-radius: 4px;
       background: var(--card-background-color, transparent);
       cursor: pointer;
@@ -2127,36 +2127,34 @@ class BulkAreaAssignDialog extends i {
       gap: 4px;
     }
     .ble-find-btn:hover {
-      background: var(--info-color, #2196f3);
+      background: var(--primary-color, #03a9f4);
       color: var(--text-primary-color, white);
+      border-color: var(--primary-color, #03a9f4);
     }
-    /* Inline EXP badge — small, high-contrast, visible always.
-     * EXP (orange) = experimental, brand new, expect rough edges.
-     * BETA (blue)  = thresholds need real-install calibration.
-     * Both render the same shape so they cluster visually with
-     * other inline buttons, but the color difference signals the
-     * maturity gradient to users at a glance. */
-    .exp-badge {
+    /* Inline maturity badge — matches the existing 🟡 BETA /
+     * 🧪 EXPERIMENTAL convention used by the insight-feed pills
+     * (see ha-insights-card.ts _renderMaturityPill). One visual
+     * language for maturity across the whole UI. The emoji
+     * distinguishes BETA vs EXP; both render in muted yellow so
+     * they cluster as "not yet stable" rather than two unrelated
+     * categories. */
+    .maturity-badge {
       display: inline-block;
       font-size: 0.7em;
-      font-weight: 700;
+      font-weight: 600;
       padding: 0 4px;
       border-radius: 3px;
       background: var(--warning-color, #ff9800);
       color: var(--text-primary-color, white);
       vertical-align: middle;
-      letter-spacing: 0.5px;
+      letter-spacing: 0.3px;
     }
-    .beta-badge {
-      display: inline-block;
-      font-size: 0.7em;
-      font-weight: 700;
-      padding: 0 4px;
-      border-radius: 3px;
-      background: var(--info-color, #2196f3);
-      color: var(--text-primary-color, white);
-      vertical-align: middle;
-      letter-spacing: 0.5px;
+    .maturity-badge-large {
+      font-size: 0.75em;
+      padding: 2px 8px;
+      border-radius: 10px;
+      margin-left: 8px;
+      letter-spacing: 1px;
     }
     /* EXPERIMENTAL pill in the modal header — wider, more visible */
     .exp-pill {
