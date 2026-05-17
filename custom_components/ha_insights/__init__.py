@@ -1432,9 +1432,13 @@ async def _async_register_panel(hass: HomeAssistant) -> None:
           3. Legacy /www/ path (very old manual installs).
         """
         if os.path.exists(bundled_panel_path):
+            # v1.7.4: serve from a non-`/api/*` URL prefix. HA reserves
+            # `/api/*` for actual API endpoints and the path was failing
+            # silently with the modern static-path API. Use a dedicated
+            # `/ha_insights_static/*` URL space instead.
             return (
                 bundled_panel_path,
-                "/api/ha_insights/static/panel.js",
+                "/ha_insights_static/panel.js",
             )
         if os.path.exists(panel_path_hacs):
             return (
@@ -1449,32 +1453,45 @@ async def _async_register_panel(hass: HomeAssistant) -> None:
         # file is restored.
         return (
             bundled_panel_path,
-            "/api/ha_insights/static/panel.js",
+            "/ha_insights_static/panel.js",
         )
 
     panel_path, panel_module_path = await hass.async_add_executor_job(
         _resolve_panel
     )
 
-    # v1.7.3: register the bundled-static-path HTTP handler so the
-    # frontend can fetch /api/ha_insights/static/panel.js. Idempotent
-    # — HA dedupes on (url_path, path) pair. The cache_max_age is
-    # set to 0 because the cache-bust query string we add below is
-    # the actual cache key; HTTP caching here would just slow down
-    # the integration-version-change path.
-    if panel_module_path == "/api/ha_insights/static/panel.js":
+    # v1.7.4: register the bundled-static-path HTTP handler via the
+    # modern `async_register_static_paths` API. Pre-v1.7.4 this used
+    # the removed `register_static_path` (singular, sync) which silently
+    # AttributeError'd → URL never registered → 404 → "Unable to load
+    # custom panel" on the user's HA. The current API takes a list of
+    # `StaticPathConfig` objects.
+    if panel_module_path == "/ha_insights_static/panel.js":
         try:
-            hass.http.register_static_path(
-                "/api/ha_insights/static/panel.js",
-                bundled_panel_path,
-                cache_headers=False,
-            )
-        except Exception as err:  # pragma: no cover — register-twice
-            # Already registered (e.g., previous setup_entry). HA
-            # raises a RuntimeError; we don't care.
+            from homeassistant.components.http import StaticPathConfig
+
+            await hass.http.async_register_static_paths([
+                StaticPathConfig(
+                    url_path="/ha_insights_static/panel.js",
+                    path=bundled_panel_path,
+                    cache_headers=False,
+                )
+            ])
+        except RuntimeError as err:
+            # Already registered (config_entry reload). Idempotent.
             _LOGGER.debug(
                 "panel.js static path already registered: %s", err
             )
+        except Exception as err:  # pragma: no cover — defensive
+            _LOGGER.warning(
+                "Failed to register panel.js static path: %s. "
+                "Falling back to /local/* URL.",
+                err,
+            )
+            # Force the legacy resolution by clearing the bundled path
+            # so the next resolve picks up the HACS/legacy path.
+            panel_module_path = "/local/community/ha-insights-card/ha-insights-panel.js"
+            panel_path = panel_path_hacs
 
     # v1.5.41: include the integration version in the cache-bust query.
     # Previously cache-bust was just mtime+size — if HACS landed a new

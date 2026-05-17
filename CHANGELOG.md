@@ -4,6 +4,36 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+## [1.7.4] — 2026-05-17
+
+### Fixed
+
+- **v1.7.3 panel-bundle URL never registered.** Real-install
+  reported "Unable to load custom panel from
+  `/api/ha_insights/static/panel.js?v=1.7.3-...`" immediately after
+  updating. Two bugs compounded:
+
+  1. **`hass.http.register_static_path` has been removed** in
+     recent HA versions (replaced by
+     `async_register_static_paths`, plural+async). My v1.7.3 call
+     to the removed API silently `AttributeError`'d → URL never
+     registered → 404 → "Unable to load custom panel."
+  2. The URL prefix `/api/*` is reserved by HA. Even if the old
+     API had worked, this would have been blocked by HA's API
+     router.
+
+  v1.7.4 fixes both:
+  - Use the modern `async_register_static_paths([StaticPathConfig(...)])`
+    API.
+  - Serve from `/ha_insights_static/panel.js` (no `/api/` prefix).
+  - Wider exception handling — only `RuntimeError` (the
+    already-registered case) is silently swallowed; other failures
+    log a warning and fall back to the legacy HACS-card URL so the
+    panel still loads.
+
+  No manual cleanup required; v1.7.4 will simply register the new
+  URL and the panel will load.
+
 ## [1.7.3] — 2026-05-17
 
 ### Fixed
