@@ -633,17 +633,32 @@ Each step's "verify" is the gate that must pass before commit. Agent advances au
 | v0.5.0 | Surface expansion | Sidebar panel, visual editor, adaptive sizing, compact tile, search |
 | v0.5.1 | Refine polish | INSUFFICIENT_BUDGET self-signal, refusal detection, side-by-side compare, follow-up feedback |
 | v0.6.0 | Trust & visibility | Per-entity LLM opt-out, "What gets sent?" preview, audit log viewer, trust pills |
-| v0.7.0 | Detector library doubles | LongTailDetector, OrphanDeviceDetector, StreakDetector, confidence colors, age, sort/group |
+| v0.7.0 | Detector library doubles | LongTailDetector, OrphanDeviceDetector, StreakDetector, confidence colors, age display, sort/group |
+| v0.8.0–v0.8.2 | Apply pipeline polish | Undo applied, online (Layer 2) validator, edit YAML before apply, bulk apply, refine progress, empty-state CTA, persistent panel filters |
+| v0.9.0 | Smart features | High-confidence notifications, daily digest, LLM cost estimator, FrequencyAnomaly + Seasonality + LaggedCorrelation detectors, Assist-aware failover, preferred-agent dropdown |
+| v1.0.0 | Release candidate | Multi-config-entry, custom detector loading (sandboxed), multi-turn refine, i18n (German), mkdocs site, admin gate on destructive WS handlers, per-field setting descriptions |
+| v1.1.0–v1.1.4 | Audit + observations | Short/medium/long-term observation buffers (recorder), AutomationAuditDetector, LLM "🤖 Suggest improvements", side-by-side YAML diff, recorder-window detection, configurable rollup window |
+| v1.2.0 | Backfill at scale | Incremental chunked backfill for large datasets, Repairs dual-emit (HACS + core-merge bridge), blank-panel universal recovery (timeout + force-unstuck) |
+| v1.4.0 | Predictive + comms | PhoneChargeReminder w/ day-of-week, mobile notifier w/ anti-spam, WeatherCorrelation, community analytics opt-in, three-tier maturity flag, onboarding + refinement wizard |
+| v1.5.0–v1.5.30 | HA-semantics + cohorts | context.id batch correlator, unavailable/template filters, recorder-vs-live distinction, cohort dedup (false-merge fix), Labels chip + group_by, goals_json in OptionsFlow, area-assign + bulk-assign in-panel GUI, cross-integration coupling in audit |
+| v1.5.31–v1.5.51 | Stability sweep | Predictable-bug-class fixes (settings feedback, gesture eaten, pre-flight checklist), deadlock fixes (`_load_iot_classes`), CHANGELOG backfill, a11y aria-label sweep, test-mask cleanup |
+| v1.6.0 | Native button-press | EventBuffer + ButtonPressHabitDetector (pair `event.*` firings with consequent state changes via HA's native `event` platform) |
+| v1.7.0–v1.7.8 | Coupling + managed-externally | `lib/coupling_strength.py` + 🔗 card badge, panel rebuild (bundled `panel.js`, force-mount recovery), per-device "managed externally" flag (Strategy 2) — companion to coupling badge |
+| v1.8.0–v1.8.2 | Changepoint detection | `lib/changepoint_detection.py` (PELT via `ruptures` + pure-Python Welch-pooled fallback), FrequencyAnomalyDetector changepoint-aware baseline truncation, new StateShiftDetector (BETA, PATTERN_OBSERVATION) |
+| v1.9.0–v1.9.1 | Transfer entropy | `lib/transfer_entropy.py` (Schreiber 2000, pure stdlib), wired into LaggedCorrelationDetector as direction check — demote reversed flow (0.5×) and symmetric flow (0.85×), preserve when uninformative |
 
 ## Future roadmap (planned)
 
 | Target | Theme | Candidate items |
 |---|---|---|
-| v0.8 | Apply pipeline polish | Undo applied, online (Layer 2) validator, edit YAML before apply, bulk apply |
-| v0.9 | Smart features | Notifications, LLM cost estimator, agent failover, AnomalyDetector, SeasonalityDetector, CorrelationDetector |
-| v1.0 | Release candidate | Multi-config-entry, custom detector loading, multi-turn refine, i18n, docs site, HACS default-store PR |
+| v1.10 | **Find My Device — identify + perturbation** | `lib/identify_capability.py` (entity → what physical signal it can emit); `lib/perturbation_capability.py` (device_class → suggested perturbation: touch/breathe/shine + expected magnitude); `lib/perturbation_detection.py` (baseline + listening window per candidate → ranked z-scores with elimination); `services/identify_service.py` (light.flash / media_player.play_media / switch toggle / Zigbee `Identify` cluster); new "Find my devices" panel mode walking the user through orphans in batches; orphan-card buttons: 🔆 Identify, 🤚 Trigger-wait, 👆 Touch-test. **Killer feature: elimination.** Touch-test ranks all candidates by z-score so the app can say "you touched `sensor.kitchen_temp`, not `sensor.foo` — they're mislabeled." |
+| v1.11 | **Passive sensor location inference** | `lib/location_inference.py` (Pearson correlation on 7-day temp/humidity curves vs sibling sensors with known areas; time-of-peak-brightness for illuminance → window orientation → narrows rooms; cyclic-pattern matching for power meters vs known appliance plugs); new `LocationProposalDetector` emits `InsightKind.LOCATION_PROPOSAL` with ranked area guesses + confidence; fix-action assigns area + dismisses related orphan insights; **never auto-applies** |
+| v1.12 | **BLE live-find + native Identify clusters** | `lib/ble_capability.py` (entity → BLE address from `hass.data["bluetooth"]`); `ws_api` streaming RSSI subscription endpoint; card live signal-strength scope (EMA smoothing ~3 s, trend arrows, warm/cold color buckets, optional haptic pulse via companion app); stationary BLE-proxy triangulation view (sorted RSSI per proxy → narrows to zone); Zigbee + Matter `Identify` cluster native bindings |
+| v1.13 | **Survival analysis** | `lib/survival_likelihood.py` using `lifelines` AFT (NOT Cox PH — per research memory); "median time-to-event" insights ("phone normally hits 20% by 23:00 ± 47 min"); PhoneChargeReminder rewrite using AFT priors instead of hand-tuned heuristics |
+| v1.14 | **Sequence mining** | `lib/sequence_mining.py` using `prefixspan`; cross-window pattern detection beyond pair-level cooccurrence ("door → light → media → motion-away" frequent subsequence); new SequencePatternDetector |
+| v1.15+ | Polish + research backlog | Card 🔀 directionality badge (renders v1.9.1 payload); HAWatcher shadow execution (97 % precision validation); 2nd-order Markov + Shannon-entropy AIT approximation; survival-aware reminder cards |
 
-> The original v0.1 charter envisioned a different shape (vision-LLM, anomaly, cleanup as separate releases). Actual cadence has prioritized refining the hero loop and the privacy story before broadening detector kinds. See git tags for the canonical record.
+> The original v0.1 charter envisioned a different shape (vision-LLM, anomaly, cleanup as separate releases). Actual cadence prioritized refining the hero loop and privacy story before broadening detector kinds — then expanded into a research-backed detector library (v1.8+) once the foundation was stable. See git tags for the canonical per-version record; CHANGELOG.md for full per-release notes.
 
 ---
 
