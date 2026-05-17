@@ -4,6 +4,60 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+## [1.7.0] — 2026-05-17
+
+### Added
+
+- **Coupling-strength badge for pair-based insights.** Cooccurrence,
+  lagged-correlation, and button-press detectors now compute a
+  `CouplingScore` for every emitted pair (median lag in ms,
+  consistency, tier ∈ TIGHT / LOOSE / NONE) and stamp it onto the
+  payload as `_coupling`. Card v1.3.0+ reads this and renders a 🔗
+  badge for TIGHT-tier pairs.
+
+  Rationale (see `docs/HA_EVENT_SEMANTICS.md` and the upstream
+  agent memory `reference_device_internal_logic_problem`): HA event
+  metadata can't distinguish ESPHome on_press / Z-Wave binding /
+  Zigbee binding from user-driven action — both produce
+  `user_id=None, parent_id=None`. The latency signature CAN: device-
+  internal logic fires the consequent within ~500ms at near-zero
+  stddev; user habits don't. We surface the signature on the insight
+  so the user judges whether the pair is "already handled, ignore"
+  or "good automation candidate."
+
+  - **TIGHT** (median ≤ 500ms AND consistency ≥ 90%): almost
+    certainly device-internal logic or a pre-existing HA automation
+    handling the same flow. Confidence demoted ×0.85 so these rank
+    below uncoupled suggestions. Card renders 🔗 badge.
+  - **LOOSE** (median ≤ 2s AND consistency ≥ 70%): could be an HA
+    automation, could be a fast user habit — ambiguous. No
+    demotion, no badge. (Phase 2 may surface a different mark.)
+  - **NONE**: looks like real user habit. Insight emits normally.
+
+  Tunable thresholds in `lib/coupling_strength.py` constants.
+
+- **NEW** `custom_components/ha_insights/lib/coupling_strength.py` —
+  pure function `compute_coupling(deltas_seconds, leader_count)`
+  returning `CouplingScore`. Zero HA imports; unit-tested in
+  `tests/test_lib_coupling_strength.py`.
+
+### Changed
+
+- `CooccurrenceDetector._evaluate_pair` calls `compute_coupling`
+  and `apply_tier_demotion`; payload now includes `_coupling`.
+- `LaggedCorrelationDetector._evaluate_pair` propagates the
+  parent's coupling stamp into its rebuilt payload (at lagged
+  windows tier is essentially always NONE, but stamping
+  consistently lets the card make uniform rendering decisions).
+- `ButtonPressHabitDetector._build_insight` computes coupling
+  over `delays` × `total_firings` and demotes accordingly.
+
+### Notes
+
+- No schema migration; `_coupling` is additive in the free-form
+  payload dict. Older card versions ignore the field; older
+  integration versions don't stamp it.
+
 ## [1.5.51] — 2026-05-17
 
 ### Fixed

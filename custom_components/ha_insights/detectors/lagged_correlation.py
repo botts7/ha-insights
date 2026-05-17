@@ -114,6 +114,14 @@ class LaggedCorrelationDetector(CooccurrenceDetector):
             ],
             "mode": "single",
         }
+        # v1.7: carry forward the coupling stamp the parent computed.
+        # At lagged windows (>60s) tier is essentially always NONE —
+        # nothing's "tightly coupled" with a multi-minute lag — but
+        # surfacing it consistently lets the card make uniform rendering
+        # decisions across detectors.
+        base_coupling = (base.payload or {}).get("_coupling")
+        if base_coupling is not None:
+            payload["_coupling"] = base_coupling
 
         # Add a scale marker to the fingerprint so lagged + cooccurrence
         # can both fire on the same entity pair (different delta regimes)

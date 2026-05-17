@@ -16,6 +16,11 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 from ..insight import Insight, InsightKind
+from ..lib.coupling_strength import (
+    apply_tier_demotion,
+    compute_coupling,
+    coupling_payload,
+)
 from ..lib.event_filters import (
     is_after_long_silence,
     is_from_unavailable_state,
@@ -342,6 +347,18 @@ class CooccurrenceDetector(Detector):
             * max(0.0, 1.0 - stddev / 20.0)
         )
 
+        # v1.7: coupling-strength badge. Tight-coupled pairs (sub-500ms
+        # median, ≥90% consistency) are almost certainly device-internal
+        # logic (ESPHome on_press, Z-Wave central scene, Zigbee binding)
+        # OR a pre-existing HA automation — surfacing them as "automate
+        # this!" is noise. Demote confidence so they rank below
+        # uncoupled suggestions; the card renders a 🔗 badge so the
+        # user knows why. See lib/coupling_strength.py.
+        coupling = compute_coupling(
+            deltas_seconds=deltas, leader_count=leader_total
+        )
+        confidence = apply_tier_demotion(confidence, coupling.tier)
+
         avg_delta_int = round(avg_delta)
         title = (
             f"When {leader_eid} -> {leader_state}, "
@@ -385,6 +402,10 @@ class CooccurrenceDetector(Detector):
                 {"service": service, "target": {"entity_id": follower_eid}}
             ],
             "mode": "single",
+            # v1.7: coupling tier for the card's 🔗 badge. Always
+            # stamped (even NONE) so the card can display "decoupled"
+            # state too if it ever wants to.
+            "_coupling": coupling_payload(coupling),
         }
 
         return Insight(
