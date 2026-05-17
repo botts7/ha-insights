@@ -1,7 +1,7 @@
 {
   "domain": "ha_insights",
   "name": "HA Insights",
-  "after_dependencies": ["conversation", "frontend", "logbook", "recorder", "trace"],
+  "after_dependencies": ["conversation", "frontend", "http", "logbook", "recorder", "trace"],
   "codeowners": ["@botts7"],
   "config_flow": true,
   "documentation": "https://github.com/botts7/ha-insights",
