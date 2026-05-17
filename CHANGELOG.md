@@ -4,6 +4,33 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+## [1.7.2] — 2026-05-17
+
+### Fixed
+
+- **Closes #12 — AutomationAuditDetector now actually rotates through
+  every automation.** The previous `eligible[:_AUDIT_PER_SCAN_CAP]`
+  slice always audited the same first 25 automations alphabetically.
+  An install with N>25 automations had the later ones permanently
+  invisible to the audit detector — the docstring claimed "rotation
+  across scans is implicit" but the code didn't implement it.
+
+  Replaced with a class-level offset that advances each scan, with
+  two-segment slicing for clean wrap-around (final batch of each
+  cycle stitches the tail-end with a slice from the start so the
+  per-scan cap is always honored). Full list completes in
+  `ceil(N / _AUDIT_PER_SCAN_CAP)` scans regardless of automation
+  count.
+
+  Modulo handling means adding or removing automations between scans
+  doesn't crash on a stale offset — list shrink/grow resumes from
+  the current modular position.
+
+  Resets to 0 on HA restart (acceptable — worst case one extra
+  rotation cycle). Tests cover small lists, equal-to-cap lists,
+  multi-scan walks, wrap-around stitching, skip-label filtering,
+  and shrunken-list robustness.
+
 ## [1.7.1] — 2026-05-17
 
 ### Added

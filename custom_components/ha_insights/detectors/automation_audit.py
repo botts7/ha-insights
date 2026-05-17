@@ -17,7 +17,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from ..audit.fixes import apply_deterministic_fixes
 from ..audit.packet import (
@@ -68,6 +68,16 @@ class AutomationAuditDetector(Detector):
     # types and dismiss rates below ~30% on the LLM-suggested
     # ones.
     maturity = Maturity.BETA
+
+    # v1.7.2 (issue #12): round-robin offset for _select_audit_targets.
+    # The previous `eligible[:_AUDIT_PER_SCAN_CAP]` always audited the
+    # SAME first-25 automations alphabetically — installs with N>25
+    # automations had the later ones silently invisible to the audit
+    # detector forever. Class-level so it persists across the per-scan
+    # instantiations (detectors are constructed fresh per scan); resets
+    # to 0 on HA restart, which is acceptable (worst case: one extra
+    # rotation cycle).
+    _audit_offset: ClassVar[int] = 0
 
     async def scan(self, ctx: DetectorContext) -> list[Insight]:
         if not ctx.existing_automations:
@@ -280,19 +290,52 @@ class AutomationAuditDetector(Detector):
         self,
         automations: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
-        """Cap the per-scan workload. Eligible = not labeled
-        no-audit. Rotation across scans is implicit because the
-        store retains audit insights with stable fingerprints — if a
-        given automation's insight is already up-to-date, it stays;
-        if not (new observations), the scan-time dedup replaces it.
+        """Cap the per-scan workload via a round-robin window.
 
-        Dedup happens at the source (_load_existing_automations);
-        no per-detector dedup needed here.
+        Walks the eligible list in `_AUDIT_PER_SCAN_CAP`-sized batches,
+        advancing the offset each scan. With N eligible automations,
+        the full list completes in `ceil(N / _AUDIT_PER_SCAN_CAP)`
+        scans. Wraps cleanly at the end of the list — the final batch
+        of each cycle stitches the tail-end with a slice from the
+        start so the cap is always honored when possible.
+
+        Eligible = not labeled no-audit. Insight dedup happens
+        at the source (_load_existing_automations + fingerprint
+        based on automation_id), so re-auditing an automation simply
+        refreshes its existing insight in the store.
+
+        v1.7.2 (issue #12): replaces the previous
+        `eligible[:_AUDIT_PER_SCAN_CAP]` which always re-audited the
+        same first 25 automations alphabetically — meaning installs
+        with N>25 automations had the later ones silently invisible
+        to the audit detector forever.
         """
         eligible = [
             a for a in automations if not self._should_skip(a)
         ]
-        return eligible[:_AUDIT_PER_SCAN_CAP]
+        total = len(eligible)
+        if total <= _AUDIT_PER_SCAN_CAP:
+            # All fit — no rotation needed.
+            return eligible
+
+        cls = type(self)
+        offset = cls._audit_offset % total
+        # Two-segment slice handles wrap-around: take the slice from the
+        # current offset, then stitch any shortfall from the start.
+        batch = eligible[offset:offset + _AUDIT_PER_SCAN_CAP]
+        if len(batch) < _AUDIT_PER_SCAN_CAP:
+            batch = batch + eligible[:_AUDIT_PER_SCAN_CAP - len(batch)]
+        cls._audit_offset = (offset + _AUDIT_PER_SCAN_CAP) % total
+
+        _LOGGER.debug(
+            "audit: round-robin batch %d/%d (offset %d -> %d of %d)",
+            len(batch),
+            _AUDIT_PER_SCAN_CAP,
+            offset,
+            cls._audit_offset,
+            total,
+        )
+        return batch
 
     @staticmethod
     def _should_skip(automation: dict[str, Any]) -> bool:
