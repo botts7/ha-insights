@@ -369,15 +369,23 @@ async def run_all_detectors(
 
     enabled = None
     allow_experimental = False
+    managed_externally_devices: frozenset[str] = frozenset()
     if entry is not None:
         # Lazy import to avoid circular at module-load time.
         from ..config_flow import (
+            CONF_MANAGED_EXTERNALLY_DEVICES,
             get_allow_experimental_detectors,
             get_enabled_detectors,
         )
 
         enabled = get_enabled_detectors(entry)
         allow_experimental = get_allow_experimental_detectors(entry)
+        # v1.7.7: user-marked devices to suppress entirely.
+        raw_managed = entry.options.get(CONF_MANAGED_EXTERNALLY_DEVICES, [])
+        if isinstance(raw_managed, (list, tuple, set)):
+            managed_externally_devices = frozenset(
+                d for d in raw_managed if isinstance(d, str)
+            )
 
     buffer_size = (
         len(ctx.event_buffer.snapshot()) if ctx.event_buffer is not None else 0
@@ -458,6 +466,32 @@ async def run_all_detectors(
         # This detector ran end-to-end. Track its name + emitted ids so
         # the post-loop sweep can replace its prior active insights.
         completed_detectors.add(name)
+
+        # v1.7.7: user-marked-managed device suppression. Filter out any
+        # insight that references an entity belonging to a device the
+        # user has flagged "managed externally". Different from the
+        # automatic DEVICE_LIKELY pill which only demotes confidence —
+        # a user assertion is final. Insights from these devices never
+        # enter the store. Stale active insights from a newly-flagged
+        # device get cleaned up by the post-loop sweep on next scan.
+        if managed_externally_devices:
+            from ..lib.managed_externally import filter_insights as _filter_managed
+
+            device_of_map: dict[str, str | None] = {}
+            if hierarchy is not None:
+                device_of_map = dict(hierarchy.device_of)
+            elif device_id_by_entity:
+                device_of_map = dict(device_id_by_entity)
+            insights, suppressed_by_managed = _filter_managed(
+                insights, managed_externally_devices, device_of_map
+            )
+            if suppressed_by_managed:
+                _LOGGER.debug(
+                    "Detector %r: dropped %d insights from user-managed devices",
+                    name,
+                    len(suppressed_by_managed),
+                )
+
         # Group dedup: if N insights from this detector share fingerprint
         # (modulo entity_id) AND their entities all live under a common
         # scene/group, collapse them into one representative insight

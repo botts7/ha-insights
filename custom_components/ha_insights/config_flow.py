@@ -19,6 +19,7 @@ from homeassistant.config_entries import (
     OptionsFlow,
 )
 from homeassistant.core import callback
+from homeassistant.helpers import config_validation as cv
 
 from .const import DOMAIN
 
@@ -31,6 +32,14 @@ CONF_LOOKBACK_DAYS = "lookback_days"
 # gap users assumed already existed ("block this entity" now = "don't
 # scan AND don't send to LLM").
 CONF_LLM_BLOCK_ENTITIES = "llm_block_entities"
+# v1.7.7: device IDs the user has marked "managed externally". Insights
+# referencing any entity belonging to one of these devices are filtered
+# out of detector output entirely (different from the automatic
+# DEVICE_LIKELY pill which only demotes confidence — a user assertion
+# is final). Empty list = nothing suppressed. Device IDs come from HA's
+# device_registry, not entity IDs, so a device's entire entity set
+# is suppressed in one click.
+CONF_MANAGED_EXTERNALLY_DEVICES = "managed_externally_devices"
 # v1.1: limit detectors to events from a specific subset of HA areas. Empty
 # = all areas (today's behavior). Multi-select against the area registry.
 CONF_SCAN_AREAS = "scan_areas"
@@ -1083,6 +1092,8 @@ class HaInsightsOptionsFlow(OptionsFlow):
                 return await self.async_step_advanced()
             if choice == "user_overrides_pick":
                 return await self.async_step_user_overrides_pick()
+            if choice == "managed_devices":
+                return await self.async_step_managed_devices()
             return await self.async_step_wizard_intro()
 
         # Prefer the modern menu when the HA version supports it
@@ -1093,6 +1104,7 @@ class HaInsightsOptionsFlow(OptionsFlow):
                     menu_options={
                         "wizard_intro": "Quick setup (recommended)",
                         "user_overrides_pick": "Per-user notification overrides",
+                        "managed_devices": "Managed-externally devices",
                         "advanced": "Advanced settings (all options)",
                     },
                 )
@@ -1107,6 +1119,7 @@ class HaInsightsOptionsFlow(OptionsFlow):
                     {
                         "wizard_intro": "Quick setup (recommended)",
                         "user_overrides_pick": "Per-user notification overrides",
+                        "managed_devices": "Managed-externally devices",
                         "advanced": "Advanced settings (all options)",
                     }
                 ),
@@ -1480,6 +1493,94 @@ class HaInsightsOptionsFlow(OptionsFlow):
             }
         )
         return self.async_create_entry(title="", data=merged)
+
+    async def async_step_managed_devices(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Manage the user's "managed externally" device list.
+
+        Lists every device the user has flagged + lets them restore
+        any (clear the flag). Adding new devices happens via the
+        per-insight toggle in the card detail dialog — that's where
+        the user has the context to know which device is firing
+        unwanted patterns. This screen is the audit / undo surface.
+
+        v1.7.7. Strategy 2 from agent memory
+        `reference_device_internal_logic_problem`.
+        """
+        flagged = list(
+            self.config_entry.options.get(CONF_MANAGED_EXTERNALLY_DEVICES, [])
+        )
+
+        if user_input is not None:
+            # Multi-select returned the kept set (anything UNCHECKED was
+            # restored). Persist + return to root.
+            keep = user_input.get("kept_devices", [])
+            if not isinstance(keep, list):
+                keep = []
+            merged = dict(self.config_entry.options)
+            merged[CONF_MANAGED_EXTERNALLY_DEVICES] = sorted(keep)
+            return self.async_create_entry(title="", data=merged)
+
+        if not flagged:
+            # Nothing flagged yet — show the empty state via a single
+            # informational form. HA's empty-form rendering is awkward;
+            # we use a description placeholder.
+            schema = vol.Schema({})
+            return self.async_show_form(
+                step_id="managed_devices",
+                data_schema=schema,
+                description_placeholders={
+                    "info": (
+                        "No devices flagged. To mark a device 'managed "
+                        "externally', open any insight from it and use "
+                        "the per-device toggle in the detail dialog."
+                    ),
+                },
+            )
+
+        # Build device-id -> display label using the registry.
+        try:
+            from homeassistant.helpers import device_registry as dr
+
+            d_reg = dr.async_get(self.hass)
+        except Exception:
+            d_reg = None
+
+        device_choices: dict[str, str] = {}
+        for did in flagged:
+            label = did[:8] + "…"
+            if d_reg is not None:
+                device = d_reg.async_get(did)
+                if device is not None:
+                    label = device.name_by_user or device.name or label
+                    if device.manufacturer:
+                        label = f"{label} · {device.manufacturer}"
+                else:
+                    label = f"<deleted: {label}>"
+            device_choices[did] = label
+
+        schema = vol.Schema(
+            {
+                # Keep everything checked by default; user unchecks to
+                # restore.
+                vol.Optional(
+                    "kept_devices",
+                    default=list(device_choices.keys()),
+                ): cv.multi_select(device_choices),
+            }
+        )
+        return self.async_show_form(
+            step_id="managed_devices",
+            data_schema=schema,
+            description_placeholders={
+                "info": (
+                    f"You currently have {len(flagged)} device(s) flagged "
+                    "as managed externally. Uncheck a device to restore "
+                    "it — future patterns from it will surface again."
+                ),
+            },
+        )
 
     async def async_step_advanced(
         self, user_input: dict[str, Any] | None = None

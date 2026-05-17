@@ -17,6 +17,7 @@ venv/
 # IDE
 .idea/
 .vscode/
+.claude/
 
 # Local-only developer workflow notes (not published)
 .dev/
