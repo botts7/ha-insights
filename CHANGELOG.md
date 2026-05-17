@@ -4,6 +4,21 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+## [1.9.2] — 2026-05-17
+
+### Changed
+
+- **Bundle card v1.4.0 panel.js** — picks up the 🔀 directionality
+  badge in the integration's bundled panel surface. With this
+  bundle, users who install only the integration (without the
+  standalone HACS card) see the v1.9.1 directionality stamps
+  rendered as badges. Standalone-card users on v1.4.0+ already
+  see them.
+
+  Bundle-only change; no integration-side code or contract
+  changes. See `ha-insights-card` v1.4.0 changelog for the
+  rendering details.
+
 ## [1.9.1] — 2026-05-17
 
 ### Added
