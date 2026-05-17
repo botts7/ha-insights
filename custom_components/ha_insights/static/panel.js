@@ -314,11 +314,13 @@ class BulkAreaAssignDialog extends i {
             this.dispatchEvent(new CustomEvent("closed", { bubbles: true, composed: true }));
         };
     }
-    /** Hardcoded mirror of lib/perturbation_capability.py's _GUIDES keys.
-     *  Card needs to know which entities should show the 👆 button
-     *  WITHOUT round-tripping to the server for every row. Keep in
-     *  sync with the lib — see `supported_device_classes()` there. */
-    static { this._PERTURBABLE_DEVICE_CLASSES = new Set([
+    /** Fallback set used when the integration is older than v1.10.7
+     *  and doesn't include `perturbable` in the identify_capability
+     *  response. Keep loosely in sync with
+     *  lib/perturbation_capability.py — drift here only affects
+     *  pre-v1.10.7 integrations, which won't get new device_classes
+     *  added to the list anyway. */
+    static { this._PERTURBABLE_FALLBACK = new Set([
         "temperature",
         "humidity",
         "carbon_dioxide",
@@ -411,6 +413,9 @@ class BulkAreaAssignDialog extends i {
                         method: cap.method,
                         description: cap.description,
                         supported: !!cap.supported,
+                        device_class: cap.device_class ?? null,
+                        perturbable: cap.perturbable,
+                        perturbation_state: cap.perturbation_state,
                     });
                 }
                 if (Array.isArray(cap.same_as) && cap.same_as.length > 0) {
@@ -695,15 +700,26 @@ class BulkAreaAssignDialog extends i {
      *  instead, with the killer elimination outcome.
      */
     _renderTouchTestButton(entity_id) {
-        const dc = this._deviceClassOf(entity_id);
-        if (!BulkAreaAssignDialog._PERTURBABLE_DEVICE_CLASSES.has(dc)) {
-            return A;
-        }
         const cap = this._identifyCaps.get(entity_id);
         if (cap?.supported) {
             // Identify is a stronger signal — skip the touch-test button.
             return A;
         }
+        // v1.9.0 — prefer the server's authoritative `perturbable` field
+        // (integration v1.10.7+). Fallback to the local hardcoded set
+        // when paired with an older integration. Final fallback to "no
+        // button" if neither the server nor a local check resolves.
+        const dc = cap?.device_class ?? this._deviceClassOf(entity_id);
+        const isPerturbable = cap?.perturbable !== undefined
+            ? cap.perturbable
+            : BulkAreaAssignDialog._PERTURBABLE_FALLBACK.has(dc);
+        if (!isPerturbable)
+            return A;
+        // Keep the dc fallback for openTouchTest below — server didn't
+        // tell us, but the local set says yes, so we have *some* class
+        // to work with.
+        if (!dc)
+            return A;
         return b `<button
       class="touch-test-btn"
       aria-label="Touch test: physically perturb the sensor and see which entity spikes"
@@ -999,13 +1015,13 @@ class BulkAreaAssignDialog extends i {
       `;
         }
         // Clear match AND the user clicked the right entity.
+        const unit = this._unitFor(result.top_match);
         return b `
       <p class="touch-test-success">
         ✓ Clear match: <b>${result.top_match}</b>
       </p>
       <p class="touch-test-meta">
-        Spiked Δ=${top.peak_delta.toFixed(2)}
-        ${this._touchTestDeviceClass === "temperature" ? "°C" : ""}
+        Spiked Δ=${top.peak_delta.toFixed(2)}${unit ? " " + unit : ""}
         (z=${top.z_score.toFixed(1)}). ${result.reason}
       </p>
       <div class="touch-test-actions">
@@ -1015,6 +1031,17 @@ class BulkAreaAssignDialog extends i {
         <button @click=${this._closeTouchTest}>Close</button>
       </div>
     `;
+    }
+    /** v1.9.0 — pull unit_of_measurement off the entity's live state.
+     *  Returns "" when the entity has no state or no unit attribute.
+     *  Reactive: if the user reconfigures the unit, the next render
+     *  picks it up. */
+    _unitFor(entity_id) {
+        const state = this.hass?.states?.[entity_id];
+        if (!state)
+            return "";
+        const u = state.attributes?.unit_of_measurement;
+        return typeof u === "string" ? u : "";
     }
     _areaNameById(area_id) {
         if (!area_id)
@@ -1732,7 +1759,9 @@ class BulkAreaAssignDialog extends i {
       display: flex;
       align-items: center;
       justify-content: center;
-      z-index: 1000;
+      /* v1.9.0 — parent .backdrop is z-index 9999; touch-test modal
+       * must stack above it or it renders BEHIND and is unclickable. */
+      z-index: 10000;
     }
     .touch-test-modal {
       background: var(--card-background-color, white);
