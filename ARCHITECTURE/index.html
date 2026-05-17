@@ -2481,9 +2481,14 @@ Connects via WS, backdates entries to recorder. Produces a HA instance that <em>
 <td><code>lib/sequence_mining.py</code> using <code>prefixspan</code>; cross-window pattern detection beyond pair-level cooccurrence ("door → light → media → motion-away" frequent subsequence); new SequencePatternDetector</td>
 </tr>
 <tr>
-<td>v1.15+</td>
+<td>v1.15</td>
+<td><strong>HardwareSuggestionDetector</strong> — fill data gaps</td>
+<td>Meta-detector that runs AFTER existing detectors. When a detector fires weakly because the install lacks the right sensor class (lights stay on &gt;3 h in area with no motion sensor → suggest motion / mmWave / BLE presence), emit <code>InsightKind.HARDWARE_SUGGESTION</code> with the <em>category</em> of device that would close the gap. <code>lib/hardware_gap_rules.py</code> (composable pure-function rules: one per gap type — presence, contact, energy, per-room temp, AQ, outdoor, water, illuminance). <strong>Hard non-commercial guardrails: categories only, no brands/SKUs, no buy buttons, no affiliate links, no price guidance, per-suggestion dismiss + per-area cooldown.</strong> Gated on user having set <code>goals_json</code> so we only suggest to users who opted-in to proactive advice.</td>
+</tr>
+<tr>
+<td>v1.16+</td>
 <td>Polish + research backlog</td>
-<td>Card 🔀 directionality badge (renders v1.9.1 payload); HAWatcher shadow execution (97 % precision validation); 2nd-order Markov + Shannon-entropy AIT approximation; survival-aware reminder cards</td>
+<td>HAWatcher shadow execution (97 % precision validation); 2nd-order Markov + Shannon-entropy AIT approximation; survival-aware reminder cards</td>
 </tr>
 </tbody>
 </table>
