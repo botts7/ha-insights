@@ -101,6 +101,13 @@ SUPPORTED_METHODS = (
     # handles its own logic" and insights from it are fully suppressed.
     "list_managed_devices",
     "set_device_managed",
+    # v1.10 Phase A: Find My Device — make an entity announce itself.
+    # `identify_capability` returns what method (flash / chime / etc.)
+    # the entity supports; `identify_entity` actually triggers it.
+    # Used by the bulk-area-assign dialog so the user can locate
+    # devices with cryptic names before assigning them an area.
+    "identify_capability",
+    "identify_entity",
 )
 
 
@@ -146,6 +153,9 @@ def async_register(hass: HomeAssistant) -> None:
     # v1.7.7: per-device "managed externally" flag
     websocket_api.async_register_command(hass, ws_list_managed_devices)
     websocket_api.async_register_command(hass, ws_set_device_managed)
+    # v1.10 Phase A: Find My Device — identify-capable orphans
+    websocket_api.async_register_command(hass, ws_identify_capability)
+    websocket_api.async_register_command(hass, ws_identify_entity)
 
 
 def _get_store(
@@ -4158,4 +4168,215 @@ async def ws_set_device_managed(
     connection.send_result(
         msg["id"],
         {"managed_devices": sorted(flagged)},
+    )
+
+
+# v1.10 Phase A — Find My Device: identify-capable orphans -------------
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "home_insights/identify_capability",
+        vol.Required("entity_ids"): [str],
+    }
+)
+@websocket_api.async_response
+async def ws_identify_capability(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Return identify capabilities for a batch of entity_ids.
+
+    Read-only; not admin-gated. The card calls this once per panel
+    open to know which entities can show a 🔆 button.
+
+    Response shape:
+      {
+        "capabilities": {
+          "<entity_id>": {
+            "method": "flash_light" | "play_chime" | ... | "none",
+            "description": "flash the light briefly",
+            "supported": true,
+            "name_quality": {
+              "tier": "user_override" | "cloud" | ... | "mac_pattern",
+              "score": 0.0-1.0,
+              "chosen_name": "Kitchen Floor Lamp",
+              "source": "tuya integration",
+              "reason": "...",
+            },
+          },
+          ...
+        }
+      }
+
+    The `name_quality` block lets the card decide whether to even
+    SHOW the 🔆 button. High-quality names ("Kitchen Floor Lamp")
+    don't need identification — the user already knows what it is.
+    Low-quality names ("ATC_a4c138") are exactly when 🔆 earns its
+    keep.
+    """
+    from homeassistant.helpers import device_registry as dr
+    from homeassistant.helpers import entity_registry as er
+
+    from .lib.identify_capability import identify_capability_for
+    from .lib.name_quality import score_name_quality
+
+    e_reg = er.async_get(hass)
+    d_reg = dr.async_get(hass)
+
+    entity_ids = msg["entity_ids"]
+    capabilities: dict[str, dict[str, Any]] = {}
+    for eid in entity_ids:
+        if not isinstance(eid, str):
+            continue
+        state = hass.states.get(eid)
+        snapshot: dict[str, Any] | None = None
+        friendly_name: str | None = None
+        if state is not None:
+            snapshot = {"attributes": dict(state.attributes)}
+            fn_attr = state.attributes.get("friendly_name")
+            friendly_name = (
+                fn_attr if isinstance(fn_attr, str) else None
+            )
+        cap = identify_capability_for(eid, snapshot)
+
+        # Resolve registry data for name_quality scoring.
+        er_entry = e_reg.async_get(eid)
+        manufacturer: str | None = None
+        model: str | None = None
+        integration_domain: str | None = None
+        name_by_user: str | None = None
+        original_name: str | None = None
+        if er_entry is not None:
+            name_by_user = er_entry.name
+            original_name = er_entry.original_name
+            if er_entry.device_id is not None:
+                dev = d_reg.async_get(er_entry.device_id)
+                if dev is not None:
+                    manufacturer = dev.manufacturer
+                    model = dev.model
+            # `platform` on EntityRegistryEntry is the integration
+            # domain that created the entity.
+            integration_domain = er_entry.platform
+
+        nq = score_name_quality(
+            eid,
+            name_by_user=name_by_user,
+            original_name=original_name,
+            friendly_name=friendly_name,
+            manufacturer=manufacturer,
+            model=model,
+            integration_domain=integration_domain,
+        )
+        capabilities[eid] = {
+            "method": cap.method.value,
+            "description": cap.description,
+            "supported": cap.method.value != "none",
+            "name_quality": {
+                "tier": nq.tier.value,
+                "score": nq.score,
+                "chosen_name": nq.chosen_name,
+                "source": nq.source,
+                "reason": nq.reason,
+            },
+        }
+    connection.send_result(msg["id"], {"capabilities": capabilities})
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "home_insights/identify_entity",
+        vol.Required("entity_id"): str,
+    }
+)
+@websocket_api.async_response
+async def ws_identify_entity(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Fire the identify signal for one entity.
+
+    Admin-gated because this calls arbitrary HA services (light.turn_on,
+    media_player.play_media, etc.) — a non-admin token shouldn't be
+    able to toggle every switch in the house via this endpoint.
+
+    Returns ``{"method": "<method>", "calls_made": N}`` on success
+    or an error code on failure. The card uses the response to render
+    "Flashed light.foo — look for it!" toast.
+    """
+    if not _require_admin(hass, connection, msg):
+        return
+
+    from asyncio import sleep as _async_sleep
+
+    from .lib.identify_capability import (
+        IdentifyMethod,
+        identify_capability_for,
+    )
+
+    entity_id = msg["entity_id"]
+    state = hass.states.get(entity_id)
+    if state is None:
+        connection.send_error(
+            msg["id"],
+            "unknown_entity",
+            f"No state found for {entity_id}",
+        )
+        return
+    cap = identify_capability_for(
+        entity_id, {"attributes": dict(state.attributes)}
+    )
+    if cap.method == IdentifyMethod.NONE:
+        connection.send_error(
+            msg["id"],
+            "not_identifiable",
+            (
+                f"{entity_id} has no built-in identify signal. Try "
+                "the touch-test mode (v1.10 Phase B) for passive sensors."
+            ),
+        )
+        return
+
+    calls_made = 0
+    try:
+        for i, call in enumerate(cap.service_calls):
+            await hass.services.async_call(
+                call["domain"],
+                call["service"],
+                {**call["data"], "entity_id": entity_id},
+                blocking=False,
+            )
+            calls_made += 1
+            # Pause between sequential calls (strobe / toggle rhythm).
+            # Skip on the last call so we don't add a useless trailing
+            # sleep before responding to the WS client.
+            if (
+                cap.inter_call_delay_ms > 0
+                and i + 1 < len(cap.service_calls)
+            ):
+                await _async_sleep(cap.inter_call_delay_ms / 1000.0)
+    except Exception as err:
+        _LOGGER.warning(
+            "identify_entity %s failed after %d/%d calls: %s",
+            entity_id,
+            calls_made,
+            len(cap.service_calls),
+            err,
+        )
+        connection.send_error(
+            msg["id"],
+            "service_call_failed",
+            f"Identify failed after {calls_made}/{len(cap.service_calls)} calls: {err}",
+        )
+        return
+
+    connection.send_result(
+        msg["id"],
+        {
+            "method": cap.method.value,
+            "description": cap.description,
+            "calls_made": calls_made,
+        },
     )
