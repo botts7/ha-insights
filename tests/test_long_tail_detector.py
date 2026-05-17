@@ -78,9 +78,13 @@ async def test_short_spans_no_insight() -> None:
 
 @pytest.mark.asyncio
 async def test_long_light_spans_produce_insight() -> None:
-    """3-hour spans on a light should surface an auto-off proposal."""
+    """3-hour spans on a light should surface an auto-off proposal.
+
+    Need 5+ occurrences to clear MIN_CONFIDENCE_TO_EMIT=0.5 (confidence
+    formula is `count/10` so 5 occurrences = 0.5 exactly).
+    """
     buf = StateEventBuffer(max_age=timedelta(days=30))
-    _seed_long_spans(buf, "light.kitchen", span_minutes=180, times=4)
+    _seed_long_spans(buf, "light.kitchen", span_minutes=180, times=5)
     detector = LongTailDetector()
     insights = await detector.scan(_ctx(buf))
     assert len(insights) == 1
@@ -104,7 +108,7 @@ async def test_below_min_occurrences_filtered() -> None:
 @pytest.mark.asyncio
 async def test_payload_has_for_trigger_and_turn_off() -> None:
     buf = StateEventBuffer(max_age=timedelta(days=30))
-    _seed_long_spans(buf, "switch.fan", span_minutes=240, times=4)
+    _seed_long_spans(buf, "switch.fan", span_minutes=240, times=5)
     detector = LongTailDetector()
     insights = await detector.scan(_ctx(buf))
     assert len(insights) == 1
@@ -176,7 +180,7 @@ async def test_extreme_span_capped() -> None:
 @pytest.mark.asyncio
 async def test_fingerprint_stable() -> None:
     buf = StateEventBuffer(max_age=timedelta(days=30))
-    _seed_long_spans(buf, "light.kitchen", span_minutes=180, times=4)
+    _seed_long_spans(buf, "light.kitchen", span_minutes=180, times=5)
     detector = LongTailDetector()
     [first] = await detector.scan(_ctx(buf))
     [second] = await detector.scan(_ctx(buf))
@@ -188,7 +192,8 @@ async def test_confidence_scales_with_count() -> None:
     """More long-tail events should produce higher confidence."""
     buf_few = StateEventBuffer(max_age=timedelta(days=30))
     buf_many = StateEventBuffer(max_age=timedelta(days=30))
-    _seed_long_spans(buf_few, "light.kitchen", span_minutes=180, times=3)
+    # 6 = clears the 0.5 emit floor with margin; 10 saturates at 1.0
+    _seed_long_spans(buf_few, "light.kitchen", span_minutes=180, times=6)
     _seed_long_spans(buf_many, "light.kitchen", span_minutes=180, times=10)
     detector = LongTailDetector()
     [few] = await detector.scan(_ctx(buf_few))

@@ -133,7 +133,8 @@ def test_action_entity_id_list_detected() -> None:
 
 
 def test_state_trigger_same_entity_same_to_value_conflicts() -> None:
-    """v0.8.2: state-trigger overlap on the same source entity = conflict."""
+    """State-trigger overlap on the same source entity AND same action target
+    = conflict. (Different action targets = independent intent; tested below.)"""
     payload = {
         "alias": "Insight",
         "trigger": [
@@ -146,7 +147,7 @@ def test_state_trigger_same_entity_same_to_value_conflicts() -> None:
         "trigger": [
             {"platform": "state", "entity_id": "light.kitchen", "to": "on"}
         ],
-        "action": [{"service": "switch.turn_on", "target": {"entity_id": "switch.y"}}],
+        "action": [{"service": "light.turn_on", "target": {"entity_id": "light.x"}}],
     }]
     assert find_conflicts(_insight(payload), existing) == ["state_overlap"]
 
@@ -180,22 +181,24 @@ def test_state_trigger_different_to_value_no_conflict() -> None:
 
 
 def test_state_trigger_any_change_matches_specific() -> None:
-    """A trigger with no `to:` (any-change) overlaps a specific to: of None."""
+    """A trigger with no `to:` (any-change) overlaps another any-change
+    on the same entity (both sigs are (entity, None, None))."""
     payload = {
         "alias": "Insight",
         "trigger": [{"platform": "state", "entity_id": "light.kitchen"}],  # no to:
-        "action": [{"service": "light.turn_on"}],
+        "action": [{"service": "light.turn_on", "target": {"entity_id": "light.x"}}],
     }
     existing = [{
         "id": "any_change",
         "trigger": [{"platform": "state", "entity_id": "light.kitchen"}],  # no to:
-        "action": [{"service": "switch.turn_on"}],
+        "action": [{"service": "light.turn_on", "target": {"entity_id": "light.x"}}],
     }]
     assert find_conflicts(_insight(payload), existing) == ["any_change"]
 
 
 def test_state_trigger_entity_id_list_detected() -> None:
-    """state trigger entity_id can be a list of entities."""
+    """state trigger entity_id can be a list of entities; overlap on any
+    member of the list (with overlapping action target) = conflict."""
     payload = {
         "alias": "Insight",
         "trigger": [
@@ -205,14 +208,14 @@ def test_state_trigger_entity_id_list_detected() -> None:
                 "to": "on",
             }
         ],
-        "action": [{"service": "light.turn_on"}],
+        "action": [{"service": "light.turn_on", "target": {"entity_id": "light.x"}}],
     }
     existing = [{
         "id": "list_match",
         "trigger": [
             {"platform": "state", "entity_id": "light.den", "to": "on"}
         ],
-        "action": [{"service": "switch.turn_on"}],
+        "action": [{"service": "light.turn_on", "target": {"entity_id": "light.x"}}],
     }]
     assert find_conflicts(_insight(payload), existing) == ["list_match"]
 

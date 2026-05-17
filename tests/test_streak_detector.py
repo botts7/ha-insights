@@ -5,6 +5,7 @@ from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock
 
 import pytest
+from homeassistant.util import dt as dt_util
 
 from custom_components.ha_insights.detectors.base import DetectorContext
 from custom_components.ha_insights.detectors.streak import StreakDetector
@@ -41,16 +42,22 @@ def _seed_streak(
     jitter_minutes: int = 0,
     end_now: datetime | None = None,
 ) -> None:
-    """Seed `days` consecutive-day events at roughly the same time-of-day."""
-    end = end_now or datetime.now(tz=UTC).replace(microsecond=0)
+    """Seed `days` consecutive-day events at roughly the same time-of-day.
+
+    Times are constructed in HA's local timezone so `at_hour`/`at_minute`
+    describe the wall-clock value the detector will read (it uses
+    `dt_util.as_local`). Stored as UTC to mirror the production
+    state_changed listener.
+    """
+    end = end_now or dt_util.now().replace(microsecond=0)
     for i in range(days):
-        when = (end - timedelta(days=i + 1)).replace(
+        when_local = (end - timedelta(days=i + 1)).replace(
             hour=at_hour,
             minute=at_minute + (i % 2) * jitter_minutes,
             second=0,
             microsecond=0,
         )
-        buf.add(_ev(when, entity_id, state))
+        buf.add(_ev(when_local.astimezone(UTC), entity_id, state))
 
 
 @pytest.mark.asyncio

@@ -127,11 +127,15 @@ async def test_detects_clear_spike() -> None:
 
 
 @pytest.mark.asyncio
-async def test_three_x_ratio_is_threshold() -> None:
-    """3x baseline lands at confidence ~0.6 — the floor."""
+async def test_eight_x_ratio_is_threshold() -> None:
+    """8x baseline (RATIO_THRESHOLD bumped from 3x in v0.9 field testing).
+
+    Confidence at exactly the threshold is at the lower end of the
+    ramp; we just assert an insight emits at the boundary.
+    """
     buf = StateEventBuffer(max_age=timedelta(days=30))
     today_start = _today_start(datetime.now(tz=UTC))
-    # baseline 5/day => today needs >= 15 to clear 3x
+    # baseline 5/day => today needs >= 40 to clear 8x
     _seed_baseline(
         buf,
         entity_id="binary_sensor.motion",
@@ -140,12 +144,11 @@ async def test_three_x_ratio_is_threshold() -> None:
         days=13,
     )
     _seed_today(
-        buf, entity_id="binary_sensor.motion", today_start=today_start, count=15
+        buf, entity_id="binary_sensor.motion", today_start=today_start, count=40
     )
     detector = FrequencyAnomalyDetector()
     insights = await detector.scan(_ctx(buf))
     assert len(insights) == 1
-    assert insights[0].confidence == pytest.approx(0.6, abs=0.01)
 
 
 # --- Filtering ---

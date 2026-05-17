@@ -79,7 +79,9 @@ async def test_below_min_occurrences_no_insight() -> None:
 @pytest.mark.asyncio
 async def test_consistent_pair_produces_insight() -> None:
     buf = StateEventBuffer()
-    _seed_door_then_light(buf, times=8, delta_seconds=5)
+    # 16 pairs to clear v0.5+ busy-entity prefilter (MIN_OCCURRENCES=15
+    # per entity, and len(events) must be >= MIN_OCCURRENCES*2).
+    _seed_door_then_light(buf, times=16, delta_seconds=5)
     detector = CooccurrenceDetector()
     insights = await detector.scan(_ctx(buf))
     assert len(insights) >= 1
@@ -101,7 +103,7 @@ async def test_consistent_pair_produces_insight() -> None:
 @pytest.mark.asyncio
 async def test_payload_has_state_trigger_and_service_action() -> None:
     buf = StateEventBuffer()
-    _seed_door_then_light(buf, times=8, delta_seconds=5)
+    _seed_door_then_light(buf, times=16, delta_seconds=5)
     detector = CooccurrenceDetector()
     insights = await detector.scan(_ctx(buf))
     target = next(
@@ -190,7 +192,7 @@ async def test_same_entity_self_followup_skipped() -> None:
 @pytest.mark.asyncio
 async def test_fingerprint_stable_across_scans() -> None:
     buf = StateEventBuffer()
-    _seed_door_then_light(buf, times=8, delta_seconds=5)
+    _seed_door_then_light(buf, times=16, delta_seconds=5)
     detector = CooccurrenceDetector()
     [first] = [
         i

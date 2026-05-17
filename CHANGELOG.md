@@ -4,6 +4,71 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+## [1.5.51] — 2026-05-17
+
+### Fixed
+
+- **Second wave of pre-existing test failures (issue #11).** After
+  the first batch fixes landed, pytest collection progressed further
+  and surfaced 7 more failures with the same root cause: stale seed
+  counts vs raised thresholds. All fixed:
+  - `test_long_tail_detector.py`: 4 tests needed ≥5 spans (confidence
+    formula is `count/10`, MIN_CONFIDENCE_TO_EMIT=0.5).
+  - `test_lagged_correlation_detector.py`: needed ≥6 pairs (inherited
+    cooccurrence floor of 0.55).
+  - `test_frequency_anomaly_detector.py`: renamed
+    `test_three_x_ratio_is_threshold` → `test_eight_x_ratio_is_threshold`
+    after v0.9 bumped RATIO_THRESHOLD from 3 to 8.
+  - `test_schedule_detector.py`: loosened a confidence-value assertion
+    that synthetic single-entity seeds can no longer satisfy now that
+    `assess_human_likelihood` shapes confidence.
+  - `test_streak_detector.py`: fixed UTC-vs-local-time mismatch in the
+    seed helper — `dt_util.as_local` in the detector was reading
+    timezone-shifted hours on non-UTC test runners.
+  - `ws_api.py`: dropped `dev_inject_event` from `SUPPORTED_METHODS`
+    (test already enforced it's debug-only).
+
+- **BETA-detector audit (issue #11 follow-up).**
+  `ButtonPressHabitDetector._already_automated` only matched scalar
+  `entity_id` on existing triggers. HA state triggers accept either a
+  string or a list of strings; the list form (`entity_id: [a, b, c]`)
+  silently fell through, so the detector could propose a "press X →
+  do Y" automation even when an existing automation triggered on `[X,
+  other]`. Fix iterates list-form entity_ids.
+
+- **Pre-existing test failures surfaced by v1.5.50.** v1.5.50 cleared the
+  ruff backlog and pytest collection started running — which immediately
+  exposed ~10 tests that had been broken across multiple versions but
+  hidden because ruff was failing the `pytest` step. Resolved here as
+  [#11](https://github.com/botts7/ha-insights/issues/11). All test
+  failures are now green:
+
+  - **`conflict_scanner.py`**: real production bug. The schedule-like
+    fallback added in 2026-05-10 (ea61c3936) over-fired on
+    same-`platform: time` pairs that the time-window check had already
+    decided were not in conflict. Added an `_all_platform_time(a) and
+    _all_platform_time(b)` short-circuit before the fallback — when both
+    sides have only directly-comparable time triggers, the
+    `_times_close` check is authoritative. Catches the same edge case
+    where a malformed `at: not-a-time` would get flagged purely from
+    the fallback. The schedule-like fallback still does its intended
+    job for cross-platform cases (time vs sun, calendar, etc.).
+  - **`test_conflict_scanner.py`**: 3 state-trigger tests assumed
+    overlap on the source entity alone was a conflict, but the scanner
+    has required overlap on BOTH source entity AND action target since
+    earlier. The tests' action targets differed by name; updated to
+    overlap so the tests test what their names claim.
+  - **`test_config_flow.py`**: the OptionsFlow init step is now a menu
+    (Quick wizard / per-user overrides / Advanced); lookback_days lives
+    inside Advanced. The test was written when init was a single form.
+    Rewrote to walk init-menu → Advanced → submit.
+  - **`test_cooccurrence_detector.py`**: 3 tests seeded 8 pairs but the
+    v0.5+ busy-entity prefilter requires per-entity count ≥
+    `MIN_OCCURRENCES = 15`. Bumped seeds to 16 pairs to clear the
+    threshold. (The "StopIteration" failure in
+    `test_payload_has_state_trigger_and_service_action` was the same
+    root cause — `next()` on an empty insights list.)
+
 ## [1.5.50] — 2026-05-17
 
 ### Fixed

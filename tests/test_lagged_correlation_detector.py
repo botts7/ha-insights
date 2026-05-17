@@ -63,9 +63,15 @@ async def test_no_buffer_returns_empty() -> None:
 
 @pytest.mark.asyncio
 async def test_detects_3min_lagged_pattern() -> None:
-    """Garage opens, driveway light follows ~3 min later, 5 times."""
+    """Garage opens, driveway light follows ~3 min later, 6 times.
+
+    Need 6+ to clear the inherited MIN_CONFIDENCE_TO_EMIT=0.55 — the
+    confidence formula is `min(1, count/10) * consistency * stddev_factor`,
+    so 5 occurrences with perfect consistency and zero stddev lands at
+    exactly 0.5, just under the floor.
+    """
     buf = StateEventBuffer(max_age=timedelta(days=20))
-    _seed_lag_pair(buf, times=5, delta_seconds=180)
+    _seed_lag_pair(buf, times=6, delta_seconds=180)
     detector = LaggedCorrelationDetector()
     insights = await detector.scan(_ctx(buf))
     assert len(insights) >= 1

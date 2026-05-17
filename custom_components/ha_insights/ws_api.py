@@ -72,7 +72,9 @@ SUPPORTED_METHODS = (
     "hypothesize",
     "refine_cost_estimate",
     "list_entries",
-    "dev_inject_event",
+    # `dev_inject_event` is intentionally NOT here — debug-only handler,
+    # not part of the client-discoverable API. Enforced by
+    # test_supported_methods_match.py.
     "get_automation",
     "refine_automation",
     "apply_automation_refinement",

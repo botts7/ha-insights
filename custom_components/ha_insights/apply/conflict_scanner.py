@@ -137,6 +137,13 @@ def _automations_overlap(
     if a_states & b_states:
         return True
 
+    # If both sides ONLY use `platform: time`, the time-window check above
+    # was definitive — don't fall through to the schedule-like fallback.
+    # The fallback exists for cross-platform cases (time vs sun, calendar
+    # vs time_pattern) where exact times can't be compared statically.
+    if _all_platform_time(a_triggers) and _all_platform_time(b_triggers):
+        return False
+
     # Schedule-like fallback: when target overlaps AND BOTH automations
     # have a schedule-driven trigger of any kind, we can't compare exact
     # times (the existing automation triggers on sun, the insight on a
@@ -147,6 +154,19 @@ def _automations_overlap(
         return True
 
     return False
+
+
+def _all_platform_time(triggers: list[Any]) -> bool:
+    """True when every trigger in the list is `platform: time`.
+
+    Lets the caller skip the schedule-like fallback for a same-platform,
+    directly-comparable pair where the time-window check is authoritative.
+    """
+    if not triggers:
+        return False
+    return all(
+        isinstance(t, dict) and t.get("platform") == "time" for t in triggers
+    )
 
 
 _SCHEDULE_LIKE_PLATFORMS: frozenset[str] = frozenset(
