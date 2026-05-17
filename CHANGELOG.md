@@ -4,6 +4,20 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+## [1.10.1] — 2026-05-17
+
+### Changed
+
+- **Bundle card v1.5.0 panel.js** — picks up the smart sort + tier
+  badges in the bulk-area-assign dialog. With this bundle, users
+  on only the integration-bundled panel surface (no standalone
+  HACS card) see worst-named entities float to the top and get
+  the 🆔/❓/🏷️/☁️/✏️ tier icons.
+
+  Bundle-only change; no integration-side code or contract
+  changes. See `ha-insights-card` v1.5.0 changelog for rendering
+  details.
+
 ## [1.10.0] — 2026-05-17
 
 ### Added — Find My Device, phase A

@@ -238,6 +238,19 @@ class BulkAreaAssignDialog extends i {
          *  so the first-load picture is "things you haven't classified yet". */
         this._showAll = false;
         this._filter = "";
+        /** v1.5.0 — Optional HA Insights enrichment. When the HA Insights
+         *  integration is installed (v1.10.0+), we call
+         *  `home_insights/identify_capability` to score each entity's name
+         *  quality and sort worst-named entities to the top so the user
+         *  tackles the genuinely-confusing ones first.
+         *
+         *  Falls back silently when the WS endpoint isn't available
+         *  (vanilla HA install). The dialog remains fully functional
+         *  without the integration — sorting just stays alphabetical.
+         *
+         *  Map: entity_id → { score (0-1), tier, chosen_name }.
+         *  Empty map = enrichment didn't run or returned no data. */
+        this._nameQuality = new Map();
         /** v1.2.7 — Structured filters in addition to free-text search.
          *  Empty string = "all". Populated from the actual data on fetch
          *  so users only see options they have. */
@@ -289,12 +302,54 @@ class BulkAreaAssignDialog extends i {
             this._areas = (areas ?? []).slice().sort((a, b) => a.name.localeCompare(b.name));
             this._devices = (devices ?? []).filter((d) => !d.disabled_by);
             this._entities = (entities ?? []).filter((e) => !e.disabled_by && !e.hidden_by);
+            // v1.5.0 — opportunistic name-quality enrichment via HA
+            // Insights. Fire-and-forget; the dialog renders alphabetically
+            // while this is in flight, then re-sorts on completion.
+            void this._fetchNameQuality();
         }
         catch (err) {
             this._error = `Could not load registries: ${this._errMsg(err)}`;
         }
         finally {
             this._loading = false;
+        }
+    }
+    /** Best-effort fetch of name_quality scores via HA Insights
+     *  v1.10.0+. Silently absent on installs without the integration. */
+    async _fetchNameQuality() {
+        if (!this.hass || this._entities.length === 0)
+            return;
+        // Only ask for entities without areas — the others won't be shown
+        // by default and don't need scoring. Cap at 500 to keep the WS
+        // round-trip snappy even on huge installs.
+        const candidates = this._entities
+            .filter((e) => !e.area_id)
+            .slice(0, 500)
+            .map((e) => e.entity_id);
+        if (candidates.length === 0)
+            return;
+        try {
+            const resp = await this.hass.connection.sendMessagePromise({
+                type: "home_insights/identify_capability",
+                entity_ids: candidates,
+            });
+            const next = new Map();
+            for (const [eid, cap] of Object.entries(resp.capabilities ?? {})) {
+                if (cap.name_quality) {
+                    next.set(eid, {
+                        score: cap.name_quality.score,
+                        tier: cap.name_quality.tier,
+                        chosen_name: cap.name_quality.chosen_name,
+                    });
+                }
+            }
+            this._nameQuality = next;
+        }
+        catch {
+            // HA Insights not installed, or older version without the
+            // endpoint, or a transient error. Sorting falls back to
+            // alphabetical; no UI message — this is enrichment, not a
+            // hard dependency.
         }
     }
     _errMsg(err) {
@@ -317,6 +372,70 @@ class BulkAreaAssignDialog extends i {
     }
     _entityLabel(e) {
         return e.name || e.original_name || e.entity_id;
+    }
+    /** v1.5.0 — render a tier indicator badge per entity row.
+     *
+     *  Only renders when name_quality data is available AND the tier
+     *  is informative (skip the middle "friendly" tier to avoid
+     *  cluttering rows that don't need user attention). Mac-pattern
+     *  and generic_domain tiers get prominent icons — those are the
+     *  rows the user should focus on. Cloud / user-override tiers
+     *  get a subtle ✓ that says "this name is fine, no need to
+     *  re-investigate."
+     *
+     *  Tooltip carries the score + reason from the integration so
+     *  power users can verify the call.
+     */
+    _renderNameQualityBadge(nq) {
+        if (!nq)
+            return A;
+        let icon = "";
+        let title = "";
+        const pct = Math.round(nq.score * 100);
+        switch (nq.tier) {
+            case "mac_pattern":
+                icon = "🆔";
+                title =
+                    `MAC-pattern name (score ${pct}%). This entity needs ` +
+                        "identification — the name doesn't tell you what it is.";
+                break;
+            case "generic_domain":
+                icon = "❓";
+                title =
+                    `Generic entity_id (score ${pct}%). The name carries little ` +
+                        "signal; consider identifying the device.";
+                break;
+            case "mfr_model":
+                icon = "🏷️";
+                title =
+                    `Manufacturer + model (score ${pct}%). Better than a hex blob, ` +
+                        "but doesn't tell you which physical device it is.";
+                break;
+            case "user_override":
+                icon = "✏️";
+                title = `User-named (score ${pct}%). No identification needed.`;
+                break;
+            case "cloud":
+                icon = "☁️";
+                title =
+                    `Cloud-authoritative name (score ${pct}%). Imported from the ` +
+                        "integration's app — should match what you named it there.";
+                break;
+            case "friendly_set":
+                // Skip the badge for friendly_set — it's the common case and
+                // would clutter the list. The score-based sorting still
+                // ranks it above mac_pattern / generic_domain.
+                return A;
+            default:
+                return A;
+        }
+        return b `<span
+      class="name-quality-badge name-quality-${nq.tier}"
+      role="img"
+      aria-label="${title}"
+      title="${title}"
+      >${icon}</span
+    >`;
     }
     _areaNameById(area_id) {
         if (!area_id)
@@ -378,7 +497,7 @@ class BulkAreaAssignDialog extends i {
         const f = this._filter.trim().toLowerCase();
         const fInt = this._filterIntegration;
         const fDom = this._filterDomain;
-        return this._entities.filter((e) => {
+        const filtered = this._entities.filter((e) => {
             // Skip entities whose device already has an area (cascade
             // handles them). User can flip Show All to override.
             if (!this._showAll) {
@@ -403,6 +522,22 @@ class BulkAreaAssignDialog extends i {
             return e.entity_id.toLowerCase().includes(f) ||
                 this._entityLabel(e).toLowerCase().includes(f);
         });
+        // v1.5.0 — when HA Insights name_quality data is available,
+        // sort worst-named entities to the top so the user attacks the
+        // genuinely-confusing ones (BLE MACs, hex blobs) first. Entities
+        // missing a score (no enrichment or not in the batch) sort to
+        // the end so the high-quality entities don't crowd them out.
+        // Stable secondary sort by entity_id keeps the order deterministic.
+        if (this._nameQuality.size > 0) {
+            filtered.sort((a, b) => {
+                const sa = this._nameQuality.get(a.entity_id)?.score ?? 1.5;
+                const sb = this._nameQuality.get(b.entity_id)?.score ?? 1.5;
+                if (sa !== sb)
+                    return sa - sb;
+                return a.entity_id.localeCompare(b.entity_id);
+            });
+        }
+        return filtered;
     }
     _onPick(key, area_id) {
         const next = new Map(this._pending);
@@ -600,10 +735,13 @@ class BulkAreaAssignDialog extends i {
                 ? this._devices.find((d) => d.id === e.device_id)
                 : undefined;
             const effectiveArea = e.area_id ?? dev?.area_id ?? null;
+            const nq = this._nameQuality.get(e.entity_id);
             return b `
               <tr>
                 <td class="name">
-                  <div>${this._entityLabel(e)}</div>
+                  <div>
+                    ${this._renderNameQualityBadge(nq)}${this._entityLabel(e)}
+                  </div>
                   <div class="meta">${e.entity_id}</div>
                 </td>
                 <td class="meta">${dev ? this._deviceLabel(dev) : "—"}</td>
@@ -916,6 +1054,27 @@ class BulkAreaAssignDialog extends i {
       color: var(--secondary-text-color);
       margin-left: 4px;
     }
+    /* v1.5.0 — name_quality tier badge. Sits inline before the entity
+     * label; tooltip carries score + reason. Low-quality tiers
+     * (mac_pattern / generic_domain) get visual weight; high-quality
+     * tiers (cloud / user_override) are subtle so they don't clutter. */
+    .name-quality-badge {
+      display: inline-block;
+      margin-right: 6px;
+      font-size: 0.95em;
+      vertical-align: middle;
+      cursor: help;
+    }
+    .name-quality-mac_pattern,
+    .name-quality-generic_domain {
+      filter: none;
+      opacity: 1;
+    }
+    .name-quality-user_override,
+    .name-quality-cloud,
+    .name-quality-mfr_model {
+      opacity: 0.55;
+    }
     .area-picker {
       width: 100%;
       padding: 5px 8px;
@@ -1067,6 +1226,9 @@ __decorate([
 __decorate([
     r()
 ], BulkAreaAssignDialog.prototype, "_filter", void 0);
+__decorate([
+    r()
+], BulkAreaAssignDialog.prototype, "_nameQuality", void 0);
 __decorate([
     r()
 ], BulkAreaAssignDialog.prototype, "_filterIntegration", void 0);
