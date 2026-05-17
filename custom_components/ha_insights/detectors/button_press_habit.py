@@ -50,6 +50,11 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 from ..insight import Insight, InsightKind
+from ..lib.coupling_strength import (
+    apply_tier_demotion,
+    compute_coupling,
+    coupling_payload,
+)
 from .base import Detector, DetectorContext, Maturity, register_detector
 
 if TYPE_CHECKING:
@@ -255,6 +260,18 @@ class ButtonPressHabitDetector(Detector):
             3,
         )
 
+        # v1.7: coupling-strength badge. For button-press patterns the
+        # leader is the button entity itself (total_firings is exactly
+        # the count of times we saw the press). TIGHT coupling here is
+        # the textbook "Z-Wave central scene fires light directly via
+        # binding" case — the user is asking why we're suggesting an
+        # automation for what their hardware already does. Demote and
+        # stamp so the card can render the 🔗 explanation.
+        coupling = compute_coupling(
+            deltas_seconds=delays, leader_count=total_firings
+        )
+        confidence = apply_tier_demotion(confidence, coupling.tier)
+
         # Build the trigger/action YAML.
         automation_yaml = self._build_automation_yaml(
             event_eid=event_eid,
@@ -264,6 +281,9 @@ class ButtonPressHabitDetector(Detector):
         )
         if automation_yaml is None:
             return None  # consequent domain not buildable yet
+
+        # Stamp coupling on the payload so the card can render the badge.
+        automation_yaml["_coupling"] = coupling_payload(coupling)
 
         title = (
             f"Pressing {event_eid} ({event_type}) → {consequent_eid} "
