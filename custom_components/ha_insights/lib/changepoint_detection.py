@@ -219,10 +219,15 @@ def _detect_fallback(
     """Pure-Python mean-shift detector.
 
     Scans every interior position, computes the difference in means
-    between the prefix and suffix segments. Largest difference wins
-    if it exceeds the noise floor (3× the within-segment standard
-    deviation). Only finds ONE changepoint per call — recursion would
-    catch multiple but explodes O(N² log N) on long signals.
+    between the prefix and suffix segments. Tests every candidate
+    against the WITHIN-segment pooled standard deviation — using the
+    global stddev would let a real shift inflate its own noise floor
+    and become undetectable.
+
+    Threshold is 3 × pooled stddev (Welch-like t-test feel) which
+    rejects single-outlier "shifts" while catching genuine
+    mean changes. Only finds ONE changepoint per call — recursion
+    would catch multiple but explodes O(N² log N) on long signals.
 
     Less sensitive than PELT but adequate for the dominant use case
     (a routine that shifted once). Detectors should treat fallback-
@@ -231,23 +236,41 @@ def _detect_fallback(
     n = len(values)
     best_index: int | None = None
     best_diff: float = 0.0
+    best_pooled_stddev: float = 0.0
     for k in range(min_segment_size, n - min_segment_size + 1):
         before = values[:k]
         after = values[k:]
         mean_before = sum(before) / len(before)
         mean_after = sum(after) / len(after)
         diff = abs(mean_after - mean_before)
-        if diff > best_diff:
-            best_diff = diff
-            best_index = k
+        if diff <= best_diff:
+            continue
+        # Within-segment pooled stddev — the noise estimator that
+        # ISN'T inflated by the shift itself.
+        var_before = (
+            sum((v - mean_before) ** 2 for v in before)
+            / max(1, len(before) - 1)
+        )
+        var_after = (
+            sum((v - mean_after) ** 2 for v in after)
+            / max(1, len(after) - 1)
+        )
+        # Pool: weighted average of segment variances by degrees of
+        # freedom. Square root for stddev.
+        pooled_var = (
+            var_before * (len(before) - 1)
+            + var_after * (len(after) - 1)
+        ) / max(1, n - 2)
+        pooled_stddev = pooled_var**0.5
+        best_diff = diff
+        best_index = k
+        best_pooled_stddev = pooled_stddev
     if best_index is None:
         return []
-    # Noise floor: 3 × pooled stddev. Adjust to taste; tuned for
-    # daily-count data which has Poisson-ish variance.
-    mean_total = sum(values) / n
-    variance = sum((v - mean_total) ** 2 for v in values) / n
-    stddev = variance**0.5
-    if best_diff < 3 * stddev:
+    # Threshold against THIS split's within-segment noise, not global.
+    # The 3× multiplier rejects single-outlier "shifts" because they
+    # inflate one segment's stddev dramatically.
+    if best_diff < 3 * best_pooled_stddev:
         return []
     before_seg = values[:best_index]
     after_seg = values[best_index:]
