@@ -174,6 +174,137 @@ _INTERACTIVE_DOMAINS: frozenset[str] = frozenset({
 })
 
 
+# v1.12.5 — Hardware + history coverage predicates for the new
+# detectors added since v1.6+. Each answers a yes/no with a detail
+# string the recipe surfaces in advice.
+
+
+def _device_class_areas(
+    ctx: DetectorContext,
+    device_classes: frozenset[str],
+) -> tuple[int, int]:
+    """Return (n_areas_with_class, n_areas_total).
+
+    Counts an area as "has class" when at least one entity in that
+    area has `attributes.device_class ∈ device_classes`. Used by the
+    motion/temp/contact coverage predicates.
+    """
+    try:
+        from homeassistant.helpers import area_registry as ar
+        from homeassistant.helpers import entity_registry as er
+    except ImportError:
+        return (0, 0)
+    e_reg = er.async_get(ctx.hass)
+    a_reg = ar.async_get(ctx.hass)
+    areas_with = set()
+    all_areas = {a.area_id for a in a_reg.async_list_areas()}
+    for ent in e_reg.entities.values():
+        if ent.disabled_by or ent.hidden_by:
+            continue
+        if not ent.area_id:
+            continue
+        state = ctx.hass.states.get(ent.entity_id)
+        if state is None:
+            continue
+        dc = state.attributes.get("device_class")
+        if isinstance(dc, str) and dc.lower() in device_classes:
+            areas_with.add(ent.area_id)
+    return (len(areas_with), len(all_areas))
+
+
+_MOTION_CLASSES: frozenset[str] = frozenset(
+    {"motion", "occupancy", "presence"}
+)
+_TEMP_CLASSES: frozenset[str] = frozenset({"temperature"})
+_CONTACT_CLASSES: frozenset[str] = frozenset(
+    {"door", "window", "opening", "garage_door"}
+)
+_LUX_CLASSES: frozenset[str] = frozenset({"illuminance"})
+
+
+def _has_motion_coverage(ctx: DetectorContext) -> tuple[bool, str]:
+    """≥ 1/3 of areas have at least one motion-class sensor."""
+    have, total = _device_class_areas(ctx, _MOTION_CLASSES)
+    if total == 0:
+        return (False, "no areas defined")
+    return (have * 3 >= total, f"{have}/{total} areas with motion sensor")
+
+
+def _has_temp_coverage(ctx: DetectorContext) -> tuple[bool, str]:
+    """≥ 1/2 of areas have at least one temperature sensor."""
+    have, total = _device_class_areas(ctx, _TEMP_CLASSES)
+    if total == 0:
+        return (False, "no areas defined")
+    return (have * 2 >= total, f"{have}/{total} areas with temp sensor")
+
+
+def _has_multi_temp_per_class(ctx: DetectorContext) -> tuple[bool, str]:
+    """Location-proposal + physical-device-link need ≥ 2 tagged
+    siblings per device_class. Check at least one class meets that."""
+    try:
+        from homeassistant.helpers import entity_registry as er
+    except ImportError:
+        return (False, "registry not available")
+    e_reg = er.async_get(ctx.hass)
+    by_class: dict[str, set[str]] = {}
+    for ent in e_reg.entities.values():
+        if ent.disabled_by or ent.hidden_by:
+            continue
+        if not ent.area_id:
+            continue
+        state = ctx.hass.states.get(ent.entity_id)
+        if state is None:
+            continue
+        dc = state.attributes.get("device_class")
+        if isinstance(dc, str):
+            by_class.setdefault(dc.lower(), set()).add(ent.area_id)
+    qualifying = [c for c, areas in by_class.items() if len(areas) >= 2]
+    return (
+        len(qualifying) > 0,
+        f"{len(qualifying)} device_class(es) with ≥2 tagged entities "
+        f"({', '.join(qualifying[:3])}{'…' if len(qualifying) > 3 else ''})",
+    )
+
+
+def _has_event_entities(ctx: DetectorContext) -> tuple[bool, str]:
+    """ButtonPressHabitDetector needs `event.*` entities (HA native
+    button platform). Most Zigbee/Z-Wave button vendors expose these
+    via ZHA / Z-Wave JS / deconz / zigbee2mqtt."""
+    n = 0
+    for s in ctx.hass.states.async_all():
+        if s.entity_id.startswith("event."):
+            n += 1
+    return (n > 0, f"{n} event.* entities (smart buttons)")
+
+
+def _has_weather_integration(ctx: DetectorContext) -> tuple[bool, str]:
+    """WeatherCorrelationDetector needs at least one weather entity."""
+    n = 0
+    for s in ctx.hass.states.async_all():
+        if s.entity_id.startswith("weather."):
+            n += 1
+    return (n > 0, f"{n} weather.* entities")
+
+
+def _has_active_automations(ctx: DetectorContext) -> tuple[bool, str]:
+    """AutomationAuditDetector needs existing automations to audit."""
+    n = 0
+    for s in ctx.hass.states.async_all():
+        if s.entity_id.startswith("automation."):
+            n += 1
+    return (n > 0, f"{n} automations defined")
+
+
+def _has_recorder_7d(ctx: DetectorContext) -> tuple[bool, str]:
+    """Frequency anomaly + state shift need ≥ 7 days of history."""
+    return _has_recorder_retention(ctx, min_days=7)
+
+
+def _has_recorder_14d(ctx: DetectorContext) -> tuple[bool, str]:
+    """Seasonality detection needs ≥ 14 days for the weekly pattern."""
+    return _has_recorder_retention(ctx, min_days=14)
+
+
 def _has_user_context_events(ctx: DetectorContext) -> tuple[bool, str]:
     """Buffer must contain at least some events that look manual.
     "Manual" = either (a) HA dashboard/app click (context_user_id set)
@@ -426,6 +557,235 @@ _RECIPES: list[dict[str, Any]] = [
                 "GREAT",
                 [_has_goals_configured, _has_mobile_app_gps, _has_charging_sensor],
                 "Every goal type (commute + sleep) has the data source it needs.",
+            ),
+        ],
+    },
+    # v1.12.5 — Recipes for the v1.6+ research-backed detectors
+    # that weren't covered by the original four. Each focuses on
+    # the data dependency that actually limits the detector, not
+    # on per-detector duplication.
+    {
+        "name": "Research-backed pattern detection",
+        "feature_key": "research_pattern",
+        "next_step": (
+            "increase recorder retention to ≥ 14 days "
+            "(recorder.purge_keep_days in configuration.yaml)"
+        ),
+        "setup_url": "https://www.home-assistant.io/integrations/recorder/#purge_keep_days",
+        "setup_url_label": "Recorder docs",
+        "setup_url_external": True,
+        "scenarios": [
+            "FrequencyAnomalyDetector (v0.9) flags entities firing "
+            "unusually often/rarely vs their own 7-day baseline",
+            "StateShiftDetector (v1.8.2) flags 'your routine shifted "
+            "on YYYY-MM-DD' so other detectors don't treat the new "
+            "pattern as anomalous",
+            "SeasonalityDetector (v0.9) catches weekly cycles "
+            "(weekday vs weekend) — needs the longer window",
+            "LaggedCorrelationDetector (v0.9) + v1.9.1 transfer-entropy "
+            "direction check — needs enough events per pair",
+        ],
+        "tiers": [
+            (
+                "USELESS",
+                [_has_recorder_7d],
+                "Recorder retention is below 7 days. The newer "
+                "detectors (FrequencyAnomaly, StateShift, Seasonality, "
+                "LaggedCorrelation) need that baseline to distinguish "
+                "real patterns from noise. Bump "
+                "`recorder.purge_keep_days` in configuration.yaml.",
+            ),
+            (
+                "LIMITED",
+                [_has_recorder_7d],
+                "7+ days of recorder history — FrequencyAnomaly + "
+                "StateShift can fire on entities with ≥30 events.",
+            ),
+            (
+                "GOOD",
+                [_has_recorder_14d],
+                "14+ days — Seasonality detection (weekly cycle) "
+                "becomes reliable.",
+            ),
+            (
+                "GREAT",
+                [_has_recorder_14d, _has_user_context_events],
+                "14+ days of history AND interactive event data — "
+                "every research-backed detector has enough signal to "
+                "calibrate properly.",
+            ),
+        ],
+    },
+    {
+        "name": "Cross-integration dedup + room inference",
+        "feature_key": "cross_integration",
+        "next_step": (
+            "tag at least 2 entities of the same device_class to an Area "
+            "(so siblings can be compared)"
+        ),
+        "setup_url": "/config/devices/dashboard",
+        "setup_url_label": "Assign devices to areas",
+        "setup_url_external": False,
+        "scenarios": [
+            "PhysicalDeviceLinkDetector (v1.11.0) — spots entities "
+            "from different integrations that are actually the same "
+            "physical device (Tuya Cloud + BLE; Govee Cloud + BLE; "
+            "Hue Bridge + Matter)",
+            "LocationProposalDetector (v1.11.5) — suggests an area "
+            "for unassigned sensors based on correlation with "
+            "already-tagged siblings",
+            "🔗 dedup pill in bulk-area-assign dialog",
+            "🆔 + 👆 + 📡 Find My Device buttons surface the right "
+            "action for each entity (v1.10–v1.12)",
+        ],
+        "tiers": [
+            (
+                "USELESS",
+                [_has_multi_temp_per_class],
+                "No device_class has ≥ 2 tagged sibling entities. "
+                "Both detectors need siblings to compare against — "
+                "tag at least 2 temperature (or humidity, illuminance, "
+                "etc.) sensors per area for the correlation math to "
+                "have anything to work with.",
+            ),
+            (
+                "LIMITED",
+                [_has_multi_temp_per_class],
+                "Some siblings tagged — Cross-integration dedup + "
+                "LocationProposal can fire for those device_classes.",
+            ),
+            (
+                "GOOD",
+                [_has_multi_temp_per_class, _has_recorder_7d],
+                "Siblings tagged + 7 days of history — Pearson "
+                "correlation has enough signal to be reliable.",
+            ),
+            (
+                "GREAT",
+                [
+                    _has_multi_temp_per_class,
+                    _has_recorder_7d,
+                    _has_area_coverage,
+                ],
+                "Sibling tagging + history + broad area coverage — "
+                "LocationProposal can rank candidates across many areas "
+                "and PhysicalDeviceLink catches cross-integration dupes "
+                "across the install.",
+            ),
+        ],
+    },
+    {
+        "name": "Per-area hardware coverage",
+        "feature_key": "hardware_coverage",
+        "next_step": (
+            "add motion + temperature sensors to areas that lack them — "
+            "see Settings → Devices for current coverage"
+        ),
+        "setup_url": "/config/devices/dashboard",
+        "setup_url_label": "Review device coverage",
+        "setup_url_external": False,
+        "scenarios": [
+            "Motion sensors unlock cooccurrence detection + "
+            "presence inference + 'lights on with nobody home' "
+            "advice",
+            "Temperature sensors unlock cross-room comparisons + "
+            "HVAC waste detection + LocationProposal accuracy",
+            "Smart button entities (event.*) unlock "
+            "ButtonPressHabitDetector — many habits become "
+            "physically observable",
+            "Weather integration unlocks WeatherCorrelationDetector — "
+            "'you turn on heating when outdoor temp drops below X'",
+            "Existing automations unlock AutomationAuditDetector — "
+            "audits each for redundancy, drift, conflicts",
+        ],
+        "tiers": [
+            (
+                "USELESS",
+                [_has_motion_coverage],
+                "Fewer than 1/3 of areas have a motion / occupancy "
+                "/ presence sensor. Many of the inference detectors "
+                "depend on knowing whether a room is occupied — "
+                "without that signal, lights-on-with-nobody-home and "
+                "presence-pattern insights can't fire reliably.",
+            ),
+            (
+                "LIMITED",
+                [_has_motion_coverage],
+                "Some areas have motion sensors — presence detection "
+                "fires for those rooms. Adding temp sensors widens the "
+                "cross-room comparison surface.",
+            ),
+            (
+                "GOOD",
+                [_has_motion_coverage, _has_temp_coverage],
+                "Motion + temperature in most areas — the bulk of the "
+                "detector library has the signal it needs.",
+            ),
+            (
+                "GREAT",
+                [
+                    _has_motion_coverage,
+                    _has_temp_coverage,
+                    _has_event_entities,
+                    _has_weather_integration,
+                ],
+                "Motion + temp + smart buttons + weather — every "
+                "currently-shipped detector has its preferred data "
+                "source. ButtonPressHabit fires on physical buttons; "
+                "WeatherCorrelation links thermostat / blind activity "
+                "to outdoor conditions.",
+            ),
+        ],
+    },
+    {
+        "name": "Automation audit",
+        "feature_key": "automation_audit",
+        "next_step": (
+            "create at least one HA automation — AutomationAuditDetector "
+            "audits each for drift, redundancy, conflicts"
+        ),
+        "setup_url": "/config/automation",
+        "setup_url_label": "Open automation editor",
+        "setup_url_external": False,
+        "scenarios": [
+            "AutomationAuditDetector flags 8 finding-classes: drift, "
+            "redundant triggers, cross-integration coupling, unused "
+            "targets, conflicting schedules, etc.",
+            "Deterministic 'fix' YAML for half the findings — no LLM "
+            "needed",
+            "Optional LLM refinement for the harder cases",
+            "Round-robin audit so each automation gets attention over "
+            "successive scans (v1.7.2)",
+        ],
+        "tiers": [
+            (
+                "USELESS",
+                [_has_active_automations],
+                "No automations defined yet. AutomationAuditDetector "
+                "has nothing to audit. As you create automations, "
+                "this section will start firing.",
+            ),
+            (
+                "LIMITED",
+                [_has_active_automations],
+                "Automations present — audit can fire on each.",
+            ),
+            (
+                "GOOD",
+                [_has_active_automations, _has_recorder_7d],
+                "Automations + 7d history — drift detection becomes "
+                "reliable (comparing intended trigger frequency vs "
+                "actual recent firings).",
+            ),
+            (
+                "GREAT",
+                [
+                    _has_active_automations,
+                    _has_recorder_14d,
+                    _has_user_context_events,
+                ],
+                "Automations + 14d history + interactive events — the "
+                "audit detector has every signal it can use.",
             ),
         ],
     },
