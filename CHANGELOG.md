@@ -4,6 +4,76 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+## [1.10.3] — 2026-05-17
+
+### Added — Find My Device, phase A.5 (static-signal dedup hint)
+
+Two HA entities from different integrations can be the SAME
+physical device (Tuya cloud + BLE scanner both seeing the same
+plug; Govee Cloud + Govee BLE; Hue Bridge + Matter bridging the
+same Hue light). HA's data model treats them as separate
+`device_id`s — bulk-area-assign asks the user to assign area
+twice, the future 🔆 button will flash "two lights" when one
+physical thing exists, our cohort dedup gets confused.
+
+This release adds **static-signal physical-device dedup**: cheap,
+deterministic, no correlation math, no waiting period. Five
+signals checked per pair:
+
+| Signal | Where it comes from | Confidence |
+|---|---|---|
+| Shared MAC | `device.connections[("mac", ...)]` | 0.95 |
+| Shared Bluetooth address | `device.connections[("bluetooth", ...)]` | 0.95 |
+| Shared Zigbee IEEE | `device.connections[("zigbee", ...)]` | 0.95 |
+| Identifier overlap (Matter bridging) | `device.identifiers` set intersection | 0.90 |
+| Shared IP / host | `state.attributes.ip_address` or `host` | 0.75 |
+| Manufacturer + model + via_device | weak fallback when nothing else matches | 0.55 |
+
+#### `lib/dedup_signals.py`
+
+Pure function: `find_dedup_candidates(entity_id, *, entity_records,
+device_records, state_attributes, max_candidates=5) ->
+list[DedupCandidate]`. Returns ranked candidates above
+`EMIT_THRESHOLD=0.5`. Same-`device_id` pairs are explicitly
+excluded — HA already treats them as one device.
+
+`mfr_model_via` requires `via_device_id` to be set on BOTH; this
+prevents flagging every pair of identical Hue bulbs as "same
+physical device" (they only differ in `via_device_id` when one
+is bridged via Matter and the other via Hue).
+
+#### WS endpoint enrichment
+
+The existing `home_insights/identify_capability` response now
+includes a `same_as: [{entity_id, reason, confidence}]` field per
+entity. Card-side rendering lands in card v1.7.0.
+
+#### Tests
+
+`tests/test_lib_dedup_signals.py` — 11 cases covering each
+signal, case-insensitive MAC matching, identifier overlap (Matter
+bridging scenario), the same-device-id exclusion, the
+via_device_id requirement, max-candidates cap, and sort order.
+
+#### What this does NOT do
+
+**Correlation-based** dedup ("two temp sensors with r=0.99 over
+7 days are the same physical sensor") is the v1.11 follow-up.
+Static signals catch ~50–70 % of duplicates today; the rest need
+event-stream correlation that this lib intentionally doesn't
+touch.
+
+### Roadmap progress
+
+- v1.10 Phase A backend (identify + name_quality) ✅
+- v1.10.1 card sort + tier badges ✅
+- v1.10.2 card 🔆 identify button ✅
+- **v1.10.3 dedup hint (static signals)** ✅ (THIS)
+- v1.10.4 / card v1.7.0 — render 🔗 dedup pill (next)
+- v1.10 Phase B perturbation touch-test (v1.10.5+)
+- v1.11 correlation-based dedup + location inference
+- v1.12 BLE live-find
+
 ## [1.10.2] — 2026-05-17
 
 ### Changed
