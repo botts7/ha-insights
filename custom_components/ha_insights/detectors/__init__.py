@@ -34,6 +34,47 @@ _LOGGER = logging.getLogger(__name__)
 # it so the rest of the scan + the event loop can proceed.
 _DETECTOR_TIMEOUT_SEC = 30.0
 
+# v1.12.10 — Confidence floor for "filler" suppression. Insights with
+# `conflicts_with` (already automated) OR `_timing_assessment.timing_class
+# == "device_likely"` (managed by device's own logic) below this
+# confidence are pure noise: the user can't apply them (the action is
+# already covered) and can't trust the pattern (low confidence).
+# Real-install testing 2026-05-17 produced ~5 such filler insights at
+# 10-15% confidence on every scan. Caught alongside the v1.12.9
+# state_shift false positive fix.
+_FILLER_INSIGHT_MAX_CONFIDENCE: float = 0.50
+
+
+def _is_low_confidence_filler(insight: object) -> bool:
+    """Return True when an insight should be dropped as filler.
+
+    The user explicitly tested v1.12.8 and reported these filler
+    types in their panel:
+      - schedule at 10% on switch.main_room_led_bar with
+        `🔁 already automated` pill
+      - streak at 11% on light.back_garden_lights with
+        `🤖 device-managed` pill
+      - streak at 10% on switch.inverter with `🤖 device-managed`
+
+    None had action value: the pattern is either already automated
+    or device-internal logic, AND the detector wasn't even confident
+    in the pattern itself. Drop them rather than make the user
+    filter them out by hand.
+    """
+    confidence = getattr(insight, "confidence", 1.0)
+    if confidence >= _FILLER_INSIGHT_MAX_CONFIDENCE:
+        return False  # confidence is good enough on its own
+    # Shadowed by existing automation?
+    conflicts = getattr(insight, "conflicts_with", ())
+    if conflicts:
+        return True
+    # Device-managed timing?
+    payload = getattr(insight, "payload", None) or {}
+    timing = payload.get("_timing_assessment") if isinstance(payload, dict) else None
+    if isinstance(timing, dict) and timing.get("timing_class") == "device_likely":
+        return True
+    return False
+
 
 class _FrozenBufferView:
     """Read-only iterable view over a buffer snapshot.
@@ -555,6 +596,12 @@ async def run_all_detectors(
                         conflicts_with=tuple(conflicts),
                         title=strip_already_automated_cta(insight.title),
                     )
+
+            # v1.12.10 — drop low-confidence filler before persisting.
+            # See `_is_low_confidence_filler` docstring for rationale.
+            if _is_low_confidence_filler(insight):
+                continue
+
             await store.add_insight(insight)
             emitted_ids.add(insight.id)
             added += 1

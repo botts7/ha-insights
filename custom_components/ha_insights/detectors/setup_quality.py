@@ -361,14 +361,25 @@ _RECIPES: list[dict[str, Any]] = [
         # insight payload. Surfaced in the insight title.
         "next_step": "install the Home Assistant Companion App on your phone",
         # Deep-link the user lands on when they click the "Set this
-        # up" button on the setup-guide card. Two flavours:
+        # up" / "Manage" button on the setup-guide card. Two flavours:
         #   - internal HA path → opens in same tab via <a href>
         #   - external URL     → external_url=True opens in new tab
         # Use `None` for features whose remedy is behavioural (no URL
         # is meaningful — e.g. "use HA for a week").
-        "setup_url": "https://companion.home-assistant.io/",
-        "setup_url_label": "Get the Companion App",
-        "setup_url_external": True,
+        #
+        # **v1.12.10 fix**: was pointing to
+        # companion.home-assistant.io marketing site, only useful
+        # for a user who DOESN'T have the app yet. At GOOD/GREAT
+        # tier the user already has it and the button became dead
+        # weight. The mobile_app integration page works for both
+        # cases:
+        #   - User without app → opens HA integrations dashboard
+        #     to add it
+        #   - User with app    → opens existing mobile_app
+        #     integration's device list to manage / re-pair
+        "setup_url": "/config/integrations/integration/mobile_app",
+        "setup_url_label": "Manage mobile devices",
+        "setup_url_external": False,
         # Concrete scenarios this feature would unlock at GOOD tier.
         # The user sees these in the insight explanation so they
         # know WHY it's worth fixing.
@@ -470,9 +481,14 @@ _RECIPES: list[dict[str, Any]] = [
             "use the mobile app; anything user-initiated rather than "
             "scheduled gets recorded as a manual habit"
         ),
-        # No URL — the remedy is behavioural.
-        "setup_url": None,
-        "setup_url_label": None,
+        # **v1.12.10 fix**: previously None because the remedy is
+        # behavioural ("just use HA for a week"). User reported the
+        # Manage button felt missing — without a link, the user has
+        # nowhere to GO to watch this feature work. Link to the HA
+        # Insights panel itself so they can watch manual_habit
+        # insights surface as they accumulate.
+        "setup_url": "/ha-insights",
+        "setup_url_label": "View HA Insights panel",
         "setup_url_external": False,
         "scenarios": [
             "Spot 'you toggle the lounge lamp manually at 18:42 on weeknights'",
