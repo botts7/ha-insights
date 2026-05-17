@@ -4082,10 +4082,8 @@ async def ws_list_managed_devices(
         connection.send_result(msg["id"], {"devices": []})
         return
     try:
-        from homeassistant.helpers import (
-            device_registry as dr,
-            entity_registry as er,
-        )
+        from homeassistant.helpers import device_registry as dr
+        from homeassistant.helpers import entity_registry as er
 
         d_reg = dr.async_get(hass)
         e_reg = er.async_get(hass)

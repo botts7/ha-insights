@@ -7,7 +7,6 @@ from custom_components.ha_insights.lib.managed_externally import (
     is_suppressed,
 )
 
-
 # ---------- collect_referenced_entities ----------------------------------
 
 
