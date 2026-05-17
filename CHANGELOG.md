@@ -4,6 +4,44 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+## [1.8.1] — 2026-05-17
+
+### Changed
+
+- **FrequencyAnomalyDetector now uses changepoint-aware baseline.**
+  Wires v1.8.0's `lib/changepoint_detection.py` into the detector
+  so a routine that shifted within the 13-day baseline window no
+  longer poisons the baseline mean.
+
+  **The problem**: an entity that used to fire 5/day for 8 days
+  then shifted to 25/day for the past 5 days has an unadjusted
+  baseline of (5×8 + 25×5)/13 ≈ 12.7/day. Today firing 100 times
+  reads as ~8× — barely above the alert threshold. But the
+  ACTUAL current normal is 25/day, so today's 100 is really a
+  4× spike against the post-shift baseline, not 8× against the
+  averaged-pre-and-post baseline.
+
+  **The fix**: per-entity daily-count series fed to
+  `detect_changepoints`. If a recent changepoint (2-10 days
+  ago) is found, the baseline is recomputed using only
+  post-changepoint days. Title and payload reflect this:
+  - Title: `"... ~25.0/day NEW baseline since 2026-05-12, 4.0x..."`
+  - Payload: `_baseline_changepoint: {detected_at, magnitude}`
+
+  Healthy stable signals are untouched — the changepoint detector
+  returns empty for them. Performance impact: one
+  `detect_changepoints` call per candidate entity (cheap; per
+  v1.8.0 benchmarks).
+
+### Roadmap progress
+
+- v1.8.0 — changepoint lib ✅
+- **v1.8.1 — wire into FrequencyAnomalyDetector** ✅ (THIS)
+- v1.8.2 — new StateShiftDetector (next)
+- v1.9 — transfer entropy
+- v1.10 — survival analysis
+- v1.11 — sequence mining
+
 ## [1.8.0] — 2026-05-17
 
 ### Added

@@ -16,15 +16,74 @@ from __future__ import annotations
 
 import logging
 from collections import defaultdict
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 from homeassistant.util import dt as dt_util
 
 from ..insight import Insight, InsightKind
+from ..lib.changepoint_detection import (
+    ChangepointAssessment,
+    detect_changepoints,
+)
 from ..lib.event_filters import is_unavailable_transition
 from .base import Detector, DetectorContext, Maturity, register_detector
 
 _LOGGER = logging.getLogger(__name__)
+
+# v1.8.1: per-candidate tuple shape. Six fields: ratio, entity_id,
+# today_count, baseline_per_day (post-changepoint when applicable),
+# baseline_truncated_from (date of detected shift, or None), and
+# shift_magnitude (0.0 when no shift). Kept as a tuple for cheap
+# sort by ratio at the cap step.
+_Candidate = tuple[float, str, int, float, "date | None", float]
+
+
+def _build_count_series(
+    bucket: dict[date, int],
+    today: date,
+    days: int,
+) -> tuple[list[datetime], list[float]] | None:
+    """Materialize a contiguous (timestamps, values) series for
+    changepoint detection.
+
+    Missing days are filled with 0 (entity didn't fire that day).
+    Returns None when the series is too short to assess (< 6 days)
+    or completely flat (all zeros — silent entity isn't a "shift").
+    """
+    if days < 6:
+        return None
+    timestamps: list[datetime] = []
+    values: list[float] = []
+    for offset in range(days, 0, -1):
+        d = today - timedelta(days=offset)
+        timestamps.append(datetime(d.year, d.month, d.day, tzinfo=UTC))
+        values.append(float(bucket.get(d, 0)))
+    if sum(values) == 0:
+        return None
+    return timestamps, values
+
+
+def _detect_recent_changepoint(
+    timestamps: list[datetime],
+    values: list[float],
+) -> list[ChangepointAssessment]:
+    """Wrap detect_changepoints with the recency filter.
+
+    Only shifts that landed at least 2 days ago (so we have post-shift
+    data to recompute against) and within the last 10 days (older
+    shifts are stable enough that the 13-day mean is roughly correct)
+    are considered. Narrows the false-positive surface.
+    """
+    if not timestamps:
+        return []
+    raw = detect_changepoints(timestamps, values)
+    today = timestamps[-1].date()
+    out: list[ChangepointAssessment] = []
+    for cp in raw:
+        days_ago = (today - cp.detected_at.date()).days
+        if 2 <= days_ago <= 10:
+            out.append(cp)
+    return out
 
 # Domain whitelist mirrors OrphanDeviceDetector — high-cardinality status
 # entities (sun/scene/automation) skew the math and aren't useful spikes
@@ -126,6 +185,14 @@ class FrequencyAnomalyDetector(Detector):
         # source dominates the baseline so we can scale below.
         baseline_recorder_count: dict[str, int] = defaultdict(int)
         baseline_live_count: dict[str, int] = defaultdict(int)
+        # v1.8.1: per-entity per-day count series for changepoint
+        # detection. Without this, a routine that shifted 4 days ago
+        # has its baseline mean averaged across pre- AND post-shift
+        # days, hiding the actual baseline. Bucket key is the local
+        # date of the event (HA-local midnight).
+        baseline_daily_counts: dict[str, dict[date, int]] = defaultdict(
+            lambda: defaultdict(int)
+        )
 
         for ev in events:
             # v1.5.16 (extracted to lib/event_filters.py): skip
@@ -143,6 +210,10 @@ class FrequencyAnomalyDetector(Detector):
                     baseline_recorder_count[ev.entity_id] += 1
                 else:
                     baseline_live_count[ev.entity_id] += 1
+                # v1.8.1: per-day bucket for changepoint detection.
+                # Bucket by HA-local date (matches today_start_local).
+                local_ts = dt_util.as_local(ev.timestamp)
+                baseline_daily_counts[ev.entity_id][local_ts.date()] += 1
 
         baseline_days = self.LOOKBACK_DAYS - 1
         # First pass: collect candidates per (device_id, entity) so we can
@@ -151,7 +222,9 @@ class FrequencyAnomalyDetector(Detector):
         # all fire 10-30x more than baseline. That's "you used the car
         # today", not 10 stuck loops. Group by device_id and keep only
         # the entity with the highest ratio per device.
-        candidates: list[tuple[float, str, int, float]] = []  # (ratio, eid, today, baseline)
+        # v1.8.1: candidate tuple gained baseline_truncated_from + shift
+        # magnitude fields to surface changepoint-aware baseline.
+        candidates: list[_Candidate] = []
         for entity_id, today_count in today_counts.items():
             domain = entity_id.split(".", 1)[0] if "." in entity_id else ""
             if domain not in _DEFAULT_DOMAINS:
@@ -183,10 +256,63 @@ class FrequencyAnomalyDetector(Detector):
             baseline_per_day = adjusted_baseline / baseline_days
             if baseline_per_day <= 0:
                 continue
-            ratio = today_count / baseline_per_day
+            # v1.8.1: changepoint-aware baseline. If the entity's daily
+            # count series shows a recent shift (e.g. user changed jobs
+            # → morning activity moved later → entity fires count
+            # changed), the 13-day baseline mean averages pre- AND
+            # post-shift days, masking the actual current baseline.
+            # When a recent changepoint is detected, recompute the
+            # baseline using only post-changepoint days.
+            #
+            # Recent = the changepoint is at least 2 days back (so we
+            # have >=2 days of post-shift baseline) and within the
+            # last 10 days (older shifts are stable enough that the
+            # 13-day mean is roughly correct). The narrow window
+            # avoids correcting every minor wobble.
+            baseline_truncated_from: date | None = None
+            shift_magnitude: float = 0.0
+            cp_baseline_per_day = baseline_per_day
+            cp_series = _build_count_series(
+                baseline_daily_counts.get(entity_id, {}),
+                today_start_local.date(),
+                baseline_days,
+            )
+            if cp_series is not None:
+                cp_timestamps, cp_values = cp_series
+                changepoints = _detect_recent_changepoint(
+                    cp_timestamps, cp_values
+                )
+                if changepoints:
+                    cp = changepoints[-1]  # most recent shift
+                    cp_date = cp.detected_at.date()
+                    post_shift_days = [
+                        d for d in cp_timestamps if d.date() >= cp_date
+                    ]
+                    if len(post_shift_days) >= 2:
+                        post_shift_counts = [
+                            baseline_daily_counts.get(entity_id, {}).get(
+                                d.date(), 0
+                            )
+                            for d in post_shift_days
+                        ]
+                        post_shift_mean = sum(post_shift_counts) / len(
+                            post_shift_counts
+                        )
+                        if post_shift_mean > 0:
+                            cp_baseline_per_day = post_shift_mean
+                            baseline_truncated_from = cp_date
+                            shift_magnitude = cp.magnitude
+            ratio = today_count / cp_baseline_per_day
             if ratio < self.RATIO_THRESHOLD:
                 continue
-            candidates.append((ratio, entity_id, today_count, baseline_per_day))
+            candidates.append((
+                ratio,
+                entity_id,
+                today_count,
+                cp_baseline_per_day,
+                baseline_truncated_from,
+                shift_magnitude,
+            ))
 
         # v1.4: group fan-out filter. When a group entity (e.g.
         # `light.living_room` containing `light.lamp_a` + `light.lamp_b`)
@@ -206,10 +332,10 @@ class FrequencyAnomalyDetector(Detector):
             for parent_eid, members in ctx.container_to_members.items():
                 for member in members:
                     parent_of[member].add(parent_eid)
-            filtered: list[tuple[float, str, int, float]] = []
+            filtered: list[_Candidate] = []
             dropped_for_fanout = 0
             for cand in candidates:
-                _ratio, eid, _today, _baseline = cand
+                eid = cand[1]
                 parents = parent_of.get(eid, set())
                 # Drop if ANY parent container is also flagged — that
                 # parent gets the user's attention; the member is
@@ -236,10 +362,10 @@ class FrequencyAnomalyDetector(Detector):
                 return ctx.hierarchy.device_of.get(eid)
             return ctx.device_id_by_entity.get(eid)
 
-        per_device_best: dict[str, tuple[float, str, int, float]] = {}
-        no_device: list[tuple[float, str, int, float]] = []
+        per_device_best: dict[str, _Candidate] = {}
+        no_device: list[_Candidate] = []
         for cand in candidates:
-            ratio, eid, _today, _baseline = cand
+            eid = cand[1]
             device_id = _device_of(eid)
             if device_id is None:
                 no_device.append(cand)
@@ -257,11 +383,20 @@ class FrequencyAnomalyDetector(Detector):
         all_candidates = all_candidates[: self.MAX_INSIGHTS_PER_SCAN]
 
         insights: list[Insight] = []
-        for ratio, entity_id, today_count, baseline_per_day in all_candidates:
+        for (
+            ratio,
+            entity_id,
+            today_count,
+            baseline_per_day,
+            baseline_truncated_from,
+            shift_magnitude,
+        ) in all_candidates:
             insights.append(
                 self._build_insight(
                     entity_id=entity_id,
                     today_count=today_count,
+                    baseline_truncated_from=baseline_truncated_from,
+                    shift_magnitude=shift_magnitude,
                     baseline_per_day=baseline_per_day,
                     ratio=ratio,
                     today_date=today_start_local.date().isoformat(),
@@ -277,6 +412,8 @@ class FrequencyAnomalyDetector(Detector):
         baseline_per_day: float,
         ratio: float,
         today_date: str,
+        baseline_truncated_from: date | None = None,
+        shift_magnitude: float = 0.0,
     ) -> Insight:
         # Confidence ramps from 0.6 at 3x to 1.0 at 10x and beyond. Anything
         # below 3x has already been filtered out above; we just clamp.
@@ -285,11 +422,24 @@ class FrequencyAnomalyDetector(Detector):
             3,
         )
 
-        title = (
-            f"{entity_id} fired {today_count} times today "
-            f"(~{baseline_per_day:.1f}/day baseline, {ratio:.1f}x). "
-            "Stuck loop, manual override, or genuine event burst?"
-        )
+        # v1.8.1: title acknowledges when the baseline was recomputed
+        # from a post-shift segment. Without this hint, a user seeing
+        # "fired 30 times today vs ~3/day baseline" might think the
+        # detector is broken when they know they used to fire ~30/day
+        # before they changed jobs.
+        if baseline_truncated_from is not None:
+            title = (
+                f"{entity_id} fired {today_count} times today "
+                f"(~{baseline_per_day:.1f}/day NEW baseline since "
+                f"{baseline_truncated_from.isoformat()}, {ratio:.1f}x). "
+                "Stuck loop relative to the new pattern?"
+            )
+        else:
+            title = (
+                f"{entity_id} fired {today_count} times today "
+                f"(~{baseline_per_day:.1f}/day baseline, {ratio:.1f}x). "
+                "Stuck loop, manual override, or genuine event burst?"
+            )
 
         fingerprint = {
             "entity_id": entity_id,
@@ -302,12 +452,20 @@ class FrequencyAnomalyDetector(Detector):
         # Card payload: a 48h history graph centered on the spike. Anomalies
         # rarely have a one-shot apply-able fix — the user reads the chart
         # and decides.
-        payload = {
+        payload: dict[str, object] = {
             "type": "history-graph",
             "title": f"Activity spike: {entity_id}",
             "entities": [entity_id],
             "hours_to_show": 48,
         }
+        # v1.8.1: changepoint metadata for the card. Free-form additive
+        # field (no schema migration). Card can render a "📈 baseline
+        # shifted on YYYY-MM-DD" annotation when present.
+        if baseline_truncated_from is not None:
+            payload["_baseline_changepoint"] = {
+                "detected_at": baseline_truncated_from.isoformat(),
+                "magnitude": round(shift_magnitude, 2),
+            }
 
         return Insight(
             id=Insight.compute_id(InsightKind.ANOMALY, fingerprint),
