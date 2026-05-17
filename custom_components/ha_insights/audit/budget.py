@@ -41,7 +41,7 @@ class MonthlySpend:
 
 
 async def estimate_month_to_date(
-    store: "HaInsightsStore", now: datetime | None = None
+    store: HaInsightsStore, now: datetime | None = None
 ) -> MonthlySpend:
     """Sum outbound_calls for the current month, convert to USD."""
     if now is None:
@@ -54,7 +54,7 @@ async def estimate_month_to_date(
     bytes_total = 0
     call_count = 0
     try:
-        async with store._c.execute(  # noqa: SLF001 — intentional
+        async with store._c.execute(
             "SELECT COALESCE(SUM(bytes_sent), 0) AS bs, "
             "COALESCE(SUM(bytes_received), 0) AS br, "
             "COUNT(*) AS n "
@@ -65,7 +65,7 @@ async def estimate_month_to_date(
             if row is not None:
                 bytes_total = int(row["bs"]) + int(row["br"])
                 call_count = int(row["n"])
-    except Exception as err:  # noqa: BLE001
+    except Exception as err:
         _LOGGER.debug("budget: month-to-date query failed: %s", err)
 
     estimated_tokens = bytes_total / _BYTES_PER_TOKEN_ROUGH

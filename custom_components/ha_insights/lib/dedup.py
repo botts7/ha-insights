@@ -28,7 +28,8 @@ from __future__ import annotations
 
 import re as _re
 from collections import defaultdict
-from typing import Any, Mapping
+from collections.abc import Mapping
+from typing import Any
 
 
 def normalize_title_for_dedup(

@@ -24,6 +24,24 @@ extend-exclude = ["dev"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP", "ASYNC", "RUF"]
+# Style-only suppressions:
+#   RUF001/002/003 — "ambiguous unicode": we use ± → ° em-dash en-dash
+#     intentionally in comments, docstrings, and user-facing titles.
+#     They're more readable than ASCII equivalents and not actually
+#     ambiguous here (no homoglyph attacks on a Python repo).
+#   RUF046 — "unnecessary-cast-to-int": defensive `int(x)` where the
+#     analyzer thinks x is already int. Several call sites take user-
+#     supplied or recorder-derived values where the runtime type isn't
+#     always what the hint says; keeping the cast is cheaper than a
+#     per-line audit and avoids brittleness.
+ignore = ["RUF001", "RUF002", "RUF003", "RUF046"]
+
+[tool.ruff.lint.per-file-ignores]
+# Module docstring contains a markdown table mapping each HA-event gotcha
+# to its filter helper. Cells are naturally wide and the table would lose
+# its grid alignment if wrapped at 100 chars. Worth the file-scoped
+# exception to keep the documentation grokkable.
+"custom_components/ha_insights/lib/event_filters.py" = ["E501"]
 
 [tool.mypy]
 python_version = "3.13"

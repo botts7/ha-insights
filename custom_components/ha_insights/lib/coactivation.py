@@ -31,7 +31,7 @@ from __future__ import annotations
 from collections import defaultdict
 from collections.abc import Iterable
 from datetime import UTC, date, datetime, timedelta
-from typing import Any, Protocol
+from typing import Protocol
 
 
 class _EventLike(Protocol):

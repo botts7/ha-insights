@@ -181,7 +181,10 @@ def build_example_insights() -> list[Insight]:
                         "service": "notify.mobile_app_pixel_8",
                         "data": {
                             "title": "Battery won't make it to bedtime",
-                            "message": "📱 At 18:45 with current drain you'll be flat by 22:00. Plug in.",
+                            "message": (
+                                "📱 At 18:45 with current drain you'll be "
+                                "flat by 22:00. Plug in."
+                            ),
                         },
                     }
                 ],

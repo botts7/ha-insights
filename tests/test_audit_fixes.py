@@ -211,7 +211,7 @@ def test_trigger_time_drift_no_change_when_delta_rounds_to_zero():
             "text": "",
         }
     ]
-    refined, summaries = apply_deterministic_fixes(automation, observations)
+    refined, _summaries = apply_deterministic_fixes(automation, observations)
     assert refined is None
 
 

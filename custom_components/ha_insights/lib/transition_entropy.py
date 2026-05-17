@@ -1,4 +1,4 @@
-"""Transition-entropy assessment — does a pattern's cluster of events occur in predictable surrounding context?
+"""Transition entropy — does a pattern's cluster occur in predictable context?
 
 Fourth signal-grader sibling to timing / co-occurrence / persistence
 likelihood libs. Same architecture, same return-shape, same
@@ -67,11 +67,11 @@ from __future__ import annotations
 
 import statistics
 from dataclasses import asdict, dataclass
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 
-class TransitionEntropyClass(str, Enum):
+class TransitionEntropyClass(StrEnum):
     """Coarse classification of context-diversity distribution."""
 
     ROUTINE_CONTEXT = "routine_context"

@@ -22,7 +22,6 @@ from typing import TYPE_CHECKING, Any
 from ..audit.fixes import apply_deterministic_fixes
 from ..audit.packet import (
     AuditPacket,
-    Observation,
     build_audit_packet,
 )
 from ..audit.traces import (
@@ -133,7 +132,7 @@ class AutomationAuditDetector(Detector):
             recorder_keep_days = getattr(rec, "keep_days", None) or getattr(
                 rec, "_keep_days", None
             )
-        except Exception:  # noqa: BLE001
+        except Exception:
             recorder_keep_days = None
 
         if recorder_keep_days is not None:
@@ -229,7 +228,7 @@ class AutomationAuditDetector(Detector):
                 iot_class = getattr(integration, "iot_class", None)
                 if iot_class:
                     out[domain] = iot_class
-            except Exception:  # noqa: BLE001
+            except Exception:
                 # Custom integration not installed / manifest missing —
                 # skip and let the observation treat as unknown.
                 continue
@@ -273,7 +272,7 @@ class AutomationAuditDetector(Detector):
                 if rollups:
                     out[eid] = rollups
             return out
-        except Exception as err:  # noqa: BLE001
+        except Exception as err:
             _LOGGER.debug("audit: rollup lookup failed: %s", err)
             return {}
 
@@ -335,7 +334,7 @@ class AutomationAuditDetector(Detector):
                         include_applied=False,
                         include_snoozed=False,
                     )
-        except Exception as err:  # noqa: BLE001
+        except Exception as err:
             _LOGGER.debug(
                 "audit: failed to load recent insights for join: %s", err
             )
@@ -411,7 +410,7 @@ class AutomationAuditDetector(Detector):
                     sort_keys=False,
                     default_flow_style=False,
                 )
-            except Exception:  # noqa: BLE001
+            except Exception:
                 refined_yaml_str = ""
 
             # Build a full Apply-able automation payload. The card's

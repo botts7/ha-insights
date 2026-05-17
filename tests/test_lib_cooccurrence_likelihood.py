@@ -8,12 +8,13 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from custom_components.ha_insights.lib.cooccurrence_likelihood import (  # noqa: E402
+from datetime import UTC
+
+from custom_components.ha_insights.lib.cooccurrence_likelihood import (
     CooccurrenceClass,
     apply_to_confidence,
     assess_cooccurrence,
 )
-
 
 # ----- Sample-size guards -----
 
@@ -112,17 +113,19 @@ def test_compose_with_timing_likelihood() -> None:
     """The two libs share an apply_to_confidence signature so a
     detector can chain them: device-timer with isolated context →
     aggressive demotion (intended)."""
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
 
     from custom_components.ha_insights.lib.timing_likelihood import (
-        assess_timing,
         apply_to_confidence as timing_apply,
+    )
+    from custom_components.ha_insights.lib.timing_likelihood import (
+        assess_timing,
     )
 
     # Sub-second precision events across 10 days = device-likely (0.20)
     events = [
         datetime(2026, 5, 1, 17, 25, 0, 10_000 + i * 5_000,
-                 tzinfo=timezone.utc) + timedelta(days=i)
+                 tzinfo=UTC) + timedelta(days=i)
         for i in range(10)
     ]
     timing_a = assess_timing(events, iot_class="local_push")
@@ -151,7 +154,7 @@ if __name__ == "__main__":
             results.append((name, True, ""))
         except AssertionError as e:
             results.append((name, False, str(e)))
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             results.append((name, False, f"{type(e).__name__}: {e}"))
     passed = sum(1 for _, ok, _ in results if ok)
     print(f"\n{passed}/{len(results)} tests passed")

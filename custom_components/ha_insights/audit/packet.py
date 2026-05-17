@@ -23,16 +23,15 @@ Add new primitives here; consume them from any detector.
 from __future__ import annotations
 
 import statistics
-from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from ..observers.state_event_buffer import StateEventBuffer
     from .._script_targets import collect_script_targets  # noqa: F401
     from ..detectors.hierarchy import EntityHierarchy
     from ..insight import Insight
+    from ..observers.state_event_buffer import StateEventBuffer
 
 
 # Observation kinds. Stable strings (not enum) so consumers — including
@@ -144,9 +143,9 @@ _LOOKBACK_DAYS = 14
 def build_audit_packet(
     automation: dict[str, Any],
     *,
-    buffer: "StateEventBuffer | None",
-    hierarchy: "EntityHierarchy | None",
-    recent_insights: list["Insight"] | None = None,
+    buffer: StateEventBuffer | None,
+    hierarchy: EntityHierarchy | None,
+    recent_insights: list[Insight] | None = None,
     blocked_entities: frozenset[str] = frozenset(),
     trace_aggregates: Any | None = None,
     rollup_by_entity: dict[str, dict[str, dict[int, int]]] | None = None,
@@ -354,7 +353,7 @@ def _observe_long_on_duration(
     *,
     target_entities: set[str],
     automation: dict[str, Any],
-    buffer: "StateEventBuffer",
+    buffer: StateEventBuffer,
     now: datetime,
 ) -> list[Observation]:
     """If the automation's `turn_on` action runs for entities whose
@@ -449,7 +448,7 @@ def _observe_long_on_duration(
 def _observe_trigger_time_drift(
     *,
     automation: dict[str, Any],
-    buffer: "StateEventBuffer",
+    buffer: StateEventBuffer,
     now: datetime,
 ) -> list[Observation]:
     """If the automation has a `platform: time` trigger and the
@@ -553,7 +552,7 @@ def _observe_trigger_time_drift(
 def _observe_silent_entities(
     *,
     entities: set[str],
-    buffer: "StateEventBuffer",
+    buffer: StateEventBuffer,
     live_states: dict[str, str],
     live_state_last_changed: dict[str, datetime] | None = None,
     now: datetime,
@@ -664,7 +663,7 @@ def _observe_silent_entities(
 def _observe_redundant_targets(
     *,
     target_entities: set[str],
-    hierarchy: "EntityHierarchy",
+    hierarchy: EntityHierarchy,
 ) -> list[Observation]:
     """Automation targets both a group/scene/script AND one of its
     members. Mirrors RedundantTargetDetector's logic but folded into
@@ -729,7 +728,7 @@ def _classify_integration(
 def _observe_cross_integration_coupling(
     *,
     all_entities: set[str],
-    hierarchy: "EntityHierarchy",
+    hierarchy: EntityHierarchy,
     iot_class_by_integration: dict[str, str],
 ) -> list[Observation]:
     """v1.5.15 — Flag automations that mix cloud-dependent integrations

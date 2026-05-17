@@ -21,7 +21,6 @@ from homeassistant.helpers import entity_registry as er
 from . import ws_api
 from .config_flow import (
     get_allow_user_detectors,
-    get_analytics_settings,
     get_audit_rollup_window_days,
     get_digest_settings,
     get_lookback_days,
@@ -171,7 +170,7 @@ async def _setup_entry_body(
                 # to count physical-switch events as manual when
                 # they originate from local integrations.
                 ctx_parent = getattr(new_state.context, "parent_id", None)
-        except Exception:  # noqa: BLE001
+        except Exception:
             ctx_user = None
             ctx_id = None
             ctx_parent = None
@@ -209,7 +208,7 @@ async def _setup_entry_body(
                     val = attrs.get("event_type")
                     if isinstance(val, str):
                         event_type = val
-            except Exception:  # noqa: BLE001
+            except Exception:
                 event_type = None
 
         buffer_.add(
@@ -529,7 +528,7 @@ async def _setup_entry_body(
                 summary.get("batch_duration_sec", 0),
                 summary.get("skipped_inflight", False),
             )
-        except Exception as err:  # noqa: BLE001
+        except Exception as err:
             _LOGGER.debug("audit auto-rollup failed: %s", err)
 
     async def _initial_rollup_kick() -> None:
@@ -673,7 +672,7 @@ async def _setup_entry_body(
             # change knows whether to compare.
             if isinstance(entry_data, dict):
                 entry_data["_known_rollup_window"] = new_window
-        except Exception as err:  # noqa: BLE001
+        except Exception as err:
             _LOGGER.debug("options-updated rollup prune skipped: %s", err)
         await hass_.config_entries.async_reload(entry_.entry_id)
 
@@ -731,7 +730,7 @@ async def _setup_entry_body(
                     counters.get("created", 0),
                     counters.get("updated", 0),
                 )
-        except Exception as err:  # noqa: BLE001
+        except Exception as err:
             _LOGGER.debug("Repairs restore on boot skipped: %s", err)
 
     entry.async_create_background_task(
@@ -770,7 +769,7 @@ async def _run_scheduled_scan(hass: HomeAssistant, entry_id: str) -> None:
         )
         added = await run_all_detectors(hass, ctx, store, entry=entry)
         _LOGGER.info("HA Insights scheduled scan complete: %d new insights", added)
-    except Exception:  # noqa: BLE001
+    except Exception:
         _LOGGER.exception("HA Insights scheduled scan failed")
 
 
@@ -906,7 +905,8 @@ async def _emit_batch_summary_insight(
     """Emit one summary insight after each audit_suggest_batch run
     so users see results in the panel, not just logs. Stable id —
     re-runs replace the previous summary instead of stacking."""
-    from datetime import UTC, datetime as _dt
+    from datetime import UTC
+    from datetime import datetime as _dt
 
     from .insight import Insight, InsightKind
 
@@ -958,7 +958,8 @@ async def _emit_rollup_summary_insight(
 ) -> None:
     """Same pattern as the suggest-batch summary: one stable-id
     insight that updates on each rollup run."""
-    from datetime import UTC, datetime as _dt
+    from datetime import UTC
+    from datetime import datetime as _dt
 
     from .insight import Insight, InsightKind
 
@@ -1209,19 +1210,21 @@ def _async_register_services(hass: HomeAssistant) -> None:
                 continue
             # Reuse the WS endpoint internally — same audit log, same
             # redactor, same caching path.
-            from .audit.cache import compute_cache_key, get as cache_get
+            from .audit.cache import compute_cache_key
+            from .audit.cache import get as cache_get
             from .audit.cache import put as cache_put
-            from .insight import Insight, InsightKind
-            from .llm import RedactionMode, Redactor, refine_insight
             from .config_flow import (
                 get_blocked_entities,
                 get_preferred_agent_id,
             )
+            from .insight import Insight, InsightKind
+            from .llm import RedactionMode, Redactor, refine_insight
             from .ws_api import _find_automation_by_id
 
             preferred = get_preferred_agent_id(entry)
             blocked = get_blocked_entities(entry) or frozenset()
-            from datetime import UTC, datetime as _dt
+            from datetime import UTC
+            from datetime import datetime as _dt
             processed = 0
             for ins in picked:
                 # Re-check budget between calls so we don't overrun
@@ -1301,7 +1304,7 @@ def _async_register_services(hass: HomeAssistant) -> None:
                         feedback=feedback,
                         preferred_agent_id=preferred,
                     )
-                except Exception as err:  # noqa: BLE001
+                except Exception as err:
                     _LOGGER.warning(
                         "audit suggest batch: %s failed: %s",
                         automation_id,
@@ -1461,7 +1464,7 @@ async def _async_register_panel(hass: HomeAssistant) -> None:
             )
         )
         integration_version = str(manifest.get("version", "unknown"))
-    except Exception:  # noqa: BLE001
+    except Exception:
         integration_version = "unknown"
 
     def _read_signature() -> str:
@@ -1491,7 +1494,7 @@ async def _async_register_panel(hass: HomeAssistant) -> None:
         panels = hass.data.get("frontend_panels", {})
         if _PANEL_URL_PATH in panels:
             async_remove_panel(hass, _PANEL_URL_PATH)
-    except Exception:  # noqa: BLE001 — defensive; never block setup over this
+    except Exception:
         _LOGGER.debug(
             "panel pre-remove probe raised", exc_info=True
         )
@@ -1553,7 +1556,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         from .notifications.mobile import reset_daily_counter_for_entry
 
         reset_daily_counter_for_entry(entry.entry_id)
-    except Exception:  # noqa: BLE001
+    except Exception:
         _LOGGER.debug("daily-counter reset on unload skipped", exc_info=True)
     # Cancel any in-flight initial backfill before closing the store —
     # otherwise it'll write to a closed connection on its next flush.
@@ -1594,7 +1597,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             from .audit.rollup import reset_progress as _reset_rollup_progress
 
             _reset_rollup_progress()
-        except Exception:  # noqa: BLE001
+        except Exception:
             pass
     return True
 
@@ -1618,5 +1621,5 @@ async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
                 "HA Insights uninstall: cleared %d Repairs entries",
                 cleared,
             )
-    except Exception as err:  # noqa: BLE001
+    except Exception as err:
         _LOGGER.debug("Repairs cleanup on uninstall failed: %s", err)

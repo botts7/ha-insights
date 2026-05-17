@@ -110,7 +110,7 @@ class RoutineDetector(Detector):
 
     # -------- candidate filter --------
 
-    def _is_candidate_event(self, ev: "StateEvent") -> bool:
+    def _is_candidate_event(self, ev: StateEvent) -> bool:
         if ev.new_state is None or ev.new_state == ev.old_state:
             return False
         if ev.context_user_id is None:
@@ -227,7 +227,7 @@ class RoutineDetector(Detector):
             sun_trigger_data = detect_sun_relative_trigger(
                 core_day_times, ctx.hass
             )
-        except Exception:  # noqa: BLE001
+        except Exception:
             sun_trigger_data = None
 
         automation = self._build_routine_yaml(

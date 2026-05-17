@@ -73,7 +73,7 @@ def compute_cache_key(
     canonical_yaml = json.dumps(automation_yaml, sort_keys=True, default=str)
     canonical_obs = ",".join(sorted(set(observation_kinds)))
     digest = hashlib.sha256(
-        f"{integration_version}|{canonical_yaml}|{canonical_obs}".encode("utf-8")
+        f"{integration_version}|{canonical_yaml}|{canonical_obs}".encode()
     ).hexdigest()
     return digest
 

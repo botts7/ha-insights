@@ -109,7 +109,7 @@ class DetectorContext:
     # registries. Replaces the scattered dicts above in Phase 3 of the
     # refactor; legacy fields keep working until then. See
     # detectors/hierarchy.py for query methods.
-    hierarchy: "EntityHierarchy | None" = None  # noqa: F821 — forward ref
+    hierarchy: EntityHierarchy | None = None  # noqa: F821 — forward ref
     # v1.5.22: iot_class per integration, loaded ON THE MAIN LOOP by
     # run_all_detectors before dispatching detectors to worker threads.
     # Earlier (v1.5.15) the audit detector loaded these inside its

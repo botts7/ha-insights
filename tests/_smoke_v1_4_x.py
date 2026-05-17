@@ -26,7 +26,7 @@ def t(name: str):
             results.append((name, "PASS", None))
         except AssertionError as e:
             results.append((name, "FAIL", str(e)))
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             results.append((name, "ERROR", f"{type(e).__name__}: {e}"))
         return fn
 
@@ -1230,7 +1230,7 @@ def _():
         body = _read(f"{det_dir}/{fname}")
         try:
             ast.parse(body, filename=fname)
-        except SyntaxError as e:  # noqa: PERF203
+        except SyntaxError as e:
             failed.append((fname, f"{type(e).__name__}: {e}"))
     assert not failed, f"detector files failed to parse: {failed}"
 
@@ -1344,7 +1344,6 @@ def _():
     used as a string in annotations — pyflakes can't tell. We
     filter it out instead of fighting the tool.
     """
-    import os
     import subprocess
 
     integration_dir = "custom_components/ha_insights"
@@ -1369,7 +1368,7 @@ def _():
             continue
         undefined.append(line)
     assert not undefined, (
-        f"pyflakes found undefined names (likely missing imports):\n"
+        "pyflakes found undefined names (likely missing imports):\n"
         + "\n".join(undefined)
     )
 
@@ -1399,7 +1398,7 @@ def _():
         body = _read(full)
         try:
             compile(body, fname, "exec")
-        except SyntaxError as e:  # noqa: PERF203
+        except SyntaxError as e:
             failed.append((full, f"{type(e).__name__}: {e}"))
     assert not failed, f"detector compile failed: {failed}"
 
@@ -1433,7 +1432,7 @@ def _():
             full = f"{path}/{fname}"
             try:
                 ast.parse(_read(full), filename=fname)
-            except SyntaxError as e:  # noqa: PERF203
+            except SyntaxError as e:
                 failed.append((full, f"{type(e).__name__}: {e}"))
     assert not failed, f"helper files failed to parse: {failed}"
 

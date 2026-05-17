@@ -4,20 +4,19 @@ No HA imports required — module is a pure function over datetimes."""
 from __future__ import annotations
 
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 # Add the repo root so we can import custom_components.ha_insights.lib
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from custom_components.ha_insights.lib.timing_likelihood import (  # noqa: E402
+from custom_components.ha_insights.lib.timing_likelihood import (
     TimingClass,
     apply_to_confidence,
     assess_timing,
 )
 
-
-_TZ = timezone.utc
+_TZ = UTC
 
 
 def _at(hour: int, minute: int, second: int = 0, microsecond: int = 0,
@@ -108,7 +107,8 @@ def test_human_jitter_is_classified_human() -> None:
     ]
     a = assess_timing(events, iot_class="local_push")
     assert a.timing_class is TimingClass.HUMAN_LIKELY, (
-        f"expected HUMAN_LIKELY got {a.timing_class}: stddev={a.stddev_seconds}, range={a.range_seconds}"
+        f"expected HUMAN_LIKELY got {a.timing_class}: "
+        f"stddev={a.stddev_seconds}, range={a.range_seconds}"
     )
     assert a.human_likelihood == 1.0
 
@@ -244,9 +244,9 @@ if __name__ == "__main__":
         try:
             fn()
             results.append((name, True, ""))
-        except AssertionError as e:  # noqa: PERF203
+        except AssertionError as e:
             results.append((name, False, str(e)))
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             results.append((name, False, f"{type(e).__name__}: {e}"))
     passed = sum(1 for _, ok, _ in results if ok)
     print(f"\n{passed}/{len(results)} tests passed")

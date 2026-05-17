@@ -24,7 +24,7 @@ def t(name: str):
             results.append((name, "PASS", None))
         except AssertionError as e:
             results.append((name, "FAIL", str(e)))
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             results.append((name, "ERROR", f"{type(e).__name__}: {e}"))
         return fn
     return deco
@@ -89,8 +89,10 @@ def _():
 
 @t("dedup: lowercase kind buckets together (case-resilience fix)")
 def _():
-    a = _enriched("binary_sensor.home_nvr_cam1_motion"); a["kind"] = "ANOMALY"
-    b = _enriched("binary_sensor.home_nvr_cam2_motion"); b["kind"] = "anomaly"
+    a = _enriched("binary_sensor.home_nvr_cam1_motion")
+    a["kind"] = "ANOMALY"
+    b = _enriched("binary_sensor.home_nvr_cam2_motion")
+    b["kind"] = "anomaly"
     r = display_time_dedup([a, b], {})
     assert len(r) == 1, f"got {len(r)}"
 
@@ -106,9 +108,12 @@ def _():
 
 @t("dedup: highest confidence picked as rep")
 def _():
-    a = _enriched("binary_sensor.cam1"); a["confidence"] = 0.5
-    b = _enriched("binary_sensor.cam2"); b["confidence"] = 0.9
-    c = _enriched("binary_sensor.cam3"); c["confidence"] = 0.7
+    a = _enriched("binary_sensor.cam1")
+    a["confidence"] = 0.5
+    b = _enriched("binary_sensor.cam2")
+    b["confidence"] = 0.9
+    c = _enriched("binary_sensor.cam3")
+    c["confidence"] = 0.7
     r = display_time_dedup([a, b, c], {})
     assert len(r) == 1 and r[0]["id"] == "id-binary_sensor.cam2"
 

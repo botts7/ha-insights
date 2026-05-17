@@ -19,7 +19,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from custom_components.ha_insights.llm.refiner import build_refine_prompt
 
-
 _SAMPLE_PAYLOAD = {
     "alias": "Hallway motion → light",
     "trigger": [

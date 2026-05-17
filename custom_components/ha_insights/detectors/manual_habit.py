@@ -100,7 +100,7 @@ class ManualHabitDetector(Detector):
 
         # Filter buffer to MANUAL events only. Bucket by (entity, target_state).
         cutoff = datetime.now(tz=UTC) - timedelta(days=_LOOKBACK_DAYS)
-        groups: dict[tuple[str, str], list["StateEvent"]] = defaultdict(list)
+        groups: dict[tuple[str, str], list[StateEvent]] = defaultdict(list)
         for ev in ctx.event_buffer.query(since=cutoff):
             if not self._is_candidate_event(ev, local_integration_entities):
                 continue
@@ -125,7 +125,7 @@ class ManualHabitDetector(Detector):
 
     def _is_candidate_event(
         self,
-        ev: "StateEvent",
+        ev: StateEvent,
         local_integration_entities: frozenset[str],
     ) -> bool:
         if ev.new_state is None or ev.new_state == ev.old_state:
@@ -156,7 +156,7 @@ class ManualHabitDetector(Detector):
         return True
 
     def _build_local_integration_set(
-        self, ctx: "DetectorContext"
+        self, ctx: DetectorContext
     ) -> frozenset[str]:
         """Entity IDs whose source integration is locally hosted (Zigbee,
         Z-Wave, ESPHome, MQTT, Hue local-bridge, etc.). Mirrors the
@@ -192,7 +192,7 @@ class ManualHabitDetector(Detector):
         ctx: DetectorContext,
         entity_id: str,
         new_state: str,
-        events: list["StateEvent"],
+        events: list[StateEvent],
         already_handled: set[tuple[str, str, int]],
     ) -> Insight | None:
         # First-event-per-day (local time) clustering.
@@ -286,7 +286,7 @@ class ManualHabitDetector(Detector):
             sun_trigger_data = detect_sun_relative_trigger(
                 habit_local_times, ctx.hass
             )
-        except Exception:  # noqa: BLE001
+        except Exception:
             sun_trigger_data = None
 
         # Build the apply-able automation YAML.
@@ -476,7 +476,7 @@ class ManualHabitDetector(Detector):
                 if not isinstance(svc, str) or "." not in svc:
                     continue
                 try:
-                    svc_domain, svc_call = svc.split(".", 1)
+                    svc_domain, _svc_call = svc.split(".", 1)
                 except ValueError:
                     continue
                 # Reverse the service → target-state mapping

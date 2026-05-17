@@ -22,7 +22,7 @@ from homeassistant.core import CoreState, HomeAssistant
 from .base import DETECTORS, Detector, DetectorContext, register_detector
 
 if TYPE_CHECKING:
-    from homeassistant.config_entries import ConfigEntry  # noqa: F401
+    from homeassistant.config_entries import ConfigEntry
 
     from ..observers.state_event_buffer import StateEvent
     from ..store import InsightStore
@@ -62,7 +62,7 @@ class _FrozenBufferView:
       `time.sleep(0)` every _GIL_YIELD_EVERY events.
     """
 
-    __slots__ = ("_events", "_blocked_entities", "_area_filter")
+    __slots__ = ("_area_filter", "_blocked_entities", "_events")
 
     # Yield the GIL every N events. Tuned for ~1ms wall-clock between
     # yields on representative hardware — frequent enough that the
@@ -163,8 +163,8 @@ async def run_all_detectors(
     store: InsightStore,
     *,
     allow_during_setup: bool = False,
-    entry: "ConfigEntry | None" = None,  # noqa: F821 — string forward-ref
-    cancel_event: "asyncio.Event | None" = None,
+    entry: ConfigEntry | None = None,
+    cancel_event: asyncio.Event | None = None,
     return_summary: bool = False,
 ) -> int | dict[str, int]:
     """Fan out a single scan pass across every registered detector.
@@ -316,7 +316,7 @@ async def run_all_detectors(
                 iot_class = getattr(integration, "iot_class", None)
                 if isinstance(iot_class, str):
                     iot_class_by_integration[domain] = iot_class
-            except Exception:  # noqa: BLE001
+            except Exception:
                 # Custom integration not installed / manifest missing —
                 # skip and let the audit observation treat as unknown.
                 continue
@@ -442,7 +442,7 @@ async def run_all_detectors(
                 asyncio.to_thread(_run_detector_in_thread, detector_cls, snapshot_ctx),
                 timeout=_DETECTOR_TIMEOUT_SEC,
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             _LOGGER.warning(
                 "HA Insights detector %r exceeded %.0fs budget; skipping. "
                 "The thread will continue until it returns naturally but "
@@ -451,7 +451,7 @@ async def run_all_detectors(
                 _DETECTOR_TIMEOUT_SEC,
             )
             continue
-        except Exception:  # noqa: BLE001
+        except Exception:
             _LOGGER.exception("HA Insights detector %r failed", name)
             continue
 
@@ -584,7 +584,7 @@ async def run_all_detectors(
             hass,
             [i for i in current_insights if i.detector == "automation_audit"],
         )
-    except Exception as err:  # noqa: BLE001
+    except Exception as err:
         _LOGGER.debug("audit Repairs sync skipped: %s", err)
 
     if return_summary:
@@ -718,7 +718,7 @@ def _dedup_grouped_insights(
     entity_dependencies: dict[str, frozenset[str]],
     container_to_members: dict[str, frozenset[str]] | None = None,
     device_id_by_entity: dict[str, str | None] | None = None,
-    hierarchy_for_dedup: "EntityHierarchy | None" = None,  # noqa: F821
+    hierarchy_for_dedup: EntityHierarchy | None = None,  # noqa: F821
 ) -> list:
     """Collapse insights that share a fingerprint (mod entity_id) AND
     whose entities live under the same group/scene container.
@@ -747,14 +747,13 @@ def _dedup_grouped_insights(
     # without entity_dependencies — its only consumer is the legacy
     # _find_common_container path, which already tolerates an empty map.
 
-    from collections import defaultdict as _defaultdict
-
-    from ..insight import Insight as _Insight  # local to avoid cycle
-
     # Group by fingerprint signature with entity_id stripped. Insights
     # without an entity_id key (cooccurrence) sit alone in their own
     # singleton bucket and pass through unchanged.
     import json as _json
+    from collections import defaultdict as _defaultdict
+
+    from ..insight import Insight as _Insight  # local to avoid cycle
 
     by_signature: dict[str, list] = _defaultdict(list)
     for ins in insights:
@@ -1086,7 +1085,7 @@ async def _load_existing_automations(hass: HomeAssistant) -> list[dict]:
                 if _is_duplicate(raw):
                     continue
                 automations.append(raw)
-    except Exception:  # noqa: BLE001
+    except Exception:
         _LOGGER.debug(
             "automation component data unavailable; falling back to "
             "automations.yaml only", exc_info=True,
@@ -1112,7 +1111,7 @@ async def _load_existing_automations(hass: HomeAssistant) -> list[dict]:
             if isinstance(loaded, dict):
                 return [loaded]
             return []
-        except Exception:  # noqa: BLE001
+        except Exception:
             _LOGGER.exception("Could not load automations.yaml for conflict scan")
             return []
 

@@ -113,7 +113,7 @@ class ButtonPressHabitDetector(Detector):
         # Only entities that actually carry an event_type attribute
         # (Phase 1 capture) — older HA versions or non-event-platform
         # entities silently skip.
-        firings: dict[tuple[str, str], list["StateEvent"]] = defaultdict(list)
+        firings: dict[tuple[str, str], list[StateEvent]] = defaultdict(list)
         for ev in ctx.event_buffer.query(since=cutoff):
             if ev.domain != "event":
                 continue

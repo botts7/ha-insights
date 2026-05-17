@@ -51,7 +51,7 @@ _TIGHTER_FIT_RATIO = 0.6
 
 def detect_sun_relative_trigger(
     habit_times: list[datetime],
-    hass: "HomeAssistant",
+    hass: HomeAssistant,
 ) -> tuple[str, int] | None:
     """If habit_times correlate more tightly with sunrise or sunset
     than with the wall clock, return (event_name, offset_minutes).
@@ -67,7 +67,7 @@ def detect_sun_relative_trigger(
         return None
 
     try:
-        from homeassistant.components.sun import (  # noqa: F401
+        from homeassistant.components.sun import (
             get_astral_event_date,
         )
     except ImportError:
@@ -79,7 +79,7 @@ def detect_sun_relative_trigger(
         try:
             sunrise = get_astral_event_date(hass, "sunrise", date=t.date())
             sunset = get_astral_event_date(hass, "sunset", date=t.date())
-        except Exception:  # noqa: BLE001
+        except Exception:
             return None
         if sunrise is None or sunset is None:
             continue

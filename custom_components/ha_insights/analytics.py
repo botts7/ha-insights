@@ -62,7 +62,7 @@ _REPORT_WINDOW_DAYS = 7
 
 
 def get_or_create_install_uuid(
-    entry: "ConfigEntry", hass: HomeAssistant | None = None
+    entry: ConfigEntry, hass: HomeAssistant | None = None
 ) -> str:
     """Return the stable per-entry install UUID, creating one if
     missing. Stored in options so it survives restarts but resets
@@ -90,7 +90,7 @@ def get_or_create_install_uuid(
             merged = dict(entry.options)
             merged["analytics_install_uuid"] = new_uid
             hass.config_entries.async_update_entry(entry, options=merged)
-        except Exception:  # noqa: BLE001
+        except Exception:
             _LOGGER.debug(
                 "Failed to persist analytics_install_uuid", exc_info=True
             )
@@ -99,8 +99,8 @@ def get_or_create_install_uuid(
 
 async def build_report_payload(
     hass: HomeAssistant,
-    entry: "ConfigEntry",
-    store: "InsightStore",
+    entry: ConfigEntry,
+    store: InsightStore,
 ) -> dict[str, Any]:
     """Compose the weekly report. SAFE TO LOG — no PII, no payload
     content, no entity names. Returns the JSON body that would be
@@ -122,7 +122,7 @@ async def build_report_payload(
             include_applied=True,
             include_snoozed=True,
         )
-    except Exception:  # noqa: BLE001
+    except Exception:
         all_in_window = []
     # exclude example insights from the
     # community dataset. They're first-run demo content, not real
@@ -159,7 +159,7 @@ async def build_report_payload(
             name: getattr(cls, "maturity", Maturity.STABLE).value
             for name, cls in DETECTORS.items()
         }
-    except Exception:  # noqa: BLE001
+    except Exception:
         maturity_by_detector = {}
 
     try:
@@ -167,7 +167,7 @@ async def build_report_payload(
 
         integration = await async_get_integration(hass, "ha_insights")
         integration_version = integration.version or "0.0"
-    except Exception:  # noqa: BLE001
+    except Exception:
         integration_version = "0.0"
 
     return {
@@ -216,7 +216,7 @@ def _ha_version(hass: HomeAssistant) -> str:
         from homeassistant.const import __version__ as HA_VERSION
 
         return ".".join(str(HA_VERSION).split(".")[:2])
-    except Exception:  # noqa: BLE001
+    except Exception:
         return "unknown"
 
 
@@ -230,8 +230,8 @@ def _iso_week_label() -> str:
 
 async def send_report(
     hass: HomeAssistant,
-    entry: "ConfigEntry",
-    store: "InsightStore",
+    entry: ConfigEntry,
+    store: InsightStore,
     *,
     endpoint: str | None = None,
 ) -> dict[str, Any] | None:
@@ -264,7 +264,7 @@ async def send_report(
                     "Analytics POST to %s returned %d", url, resp.status
                 )
                 return None
-    except Exception:  # noqa: BLE001
+    except Exception:
         _LOGGER.debug("Analytics POST failed (best-effort)", exc_info=True)
         return None
     return payload

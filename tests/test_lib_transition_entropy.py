@@ -6,7 +6,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from custom_components.ha_insights.lib.transition_entropy import (  # noqa: E402
+from custom_components.ha_insights.lib.transition_entropy import (
     TransitionEntropyClass,
     apply_to_confidence,
     assess_transition_entropy,
@@ -84,7 +84,7 @@ if __name__ == "__main__":
             results.append((name, True, ""))
         except AssertionError as e:
             results.append((name, False, str(e)))
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             results.append((name, False, f"{type(e).__name__}: {e}"))
     passed = sum(1 for _, ok, _ in results if ok)
     print(f"\n{passed}/{len(results)} tests passed")

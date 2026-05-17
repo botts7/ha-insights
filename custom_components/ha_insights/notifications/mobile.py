@@ -172,7 +172,7 @@ async def fire_mobile_notifications(
             policy = resolve_effective_policy(
                 entry, target_user_id_for_policy
             )
-        except Exception:  # noqa: BLE001
+        except Exception:
             _LOGGER.debug(
                 "Per-user policy resolution failed, falling back to global",
                 exc_info=True,
@@ -188,7 +188,7 @@ async def fire_mobile_notifications(
             from .adaptive import get_adaptive_floor
 
             floor = get_adaptive_floor(hass, entry_id, floor)
-        except Exception:  # noqa: BLE001
+        except Exception:
             _LOGGER.debug(
                 "Adaptive floor lookup failed, falling back to "
                 "baseline %.2f",
@@ -298,7 +298,7 @@ async def fire_mobile_notifications(
                 blocking=False,
             )
             fired_any = True
-        except Exception:  # noqa: BLE001
+        except Exception:
             _LOGGER.exception(
                 "Failed to send HA Insights mobile notification via %s",
                 target,

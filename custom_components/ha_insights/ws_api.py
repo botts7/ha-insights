@@ -46,7 +46,7 @@ async def _get_integration_version(hass: HomeAssistant) -> str:
 
         integration = await async_get_integration(hass, DOMAIN)
         return str(integration.version) if integration.version else "unknown"
-    except Exception:  # noqa: BLE001
+    except Exception:
         return "unknown"
 
 SUPPORTED_METHODS = (
@@ -334,7 +334,7 @@ async def ws_list(
                 break
         if hierarchy is None:
             hierarchy = build_hierarchy(hass)
-    except Exception:  # noqa: BLE001
+    except Exception:
         hierarchy = None
 
     # Pull what ws_list specifically needs out of the hierarchy. Older
@@ -417,7 +417,7 @@ async def ws_list(
             referenced = _expand(referenced)
             for eid in referenced:
                 entity_to_automations.setdefault(eid, []).append(label)
-    except Exception:  # noqa: BLE001
+    except Exception:
         pass  # additive enrichment; missing values just become empty lists
 
     def _entities_in_insight(ins) -> set[str]:
@@ -439,7 +439,7 @@ async def ws_list(
                 from .apply.conflict_scanner import _extract_target_entities
 
                 out |= _extract_target_entities(ins.payload.get("action"))
-            except Exception:  # noqa: BLE001
+            except Exception:
                 pass
         return out
 
@@ -465,10 +465,10 @@ async def ws_list(
                     # No alias — id IS the visible label (older YAML).
                     alias_to_id[aid] = aid
                     id_to_alias[aid] = aid
-    except Exception:  # noqa: BLE001
+    except Exception:
         pass
 
-    def _build_automation_links(labels: "list | tuple") -> list[dict]:
+    def _build_automation_links(labels: list | tuple) -> list[dict]:
         """Resolve a list of automation labels (alias OR id) into
         [{id?, alias, url?}] entries the card can render as clickable
         chips. Accepts both forms because `conflicts_with` ships ids and
@@ -561,7 +561,7 @@ async def ws_list(
                 detector_maturity_by_name[det_name] = (
                     m.value if hasattr(m, "value") else str(m)
                 )
-    except Exception:  # noqa: BLE001
+    except Exception:
         detector_maturity_by_name = {}
 
     enriched: list[dict[str, Any]] = []
@@ -807,7 +807,7 @@ def _display_time_dedup(
         registry = er.async_get(hass)
         for ent in registry.entities.values():
             device_id_by_entity[ent.entity_id] = ent.device_id
-    except Exception:  # noqa: BLE001
+    except Exception:
         pass
 
     return display_time_dedup(enriched, device_id_by_entity)
@@ -1002,7 +1002,7 @@ async def ws_purge_all(
         from .audit.repairs import clear_all_audit_issues
 
         cleared_repairs = clear_all_audit_issues(hass)
-    except Exception:  # noqa: BLE001
+    except Exception:
         cleared_repairs = 0
     connection.send_result(
         msg["id"],
@@ -1075,7 +1075,7 @@ async def ws_dismiss(
         from .audit.repairs import clear_issue_for_insight
 
         clear_issue_for_insight(hass, msg["insight_id"])
-    except Exception:  # noqa: BLE001
+    except Exception:
         pass
     connection.send_result(msg["id"])
 
@@ -1232,7 +1232,7 @@ async def ws_apply(
             domain=DOMAIN,
             entity_id=f"automation.{auto_id}",
         )
-    except Exception:  # noqa: BLE001
+    except Exception:
         pass
 
     connection.send_result(
@@ -2212,7 +2212,7 @@ async def ws_recorder_status(
             configured_audit_window_days = max(
                 get_audit_rollup_window_days(e) for e in entries
             )
-    except Exception:  # noqa: BLE001
+    except Exception:
         pass
 
     try:
@@ -2265,7 +2265,7 @@ async def ws_recorder_status(
                         minimal_response=True,
                         no_attributes=True,
                     )
-                except Exception as err:  # noqa: BLE001
+                except Exception as err:
                     _LOGGER.debug(
                         "recorder_status: probe at %dd failed: %s",
                         days,
@@ -2285,7 +2285,7 @@ async def ws_recorder_status(
         oldest_age_days = await rec.async_add_executor_job(
             _probe_oldest_age_days
         )
-    except Exception as err:  # noqa: BLE001
+    except Exception as err:
         _LOGGER.debug("recorder_status: probe failed: %s", err)
 
     # Safe window is the smaller of the two when both known.
@@ -2550,7 +2550,7 @@ def _resolve_audit_depth(
 
         for entry in hass.config_entries.async_entries(DOMAIN):
             return get_audit_analysis_depth(entry)
-    except Exception:  # noqa: BLE001
+    except Exception:
         pass
     return "concise"
 
@@ -2872,7 +2872,7 @@ def _sanitize_yaml_safe(value: Any) -> Any:
 
     try:
         return _json.loads(_json.dumps(value, default=str))
-    except Exception:  # noqa: BLE001 — defensive last resort
+    except Exception:
         return value
 
 
@@ -2908,6 +2908,7 @@ def _find_automation_by_id(
     try:
         import glob as _glob
         import os as _os
+
         import yaml as _yaml
 
         candidate_paths: list[str] = []
@@ -2938,7 +2939,7 @@ def _find_automation_by_id(
             try:
                 with open(path, encoding="utf-8") as f:
                     loaded = _yaml.safe_load(f)
-            except Exception:  # noqa: BLE001 — bad YAML, skip
+            except Exception:
                 continue
             # Top-level automations.yaml ships a list directly.
             # configuration.yaml / packages have `automation:` as a key.
@@ -2962,7 +2963,7 @@ def _find_automation_by_id(
                     or entry.get("alias") == automation_id
                 ):
                     return entry
-    except Exception:  # noqa: BLE001
+    except Exception:
         pass
     return None
 
@@ -3029,7 +3030,7 @@ async def ws_get_automation(
         yaml_text = _yaml.safe_dump(
             raw, sort_keys=False, default_flow_style=False
         )
-    except Exception as err:  # noqa: BLE001
+    except Exception as err:
         _LOGGER.warning(
             "ws_get_automation: yaml.safe_dump failed for %r: %s",
             automation_id,
@@ -3067,7 +3068,7 @@ async def ws_refine_automation(
     """Run an existing automation through the LLM refine pipeline."""
     from datetime import UTC, datetime
 
-    from .config_flow import get_blocked_entities, get_preferred_agent_id
+    from .config_flow import get_blocked_entities
     from .insight import Insight, InsightKind
     from .llm import RedactionMode, Redactor, refine_insight
 
@@ -3139,7 +3140,7 @@ async def ws_refine_automation(
             feedback=wrapped_feedback,
             preferred_agent_id=preferred,
         )
-    except Exception as err:  # noqa: BLE001
+    except Exception as err:
         connection.send_error(
             msg["id"], "refine_failed", _humanize_llm_error(str(err))
         )
@@ -3166,7 +3167,7 @@ async def ws_refine_automation(
         original_yaml = _yaml.safe_dump(
             raw, sort_keys=False, default_flow_style=False
         )
-    except Exception:  # noqa: BLE001
+    except Exception:
         refined_yaml = str(result.refined_payload)
         original_yaml = str(raw)
 
@@ -3226,7 +3227,7 @@ async def ws_apply_automation_refinement(
     writer = AutomationWriter(hass)
     try:
         await writer.write(refined, auto_id=automation_id)
-    except Exception as err:  # noqa: BLE001
+    except Exception as err:
         connection.send_error(msg["id"], "write_failed", str(err))
         return
 
@@ -3285,12 +3286,17 @@ async def ws_audit_suggest(
     Privacy: same Redactor and same audit log as ws_refine_automation.
     No bespoke LLM path here — we reuse the proven pipeline.
     """
-    from datetime import UTC, datetime as _dt
+    from datetime import UTC
+    from datetime import datetime as _dt
 
     from .audit.cache import (
         CachedSuggestion,
         compute_cache_key,
+    )
+    from .audit.cache import (
         get as cache_get,
+    )
+    from .audit.cache import (
         put as cache_put,
     )
     from .config_flow import get_blocked_entities
@@ -3400,7 +3406,7 @@ async def ws_audit_suggest(
                 sort_keys=False,
                 default_flow_style=False,
             )
-        except Exception:  # noqa: BLE001
+        except Exception:
             cached_original = str(starting_payload)
             cached_refined = str(cached.refined_yaml)
         connection.send_result(
@@ -3437,7 +3443,7 @@ async def ws_audit_suggest(
         area_id=None,
         title=(
             "Refine existing automation based on audit findings: "
-            f"{(starting_payload or {}).get('alias') if isinstance(starting_payload, dict) else automation_id}"
+            f"{(starting_payload or {}).get('alias') if isinstance(starting_payload, dict) else automation_id}"  # noqa: E501
         ),
         confidence=1.0,
         fingerprint=virtual_fingerprint,
@@ -3489,7 +3495,7 @@ async def ws_audit_suggest(
             feedback=feedback,
             preferred_agent_id=preferred,
         )
-    except Exception as err:  # noqa: BLE001
+    except Exception as err:
         connection.send_error(
             msg["id"], "refine_failed", _humanize_llm_error(str(err))
         )
@@ -3534,7 +3540,7 @@ async def ws_audit_suggest(
             sort_keys=False,
             default_flow_style=False,
         )
-    except Exception:  # noqa: BLE001
+    except Exception:
         original_yaml_str = str(diff_baseline)
         refined_yaml_str = str(result.refined_payload)
 
@@ -3606,7 +3612,7 @@ def _check_dependency_satisfied(
             if feature == "recorder":
                 return "recorder" in hass.config.components
         return False
-    except Exception:  # noqa: BLE001
+    except Exception:
         return False
 
 
@@ -3721,7 +3727,7 @@ async def ws_inject_examples(
         for ins in build_example_insights():
             await store.add_insight(ins)
             added += 1
-    except Exception as err:  # noqa: BLE001
+    except Exception as err:
         _LOGGER.exception("inject_examples failed")
         connection.send_error(msg["id"], "inject_failed", str(err))
         return
@@ -3764,7 +3770,7 @@ async def ws_clear_examples(
             if ins.payload.get(EXAMPLE_PAYLOAD_KEY) is True:
                 await store.dismiss_insight(ins.id)
                 removed += 1
-    except Exception as err:  # noqa: BLE001
+    except Exception as err:
         _LOGGER.exception("clear_examples failed")
         connection.send_error(msg["id"], "clear_failed", str(err))
         return
@@ -3815,7 +3821,7 @@ async def ws_analytics_preview(
                 "default_endpoint": DEFAULT_ANALYTICS_ENDPOINT,
             },
         )
-    except Exception as err:  # noqa: BLE001
+    except Exception as err:
         _LOGGER.exception("analytics_preview failed")
         connection.send_error(msg["id"], "preview_failed", str(err))
 
@@ -3856,7 +3862,7 @@ async def ws_list_ha_users(
         return
     try:
         users = await hass.auth.async_get_users()
-    except Exception as err:  # noqa: BLE001
+    except Exception as err:
         _LOGGER.exception("list_ha_users failed")
         connection.send_error(msg["id"], "list_failed", str(err))
         return
@@ -3868,7 +3874,7 @@ async def ws_list_ha_users(
             uid = cfg.data.get("user_id")
             if isinstance(uid, str) and uid:
                 mobile_app_users[uid] = mobile_app_users.get(uid, 0) + 1
-    except Exception:  # noqa: BLE001
+    except Exception:
         pass
     out = [
         {

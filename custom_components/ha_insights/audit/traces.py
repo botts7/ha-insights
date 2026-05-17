@@ -60,7 +60,7 @@ class TraceAggregates:
 
 
 async def fetch_trace_aggregates(
-    hass: "HomeAssistant",
+    hass: HomeAssistant,
     automation_id: str,
 ) -> TraceAggregates:
     """Return a TraceAggregates summarizing every stored trace for one
@@ -104,7 +104,7 @@ async def fetch_trace_aggregates(
 
 
 async def _list_traces(
-    hass: "HomeAssistant",
+    hass: HomeAssistant,
     item_id: str,
 ) -> list[dict[str, Any]] | None:
     """Read traces directly from HA's `hass.data[DATA_TRACE]` storage.
@@ -123,7 +123,7 @@ async def _list_traces(
     """
     try:
         from homeassistant.components.trace.const import DATA_TRACE
-    except Exception:  # noqa: BLE001
+    except Exception:
         return None
 
     trace_data = hass.data.get(DATA_TRACE)
@@ -155,7 +155,7 @@ async def _list_traces(
         if hasattr(t, "as_short_dict"):
             try:
                 out.append(t.as_short_dict())
-            except Exception:  # noqa: BLE001
+            except Exception:
                 continue
         elif isinstance(t, dict):
             out.append(t)
@@ -163,7 +163,7 @@ async def _list_traces(
 
 
 async def _get_trace(
-    hass: "HomeAssistant",
+    hass: HomeAssistant,
     item_id: str,
     run_id: str,
 ) -> dict[str, Any] | None:
@@ -171,7 +171,7 @@ async def _get_trace(
     returns None when not found."""
     try:
         from homeassistant.components.trace.const import DATA_TRACE
-    except Exception:  # noqa: BLE001
+    except Exception:
         return None
 
     trace_data = hass.data.get(DATA_TRACE)
@@ -190,7 +190,7 @@ async def _get_trace(
     if hasattr(trace, "as_dict"):
         try:
             return trace.as_dict()
-        except Exception:  # noqa: BLE001
+        except Exception:
             return None
     return trace if isinstance(trace, dict) else None
 

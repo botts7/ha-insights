@@ -1,4 +1,4 @@
-"""Co-occurrence-likelihood assessment — distinguish isolated device events from human-context events.
+"""Co-occurrence likelihood — isolated device events vs human-context events.
 
 Companion to `lib/timing_likelihood.py`. Where timing analyzes the
 variance / range of an entity's events across days, co-occurrence
@@ -58,11 +58,11 @@ from __future__ import annotations
 
 import statistics
 from dataclasses import asdict, dataclass
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 
-class CooccurrenceClass(str, Enum):
+class CooccurrenceClass(StrEnum):
     """Coarse classification of surrounding-event density."""
 
     HUMAN_CONTEXT = "human_context"
