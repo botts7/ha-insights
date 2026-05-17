@@ -2486,7 +2486,17 @@ Connects via WS, backdates entries to recorder. Produces a HA instance that <em>
 <td>Meta-detector that runs AFTER existing detectors. When a detector fires weakly because the install lacks the right sensor class (lights stay on &gt;3 h in area with no motion sensor → suggest motion / mmWave / BLE presence), emit <code>InsightKind.HARDWARE_SUGGESTION</code> with the <em>category</em> of device that would close the gap. <code>lib/hardware_gap_rules.py</code> (composable pure-function rules: one per gap type — presence, contact, energy, per-room temp, AQ, outdoor, water, illuminance). <strong>Hard non-commercial guardrails: categories only, no brands/SKUs, no buy buttons, no affiliate links, no price guidance, per-suggestion dismiss + per-area cooldown.</strong> Gated on user having set <code>goals_json</code> so we only suggest to users who opted-in to proactive advice.</td>
 </tr>
 <tr>
-<td>v1.16+</td>
+<td>v1.16</td>
+<td><strong>AdaptiveFeedbackDetector</strong> — learn from accept/reject/retire</td>
+<td>Meta detector consuming per-detector verdict history + environmental-change signals. Emits two kinds: (1) "you've rejected 18/20 X-detector suggestions, disable it?" (2) "we retired this 6 months ago but the automation it referenced was deleted / the sensor was moved — reconsider?" New <code>lib/user_verdict_history.py</code> (per-fingerprint accept/reject/retire counts, rolling window) + <code>lib/environmental_diff.py</code> (per-fingerprint context-changed-since-retire detection). <strong>Never auto-disables a detector or unretires silently</strong> — always surfaces as an actionable insight.</td>
+</tr>
+<tr>
+<td>v2.0</td>
+<td><strong>Per-person presence + identity-aware insights</strong></td>
+<td>New mental model: every detector that could be person-aware gets a <code>person_id</code> dimension. <code>lib/person_location.py</code> (per-person device_trackers + BLE proximity → per-(person, area, time) location probability) + <code>lib/identity_disambiguation.py</code> (negative-constraint reasoning: "can't be Alice if she's not home"). Publishes <code>sensor.ha_insights_&lt;person&gt;_location</code>. PersonalSchedulePatternDetector emits "Alice usually arrives 17:30 ± 12 min on weekdays" (not just "someone arrives"). Per-insight "That was X, not me" feedback corrects identity weights over time. Privacy: per-person opt-out, redactor extends to per-person IDs in LLM context. <strong>Prerequisites: HA <code>person.*</code> entities + companion app + recommended BLE proxies / mmWave.</strong></td>
+</tr>
+<tr>
+<td>v2.x+</td>
 <td>Polish + research backlog</td>
 <td>HAWatcher shadow execution (97 % precision validation); 2nd-order Markov + Shannon-entropy AIT approximation; survival-aware reminder cards</td>
 </tr>
