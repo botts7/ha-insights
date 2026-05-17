@@ -4420,6 +4420,7 @@ class HaInsightsCard extends i {
         <div class="row-title">
           ${this._displayTitle(insight)}
           ${this._renderCouplingBadge(insight)}
+          ${this._renderDirectionalityBadge(insight)}
           ${hasCohort
             ? b ` <button
                 class="pill-action"
@@ -4721,6 +4722,87 @@ class HaInsightsCard extends i {
             return insight.title;
         return insight.title.replace(/\s*(?:Automate\s+(?:this|it)\??|Build\s+automation\??)\s*$/i, "").trim();
     }
+    /** v1.4 (integration v1.9.1+): 🔀 directionality badge for
+     *  lagged_correlation pairs.
+     *
+     *  The integration runs transfer entropy on every detected pair
+     *  (`lib/transfer_entropy.py`) and stamps the result on the payload.
+     *  We render three states, each with a distinct visual:
+     *
+     *  - **direction "x_to_y"** with non-trivial flow → ✅ "direction
+     *    confirmed" (positive signal — the suggestion is well-grounded).
+     *  - **direction "y_to_x"** with non-trivial flow → ⚠️ "direction
+     *    looks reversed" (the proposed leader is actually the follower;
+     *    the integration already demoted confidence ×0.5 so it usually
+     *    falls below MIN_CONFIDENCE_TO_EMIT, but if one slipped through
+     *    the user should know).
+     *  - **direction "symmetric"** with both TEs above noise → 🔀
+     *    "no clear direction" (both entities probably driven by a
+     *    third factor like time of day, not by each other).
+     *
+     *  We skip rendering entirely when:
+     *    - assessment wasn't run (`assessed: false`)
+     *    - both TEs are below the noise floor (uninformative — usually
+     *      sparse data; surfacing a badge would be misleading)
+     *
+     *  The integration is the source of truth for *what* to demote;
+     *  the card is the source of truth for *how* to surface the
+     *  rationale to the user. See `lib/transfer_entropy.py` and
+     *  `detectors/lagged_correlation.py`.
+     */
+    _renderDirectionalityBadge(insight) {
+        const payload = insight.payload ?? {};
+        const dir = payload._directionality;
+        if (!dir || dir.assessed !== true)
+            return A;
+        // Noise-floor cutoff matches NOISE_FLOOR_BITS in lib/transfer_entropy.py.
+        // Mismatching this would surface badges the integration considered
+        // uninformative — keep them in sync.
+        const NOISE_FLOOR_BITS = 0.05;
+        const txy = typeof dir.te_x_to_y === "number" ? dir.te_x_to_y : 0;
+        const tyx = typeof dir.te_y_to_x === "number" ? dir.te_y_to_x : 0;
+        if (txy < NOISE_FLOOR_BITS && tyx < NOISE_FLOOR_BITS)
+            return A;
+        let icon = "🔀";
+        let label = "no clear direction";
+        let tooltip = "";
+        switch (dir.direction) {
+            case "x_to_y":
+                icon = "✅";
+                label = "direction confirmed";
+                tooltip = (`Transfer entropy ${txy.toFixed(2)} bits (forward) vs `
+                    + `${tyx.toFixed(2)} bits (reverse) — the leader's past `
+                    + "genuinely reduces uncertainty about the follower's future. "
+                    + "This suggestion is well-grounded.");
+                break;
+            case "y_to_x":
+                icon = "⚠️";
+                label = "direction reversed";
+                tooltip = (`Transfer entropy ${tyx.toFixed(2)} bits (reverse) vs `
+                    + `${txy.toFixed(2)} bits (forward) — the proposed leader `
+                    + "looks like the FOLLOWER. The entities may be mislabeled "
+                    + "or the causation runs the other way. Inspect before applying.");
+                break;
+            case "symmetric":
+                icon = "🔀";
+                label = "no clear direction";
+                tooltip = (`Forward and reverse transfer entropy are similar `
+                    + `(${txy.toFixed(2)} vs ${tyx.toFixed(2)} bits) — both `
+                    + "entities are probably driven by a third factor (time of "
+                    + "day, a manual ritual, an unseen scene) rather than by "
+                    + "each other. Consider whether automation adds value.");
+                break;
+            default:
+                return A;
+        }
+        return b `<span
+      class="pill-action directionality-badge"
+      style="margin-left:6px;"
+      role="img"
+      aria-label="${tooltip}"
+      title="${tooltip}"
+    >${icon} ${label}</span>`;
+    }
     /** v1.7: 🔗 badge for tight-coupled pairs.
      *
      *  Cooccurrence / lagged / button-press detectors stamp a `_coupling`
@@ -4755,6 +4837,103 @@ class HaInsightsCard extends i {
       aria-label="${tooltip}"
       title="${tooltip}"
     >🔗 coupled</span>`;
+    }
+    /** v1.7.7: render the "Managed devices" section in the detail dialog.
+     *
+     *  Lists every device this insight references with a toggle to mark
+     *  it "managed externally" — a user assertion that the device handles
+     *  its own logic and HA Insights should stop surfacing patterns from
+     *  it. Companion to the 🔗 coupling badge: that one INFERS coupling
+     *  from timing; this one is the explicit user override.
+     *
+     *  Shown only when the insight carries `referenced_devices` (server
+     *  v1.7.7+) AND at least one device is present. Cohort insights with
+     *  many member devices show all of them.
+     *
+     *  Toggling fires `home_insights/set_device_managed`. After the
+     *  toggle, currently-emitted insights from the device stay in the
+     *  store (they'll be cleaned up by the next scan's stale-sweep) but
+     *  any future scan won't surface new patterns. We optimistically
+     *  update the local insight's device.managed flag so the toggle
+     *  reflects immediately.
+     */
+    _renderManagedDevicesSection(insight) {
+        const devices = insight.referenced_devices;
+        if (!devices || devices.length === 0)
+            return A;
+        return b `
+      <h4>Devices</h4>
+      <div class="managed-devices">
+        <p style="margin-top:0; color: var(--secondary-text-color); font-size: 0.92em;">
+          Mark a device "managed externally" to stop surfacing patterns
+          from it. Different from automatic device-managed detection
+          — this is your explicit assertion.
+        </p>
+        <ul style="list-style: none; padding: 0; margin: 0;">
+          ${devices.map((d) => b `
+            <li style="display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--divider-color);">
+              <span style="flex: 1;">
+                <strong>${d.name}</strong>
+                <span style="color: var(--secondary-text-color); font-size: 0.85em; margin-left: 6px;">${d.device_id.slice(0, 8)}…</span>
+              </span>
+              ${d.managed
+            ? b `<button
+                    class="pill-action"
+                    style="background: var(--warning-color, #ef6c00); color: white; border-color: var(--warning-color, #ef6c00);"
+                    title="Currently suppressed. Click to restore — future patterns from this device will surface again."
+                    @click=${() => this._setDeviceManaged(d.device_id, false)}
+                  >✓ Suppressed — restore</button>`
+            : b `<button
+                    class="pill-action"
+                    title="Stop surfacing future insights from this device. Existing insights stay until next scan."
+                    @click=${() => this._setDeviceManaged(d.device_id, true)}
+                  >🔇 Suppress device</button>`}
+            </li>
+          `)}
+        </ul>
+      </div>
+    `;
+    }
+    /** Toggle a device's managed-externally flag. Optimistic UI: flip
+     *  the local insight's `referenced_devices[].managed` immediately,
+     *  then call the server. On failure, log + leave the optimistic
+     *  state (user can retry; next scan will re-sync). */
+    async _setDeviceManaged(deviceId, managed) {
+        // Optimistic local update
+        this._insights = this._insights.map((i) => {
+            if (!i.referenced_devices)
+                return i;
+            if (!i.referenced_devices.some((d) => d.device_id === deviceId))
+                return i;
+            return {
+                ...i,
+                referenced_devices: i.referenced_devices.map((d) => d.device_id === deviceId ? { ...d, managed } : d),
+            };
+        });
+        try {
+            await this.hass.callWS({
+                type: "home_insights/set_device_managed",
+                device_id: deviceId,
+                managed,
+            });
+            this._toast = managed
+                ? "Device suppressed. New patterns from it won't appear."
+                : "Device restored. Future patterns from it will appear again.";
+        }
+        catch (err) {
+            // Revert optimistic update
+            this._insights = this._insights.map((i) => {
+                if (!i.referenced_devices)
+                    return i;
+                if (!i.referenced_devices.some((d) => d.device_id === deviceId))
+                    return i;
+                return {
+                    ...i,
+                    referenced_devices: i.referenced_devices.map((d) => d.device_id === deviceId ? { ...d, managed: !managed } : d),
+                };
+            });
+            this._toast = `Failed: ${this._asMessage(err)}`;
+        }
     }
     /** Render an "🔁 already automated" or "🤖 in N automations" pill.
      *
@@ -5947,6 +6126,7 @@ class HaInsightsCard extends i {
             <div class="dialog-title">
               ${this._displayTitle(insight)}
               ${this._renderCouplingBadge(insight)}
+              ${this._renderDirectionalityBadge(insight)}
             </div>
             <button
               class="dialog-close"
@@ -5988,6 +6168,7 @@ class HaInsightsCard extends i {
                         ${this._hypothesisById.get(insight.id)}
                       </div>`
                         : A}
+                  ${this._renderManagedDevicesSection(insight)}
                   ${this._renderPreview(insight)}
                   ${this._renderRename(insight, undefined)}
                   ${llmEnabled
