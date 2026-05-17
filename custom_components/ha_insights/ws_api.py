@@ -4219,11 +4219,41 @@ async def ws_identify_capability(
     from homeassistant.helpers import device_registry as dr
     from homeassistant.helpers import entity_registry as er
 
+    from .lib.dedup_signals import (
+        DeviceRecord,
+        EntityRecord,
+        find_dedup_candidates,
+    )
     from .lib.identify_capability import identify_capability_for
     from .lib.name_quality import score_name_quality
 
     e_reg = er.async_get(hass)
     d_reg = dr.async_get(hass)
+
+    # v1.10.3 — build the full entity/device projections ONCE so
+    # find_dedup_candidates can do O(N) lookups per query entity
+    # instead of O(N*M) registry scans.
+    all_entity_records: dict[str, EntityRecord] = {}
+    for er_ent in e_reg.entities.values():
+        all_entity_records[er_ent.entity_id] = EntityRecord(
+            entity_id=er_ent.entity_id,
+            device_id=er_ent.device_id,
+            original_name=er_ent.original_name,
+        )
+    all_device_records: dict[str, DeviceRecord] = {}
+    for dev in d_reg.devices.values():
+        all_device_records[dev.id] = DeviceRecord(
+            device_id=dev.id,
+            manufacturer=dev.manufacturer,
+            model=dev.model,
+            via_device_id=dev.via_device_id,
+            connections=[(t, v) for t, v in (dev.connections or set())],
+            identifiers=[(t, v) for t, v in (dev.identifiers or set())],
+        )
+    # Only collect state attributes for the requested entities + their
+    # candidates' entities. Full-state collection would be wasteful
+    # on huge installs.
+    state_attrs: dict[str, dict[str, Any]] = {}
 
     entity_ids = msg["entity_ids"]
     capabilities: dict[str, dict[str, Any]] = {}
@@ -4269,6 +4299,33 @@ async def ws_identify_capability(
             model=model,
             integration_domain=integration_domain,
         )
+
+        # v1.10.3 — populate state_attrs lazily for this entity so
+        # the IP/host signal can compare against others. Build only
+        # the attrs we need — Map.get on missing is fine.
+        if state is not None and eid not in state_attrs:
+            ip_attr = state.attributes.get("ip_address")
+            host_attr = state.attributes.get("host")
+            if isinstance(ip_attr, str) or isinstance(host_attr, str):
+                state_attrs[eid] = {
+                    "ip_address": ip_attr,
+                    "host": host_attr,
+                }
+
+        # Run dedup against the full registry projection. For the IP
+        # signal to work bidirectionally we need state_attrs to also
+        # cover the *candidate* side — populate any candidate that
+        # has IP/host on its state. Cheap because we only touch each
+        # state object once across the loop.
+        dedup_candidates = find_dedup_candidates(
+            eid,
+            entity_records=all_entity_records,
+            device_records=all_device_records,
+            state_attributes=_collect_ip_attrs_for_candidates(
+                hass, all_entity_records, eid, state_attrs
+            ),
+        )
+
         capabilities[eid] = {
             "method": cap.method.value,
             "description": cap.description,
@@ -4280,8 +4337,45 @@ async def ws_identify_capability(
                 "source": nq.source,
                 "reason": nq.reason,
             },
+            "same_as": [
+                {
+                    "entity_id": c.entity_id,
+                    "reason": c.reason,
+                    "confidence": c.confidence,
+                }
+                for c in dedup_candidates
+            ],
         }
     connection.send_result(msg["id"], {"capabilities": capabilities})
+
+
+def _collect_ip_attrs_for_candidates(
+    hass: HomeAssistant,
+    entity_records: dict[str, Any],
+    me_eid: str,
+    cache: dict[str, dict[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    """Ensure the cache has IP/host attrs for ANY entity that might
+    match `me_eid` via the IP signal. Cheap — only touches entities
+    whose state object exists and exposes an IP/host attribute."""
+    # If the query entity itself has no IP/host, no IP-based match is
+    # possible — skip the work entirely.
+    if me_eid not in cache:
+        return cache
+    for other_eid in entity_records:
+        if other_eid == me_eid or other_eid in cache:
+            continue
+        other_state = hass.states.get(other_eid)
+        if other_state is None:
+            continue
+        ip_attr = other_state.attributes.get("ip_address")
+        host_attr = other_state.attributes.get("host")
+        if isinstance(ip_attr, str) or isinstance(host_attr, str):
+            cache[other_eid] = {
+                "ip_address": ip_attr,
+                "host": host_attr,
+            }
+    return cache
 
 
 @websocket_api.websocket_command(
