@@ -8,6 +8,26 @@ All notable changes to this project are documented in this file. Format follows 
 
 ### Fixed
 
+- **Second wave of pre-existing test failures (issue #11).** After
+  the first batch fixes landed, pytest collection progressed further
+  and surfaced 7 more failures with the same root cause: stale seed
+  counts vs raised thresholds. All fixed:
+  - `test_long_tail_detector.py`: 4 tests needed ≥5 spans (confidence
+    formula is `count/10`, MIN_CONFIDENCE_TO_EMIT=0.5).
+  - `test_lagged_correlation_detector.py`: needed ≥6 pairs (inherited
+    cooccurrence floor of 0.55).
+  - `test_frequency_anomaly_detector.py`: renamed
+    `test_three_x_ratio_is_threshold` → `test_eight_x_ratio_is_threshold`
+    after v0.9 bumped RATIO_THRESHOLD from 3 to 8.
+  - `test_schedule_detector.py`: loosened a confidence-value assertion
+    that synthetic single-entity seeds can no longer satisfy now that
+    `assess_human_likelihood` shapes confidence.
+  - `test_streak_detector.py`: fixed UTC-vs-local-time mismatch in the
+    seed helper — `dt_util.as_local` in the detector was reading
+    timezone-shifted hours on non-UTC test runners.
+  - `ws_api.py`: dropped `dev_inject_event` from `SUPPORTED_METHODS`
+    (test already enforced it's debug-only).
+
 - **BETA-detector audit (issue #11 follow-up).**
   `ButtonPressHabitDetector._already_automated` only matched scalar
   `entity_id` on existing triggers. HA state triggers accept either a
