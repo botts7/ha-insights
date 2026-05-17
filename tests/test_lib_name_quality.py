@@ -189,14 +189,15 @@ def test_single_word_with_number_is_generic() -> None:
     assert q.tier == NameQualityTier.GENERIC_DOMAIN
 
 
-def test_short_word_alone_does_not_count() -> None:
-    """"ATC" alone (3 chars but no vowel→ should be rejected) doesn't qualify."""
+def test_short_word_with_consonant_blob_does_not_count() -> None:
+    """A name like "Hi xy" has one too-short word + one no-vowel
+    blob → no real words → not friendly."""
     q = score_name_quality(
         "sensor.foo",
-        original_name="ATC short",
+        original_name="Hi xy",
     )
-    # "ATC" has no vowel (per WORD_RE); "short" has 5 chars+vowel — only
-    # one real word → not friendly.
+    # "Hi" is 2 chars (< 3); "xy" has no vowel. Zero real words →
+    # falls through past friendly_set.
     assert q.tier != NameQualityTier.FRIENDLY_SET
 
 
