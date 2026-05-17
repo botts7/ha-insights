@@ -4,6 +4,43 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+## [1.5.51] — 2026-05-17
+
+### Fixed
+
+- **Pre-existing test failures surfaced by v1.5.50.** v1.5.50 cleared the
+  ruff backlog and pytest collection started running — which immediately
+  exposed ~10 tests that had been broken across multiple versions but
+  hidden because ruff was failing the `pytest` step. Resolved here as
+  [#11](https://github.com/botts7/ha-insights/issues/11). All test
+  failures are now green:
+
+  - **`conflict_scanner.py`**: real production bug. The schedule-like
+    fallback added in 2026-05-10 (ea61c3936) over-fired on
+    same-`platform: time` pairs that the time-window check had already
+    decided were not in conflict. Added an `_all_platform_time(a) and
+    _all_platform_time(b)` short-circuit before the fallback — when both
+    sides have only directly-comparable time triggers, the
+    `_times_close` check is authoritative. Catches the same edge case
+    where a malformed `at: not-a-time` would get flagged purely from
+    the fallback. The schedule-like fallback still does its intended
+    job for cross-platform cases (time vs sun, calendar, etc.).
+  - **`test_conflict_scanner.py`**: 3 state-trigger tests assumed
+    overlap on the source entity alone was a conflict, but the scanner
+    has required overlap on BOTH source entity AND action target since
+    earlier. The tests' action targets differed by name; updated to
+    overlap so the tests test what their names claim.
+  - **`test_config_flow.py`**: the OptionsFlow init step is now a menu
+    (Quick wizard / per-user overrides / Advanced); lookback_days lives
+    inside Advanced. The test was written when init was a single form.
+    Rewrote to walk init-menu → Advanced → submit.
+  - **`test_cooccurrence_detector.py`**: 3 tests seeded 8 pairs but the
+    v0.5+ busy-entity prefilter requires per-entity count ≥
+    `MIN_OCCURRENCES = 15`. Bumped seeds to 16 pairs to clear the
+    threshold. (The "StopIteration" failure in
+    `test_payload_has_state_trigger_and_service_action` was the same
+    root cause — `next()` on an empty insights list.)
+
 ## [1.5.50] — 2026-05-17
 
 ### Fixed

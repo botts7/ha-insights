@@ -124,7 +124,12 @@ def test_get_lookback_days_invalid_returns_default() -> None:
 
 
 async def test_options_flow_includes_lookback_days(hass: HomeAssistant) -> None:
-    """OptionsFlow lets the user change lookback in-place."""
+    """OptionsFlow Advanced sub-step exposes lookback_days for in-place editing.
+
+    The init step now shows a menu (Quick wizard / per-user overrides /
+    Advanced); lookback_days lives inside the Advanced form. This test
+    walks: init-menu → Advanced → submit-new-lookback.
+    """
     entry = MockConfigEntry(
         domain=DOMAIN,
         data={CONF_LLM_MODE: LlmMode.OFF.value, CONF_LOOKBACK_DAYS: 14},
@@ -132,10 +137,18 @@ async def test_options_flow_includes_lookback_days(hass: HomeAssistant) -> None:
         title="HA Insights",
     )
     entry.add_to_hass(hass)
+
     result = await hass.config_entries.options.async_init(entry.entry_id)
-    assert result["type"] is FlowResultType.FORM
+    assert result["type"] is FlowResultType.MENU
     assert result["step_id"] == "init"
-    # Schema should expose the lookback field
+    assert "advanced" in result["menu_options"]
+
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        user_input={"next_step_id": "advanced"},
+    )
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "advanced"
     schema_keys = {str(k) for k in result["data_schema"].schema}
     assert CONF_LOOKBACK_DAYS in schema_keys
 
