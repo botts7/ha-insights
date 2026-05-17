@@ -4,6 +4,81 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+## [1.12.9] — 2026-05-17
+
+### Fixed — real-install false positives (StateShiftDetector)
+
+User on v1.12.8 reported 5 state_shift insights that were
+all the same class of false positive: devices that were just
+added to the install registered as a "behavioral shift" from
+0/day to N/day.
+
+| Entity | "Shift" claim | Reality |
+|---|---|---|
+| 4× `switch.adguard_home_*` + 1× `binary_sensor.nas_security_status` | 0 → 11/day, 7 days ago | AdGuard + Synology integrations added 7 days ago |
+| `light.passage`, `binary_sensor.porch_sensor_motion` | 0 → 131/day & 50/day, 10 days ago | Newly-added devices |
+
+The v1.12.7 guard checked `(days_of_history < 5 AND
+pre_shift_events < 10)` — but `days_of_history` was computed
+from the **GLOBAL earliest event timestamp** across all
+entities. If any other entity in the install had data older
+than the cp, this check passed even when the current entity
+had zero pre-shift events. Real installs always have at
+least one long-running entity, so the days-AND guard never
+fired in practice.
+
+### What changed
+
+Dropped the days-of-history check entirely. The guard is now
+simply:
+
+```python
+if pre_shift_event_count < _MIN_PRE_SHIFT_EVENTS:  # < 10
+    continue  # suppress
+```
+
+`pre_shift_event_count` is computed per-entity from
+`day_buckets` (already in scope), so it correctly reflects
+THIS entity's pre-shift activity. Zero events before the
+"shift" → device-started-reporting; suppress.
+
+#### Edge case: device that went legitimately silent
+
+If an existing device fell offline for the entire pre-shift
+period (sensor failure, broken integration), its
+pre_shift_event_count is also 0 → also suppressed.
+
+That's acceptable: the user can't usefully distinguish
+"newly added device" from "previously broken device coming
+back online" without registry timestamps we don't track. The
+shift itself has no actionable signal in either case.
+
+#### Test update
+
+`test_state_shift_detector.py::test_data_window_guard_constant_exists`
+now asserts that `_MIN_PRE_SHIFT_DAYS` is **absent**
+(intentionally removed in v1.12.9), and only
+`_MIN_PRE_SHIFT_EVENTS` remains.
+
+### What v1.12.9 does NOT yet fix
+
+Real-install testing also surfaced (deferred to v1.13):
+
+- **Schedule + streak insights with <20% confidence on
+  already-automated entities** (e.g.
+  `switch.main_room_led_bar` at 10% conf with `🔁 already
+  automated` tag). These produce filler insights that have
+  no action value. Fix: per-detector post-emit filter that
+  drops `confidence < 0.50` when the insight has tags
+  `["already_automated", "device_managed"]`.
+
+- **Newly-added entity badge** — even after start-of-data
+  state_shift insights are suppressed, the user may still
+  see *other* detectors emit on a newly-added entity (e.g.
+  schedule with 1-day history). A "Newly added N days ago"
+  badge on insight rows would give context without
+  suppressing legitimate findings.
+
 ## [1.12.8] — 2026-05-17
 
 ### Added — card-renderer + test backfill (agent review pt. 2)

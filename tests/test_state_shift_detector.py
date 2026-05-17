@@ -99,17 +99,23 @@ async def test_handles_start_of_data_window_without_crashing() -> None:
 
 
 @pytest.mark.asyncio
-async def test_data_window_guard_constants_exist() -> None:
-    """Belt-and-suspenders: confirm the v1.12.7 guard constants
-    are defined and have reasonable values. If a future refactor
-    accidentally removes the guard, this fails immediately."""
+async def test_data_window_guard_constant_exists() -> None:
+    """Belt-and-suspenders: confirm the v1.12.9 guard constant
+    is defined and has a reasonable value. If a future refactor
+    accidentally removes the guard, this fails immediately.
+
+    v1.12.9 simplified the guard from (days AND events) to just
+    (events) after real-install testing caught that the days
+    check used global earliest-event-time and let entity-specific
+    false positives through."""
     from custom_components.ha_insights.detectors import state_shift
 
-    assert hasattr(state_shift, "_MIN_PRE_SHIFT_DAYS")
     assert hasattr(state_shift, "_MIN_PRE_SHIFT_EVENTS")
     # Sanity: > 0 so the guard does SOMETHING.
-    assert state_shift._MIN_PRE_SHIFT_DAYS > 0
     assert state_shift._MIN_PRE_SHIFT_EVENTS > 0
+    # v1.12.7's _MIN_PRE_SHIFT_DAYS should NOT exist anymore
+    # (intentionally removed in v1.12.9).
+    assert not hasattr(state_shift, "_MIN_PRE_SHIFT_DAYS")
 
 
 # ---------- Basic detector behaviour -----------------------------------
