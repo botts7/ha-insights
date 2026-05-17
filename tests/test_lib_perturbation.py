@@ -141,20 +141,25 @@ def test_elimination_user_touched_wrong_sensor() -> None:
 
 
 def test_no_signal_when_nothing_spikes() -> None:
+    """Deterministic stable baseline (zero variance → STDDEV_FLOOR=0.1
+    in native units), test deviations small enough that z stays well
+    below the 3.0 threshold."""
     baseline = {
-        "sensor.temp_a": _noisy_baseline(22.0),
-        "sensor.temp_b": _noisy_baseline(21.5),
+        "sensor.temp_a": _flat_baseline(22.0),
+        "sensor.temp_b": _flat_baseline(21.5),
     }
+    # Max deviation 0.1 against stddev_floor 0.1 → z = 1.0, below
+    # the default threshold of 3.0.
     test = {
-        "sensor.temp_a": [22.0, 22.1, 22.05, 22.1, 22.0],
-        "sensor.temp_b": [21.5, 21.5, 21.6, 21.5, 21.5],
+        "sensor.temp_a": [22.0, 22.05, 22.1, 22.05, 22.0],
+        "sensor.temp_b": [21.5, 21.5, 21.55, 21.5, 21.5],
     }
     result = analyze_perturbation(baseline, test)
     assert result.decision == "no_signal"
     assert result.top_match is None
-    assert "stronger perturbation" in result.reason.lower() or (
+    assert "no candidate" in result.reason.lower() or (
         "didn't spike" in result.reason.lower()
-        or "no candidate" in result.reason.lower()
+        or "stronger" in result.reason.lower()
     )
 
 
