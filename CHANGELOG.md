@@ -4,6 +4,88 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+## [1.10.0] — 2026-05-17
+
+### Added — Find My Device, phase A
+
+Two foundational libs that future v1.10–v1.12 features will build on,
+plus the first user-callable WS endpoints. The card-side 🔆 button
+lands in a follow-up card release (this is the backend half).
+
+#### `lib/identify_capability.py` — what signal an entity can emit
+
+Pure function: given an entity_id + state snapshot, return the BEST
+identify method available:
+
+| Method | Trigger | Use case |
+|---|---|---|
+| `flash_light` | `light.turn_on` with `flash: short` | Lights with `SUPPORT_FLASH` |
+| `strobe_light` | manual on/off/on/off/on at 350ms | Any light |
+| `play_chime` | `media_player.play_media` with a chime URL | Speakers |
+| `siren_chirp` | `siren.turn_on` for 1s | Sirens |
+| `switch_toggle` | toggle 3× (relay click audible) | Switches |
+| `none` | — | Passive sensors; falls back to v1.10 Phase B |
+
+Returns a frozen `IdentifyCapability(method, description,
+service_calls, inter_call_delay_ms)`. Caller (the WS handler) does
+the actual `hass.services.async_call`, keeping I/O out of the
+testable layer.
+
+#### `lib/name_quality.py` — how meaningful is the entity's name
+
+Pure function: scores an entity's name on a 5-tier scale:
+
+| Tier | Score | Detected by |
+|---|---|---|
+| `user_override` | 1.00 | `EntityRegistryEntry.name` is set |
+| `cloud` | 0.85 | Integration ∈ Tuya/Hue/HomeKit/Lutron/etc. + name ≠ MAC-ish |
+| `friendly_set` | 0.70 | `friendly_name` attribute reads as ≥2 real words |
+| `mfr_model` | 0.50 | Name contains manufacturer + model (ZHA pattern) |
+| `generic_domain` | 0.25 | Fallback object_id rendering |
+| `mac_pattern` | 0.10 | Hex blob / `xx:xx` segments (BLE scanner pattern) |
+
+Recognizes ~25 cloud-name integrations and ~7 known-low-quality
+integrations (bluetooth, bthome, ble_monitor, xiaomi_ble, govee_ble,
+switchbot, inkbird). Word-detection requires vowel + ≥3 chars so
+"ATC" doesn't count as a word.
+
+Critical for routing v1.10+ Find-My-Device features: high-quality
+names ("Kitchen Floor Lamp") don't need identification; low-quality
+names ("ATC_a4c138") are exactly when 🔆 earns its keep. Without
+this scoring, every orphan entity would show an identify button —
+spamming UI for users with well-named cloud integrations.
+
+Future uses:
+- v1.10.1 dedup hint (name similarity is one signal)
+- v1.11 location inference ("Kitchen Lamp" → kitchen, no
+  correlation math needed)
+- v1.11 physical-device-link detector (similar names + similar
+  state = likely same physical device)
+
+#### WS endpoints
+
+- `home_insights/identify_capability` — read-only; returns
+  capability + name_quality for a batch of entity_ids. The card
+  calls this once per panel open. Not admin-gated (read-only).
+- `home_insights/identify_entity` — admin-gated; actually fires
+  the service calls for one entity. Returns method used + count
+  of calls fired. Logs warning on partial failure.
+
+### Tests
+
+- `tests/test_lib_name_quality.py` — 20 cases covering each tier,
+  user-override precedence, MAC-ish detection corner cases, word
+  detection (vowel + length), and assessment shape.
+
+### Roadmap progress
+
+- v1.10 Phase A backend ✅ (THIS)
+- v1.10 Phase A card 🔆 button (next — card v1.5.0)
+- v1.10.1 dedup hint (cheap; uses MAC/IP attrs + name similarity)
+- v1.10 Phase B perturbation (👆 touch-test; v1.10.5 or v1.11)
+- v1.11 location inference + physical-device-link detector
+- v1.12 BLE live-find
+
 ## [1.9.2] — 2026-05-17
 
 ### Changed
