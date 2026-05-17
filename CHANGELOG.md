@@ -4,6 +4,20 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+## [1.12.5] — 2026-05-17
+
+### Changed
+
+- **Bundle card v1.10.0 panel.js** — picks up the 📡 BLE live-find
+  button + RSSI scope modal that subscribes to v1.12.0's
+  `home_insights/ble_live_find` endpoint. Integration-only users
+  (no standalone HACS card) get the third Find-My-Device axis.
+- Also picks up explicit **EXP/BETA maturity badges** on every
+  Find-My-Device button so beta testers see the maturity of each
+  feature at a glance (🔆 stable; 👆 BETA; 📡 EXP).
+
+Bundle-only change. Card source of truth: ha-insights-card v1.10.0.
+
 ## [1.12.1] — 2026-05-17
 
 ### Added — setup_quality covers the v1.6+ research detectors
