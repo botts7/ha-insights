@@ -14,7 +14,6 @@ from custom_components.ha_insights.lib.device_alternative_identifier import (
     to_sibling,
 )
 
-
 # ---------- Priority 1: diagnostic-category sibling -----------------
 
 

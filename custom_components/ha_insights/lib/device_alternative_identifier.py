@@ -52,7 +52,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-
 # Domains where substitution makes sense — power-cycling identify
 # methods. Lights bypass entirely (their identify is already safe
 # via FLASH_LIGHT / BRIGHTNESS_WIGGLE).
