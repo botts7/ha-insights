@@ -30,9 +30,10 @@ from ._helpers import (
     _resolve_preferred_agent_id,
 )
 
-# v1.13.4-v1.13.5 steps 2-3 of the ws_api refactor — Find My Device
-# + BLE live-find handlers moved out to their own files. Imported
-# back here so async_register + any external consumer keeps working.
+# v1.13.4-v1.13.6 steps 2-4 of the ws_api refactor — Find My Device,
+# BLE live-find, and ManagedDevices handlers moved out to their own
+# files. Imported back here so async_register + any external consumer
+# keeps working.
 from .ble_find import (
     ws_ble_capability,
     ws_ble_live_find,
@@ -42,6 +43,11 @@ from .identify import (
     ws_identify_entity,
     ws_perturbation_guide,
     ws_perturbation_test,
+)
+from .managed_devices import (
+    _managed_devices_set,
+    ws_list_managed_devices,
+    ws_set_device_managed,
 )
 
 # Re-export for any external consumer that's reaching into ws_api
@@ -57,8 +63,10 @@ __all__ = [
     "ws_ble_live_find",
     "ws_identify_capability",
     "ws_identify_entity",
+    "ws_list_managed_devices",
     "ws_perturbation_guide",
     "ws_perturbation_test",
+    "ws_set_device_managed",
 ]
 
 _LOGGER = logging.getLogger(__name__)
@@ -4116,124 +4124,12 @@ async def ws_set_user_override(
     connection.send_result(msg["id"], {"overrides": current})
 
 
-# ---------- v1.7.7: per-device "managed externally" flag ------------------
-
-
-def _managed_devices_set(entry) -> set[str]:
-    """Read the user's current managed-externally device set."""
-    from ..config_flow import CONF_MANAGED_EXTERNALLY_DEVICES
-
-    raw = entry.options.get(CONF_MANAGED_EXTERNALLY_DEVICES, [])
-    if not isinstance(raw, (list, tuple, set)):
-        return set()
-    return {d for d in raw if isinstance(d, str)}
-
-
-@websocket_api.websocket_command(
-    {
-        vol.Required("type"): "home_insights/list_managed_devices",
-    }
-)
-@websocket_api.async_response
-async def ws_list_managed_devices(
-    hass: HomeAssistant,
-    connection: websocket_api.ActiveConnection,
-    msg: dict[str, Any],
-) -> None:
-    """Return currently-flagged devices with name + entity count.
-
-    Admin-only. Used by the card's per-device toggle UI and the
-    OptionsFlow management screen.
-    """
-    if not _require_admin(hass, connection, msg):
-        return
-    entries = hass.config_entries.async_entries(DOMAIN)
-    if not entries:
-        connection.send_error(msg["id"], "no_entry", "No HA Insights entry")
-        return
-    entry = entries[0]
-    flagged = _managed_devices_set(entry)
-    if not flagged:
-        connection.send_result(msg["id"], {"devices": []})
-        return
-    try:
-        from homeassistant.helpers import device_registry as dr
-        from homeassistant.helpers import entity_registry as er
-
-        d_reg = dr.async_get(hass)
-        e_reg = er.async_get(hass)
-        entity_counts: dict[str, int] = {}
-        for ent in e_reg.entities.values():
-            if ent.device_id:
-                entity_counts[ent.device_id] = entity_counts.get(ent.device_id, 0) + 1
-        out: list[dict[str, Any]] = []
-        for device_id in sorted(flagged):
-            device = d_reg.async_get(device_id)
-            if device is None:
-                # Device deleted from HA but still in our flag list —
-                # surface so the user can clean it up.
-                out.append({
-                    "device_id": device_id,
-                    "name": f"<deleted: {device_id[:8]}…>",
-                    "entity_count": 0,
-                    "deleted": True,
-                })
-                continue
-            out.append({
-                "device_id": device_id,
-                "name": device.name_by_user or device.name or device_id[:8],
-                "manufacturer": device.manufacturer,
-                "model": device.model,
-                "entity_count": entity_counts.get(device_id, 0),
-                "deleted": False,
-            })
-        connection.send_result(msg["id"], {"devices": out})
-    except Exception as err:
-        _LOGGER.exception("list_managed_devices failed")
-        connection.send_error(msg["id"], "list_failed", str(err))
-
-
-@websocket_api.websocket_command(
-    {
-        vol.Required("type"): "home_insights/set_device_managed",
-        vol.Required("device_id"): str,
-        vol.Required("managed"): bool,
-    }
-)
-@websocket_api.async_response
-async def ws_set_device_managed(
-    hass: HomeAssistant,
-    connection: websocket_api.ActiveConnection,
-    msg: dict[str, Any],
-) -> None:
-    """Add or remove a device from the managed-externally set.
-
-    Admin-only. Returns the updated set. Idempotent — adding an
-    already-flagged device or removing an absent one is a no-op.
-    """
-    if not _require_admin(hass, connection, msg):
-        return
-    entries = hass.config_entries.async_entries(DOMAIN)
-    if not entries:
-        connection.send_error(msg["id"], "no_entry", "No HA Insights entry")
-        return
-    entry = entries[0]
-    device_id = msg["device_id"]
-    managed = msg["managed"]
-    flagged = _managed_devices_set(entry)
-    if managed:
-        flagged.add(device_id)
-    else:
-        flagged.discard(device_id)
-    from ..config_flow import CONF_MANAGED_EXTERNALLY_DEVICES
-
-    merged_options = dict(entry.options)
-    merged_options[CONF_MANAGED_EXTERNALLY_DEVICES] = sorted(flagged)
-    hass.config_entries.async_update_entry(entry, options=merged_options)
-    connection.send_result(
-        msg["id"],
-        {"managed_devices": sorted(flagged)},
-    )
+# v1.13.6 — ManagedDevices handlers (ws_list_managed_devices,
+# ws_set_device_managed + helper _managed_devices_set) moved to
+# ws_api/managed_devices.py during the v1.13 refactor (step 4).
+# Imported at the top of this module and registered via async_register
+# below; this comment stub preserves the section boundary for future
+# readers.
 
 
 # v1.13.4 — Find My Device handlers (ws_identify_capability,

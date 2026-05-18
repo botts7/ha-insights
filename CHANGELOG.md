@@ -4,6 +4,37 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+## [1.13.6] — 2026-05-19
+
+### Internal — ws_api/managed_devices.py extraction (v1.13 step 4)
+
+Step 4 of the v1.13 ws_api refactor. Two ManagedDevices handlers
++ one helper extracted from `ws_api/__init__.py`:
+
+  - `ws_list_managed_devices`
+  - `ws_set_device_managed`
+  - `_managed_devices_set` (helper, also used by one other handler
+    in `__init__` so it's imported back via the same path)
+
+Re-imported back into `ws_api/__init__.py` and added to `__all__`.
+
+`ws_api/__init__.py` shrinks from 4,474 → 4,369 lines (-105 net).
+New `ws_api/managed_devices.py` is 171 lines.
+
+**Cumulative refactor progress** vs 5,259-line pre-refactor
+baseline:
+- v1.12.25 helpers: -180 lines
+- v1.13.4 identify: -567 lines
+- v1.13.5 ble_find: -218 lines
+- v1.13.6 managed_devices: -105 lines
+- **Total: -1,070 lines extracted; monolith now 4,369 lines.**
+
+That completes the three isolated handler groups flagged by the
+dependency-map memory (BLE + IDENTIFY + MANAGED_DEVICES). The
+remaining big extraction is the REFINE handler family (8 handlers
++ 6 helpers, higher coupling) — planned for v1.13.7+ as a
+multi-step refactor: helpers first, then handler groups.
+
 ## [1.13.5] — 2026-05-19
 
 ### Internal — ws_api/ble_find.py extraction (v1.13 step 3)
