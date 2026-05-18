@@ -56,6 +56,17 @@ DEFAULT_SCAN_INTERVAL_HOURS = 0
 SCAN_INTERVAL_HOURS_RANGE = (0, 168)  # 0 = off, up to weekly
 CONF_NOTIFY_ON_INSIGHT = "notify_on_insight"
 CONF_NOTIFY_THRESHOLD = "notify_threshold"
+# v1.13.1 — Repairs dual-emit for high-confidence proposal-style
+# insights (schedule / cooccurrence / stale_automation / etc.). OFF
+# by default — busy installs can produce dozens of high-confidence
+# proposals per scan and the Repairs surface stays useful only when
+# it's a high-signal channel. Users who WANT proposals visible in
+# Settings → Repairs opt in via OptionsFlow.
+# Audit findings (deterministic linter output) keep their existing
+# Repairs emission path regardless of this flag — that bridge has
+# field-tested signal quality from v1.2.
+CONF_EMIT_PROPOSALS_TO_REPAIRS = "emit_proposals_to_repairs"
+DEFAULT_EMIT_PROPOSALS_TO_REPAIRS = False
 # Comma-separated list of `notify.*` service names that should receive
 # new high-confidence insight pushes (mobile-app integration). Empty
 # string = disabled, persistent_notification only. Time-critical
@@ -1607,6 +1618,14 @@ class HaInsightsOptionsFlow(OptionsFlow):
         current_digest_on, current_digest_hour = get_digest_settings(
             self.config_entry
         )
+        # v1.13.1: Repairs dual-emit for proposal-stream insights.
+        current_emit_proposals = self.config_entry.options.get(
+            CONF_EMIT_PROPOSALS_TO_REPAIRS,
+            self.config_entry.data.get(
+                CONF_EMIT_PROPOSALS_TO_REPAIRS,
+                DEFAULT_EMIT_PROPOSALS_TO_REPAIRS,
+            ),
+        )
         current_preferred = get_preferred_agent_id(self.config_entry) or ""
         current_refine_threshold = get_refine_cost_threshold(self.config_entry)
         current_allow_user_detectors = get_allow_user_detectors(self.config_entry)
@@ -1702,6 +1721,11 @@ class HaInsightsOptionsFlow(OptionsFlow):
             )
             self._digest_hour = int(
                 user_input.get(CONF_DIGEST_HOUR, current_digest_hour)
+            )
+            self._emit_proposals_to_repairs = bool(
+                user_input.get(
+                    CONF_EMIT_PROPOSALS_TO_REPAIRS, current_emit_proposals,
+                )
             )
             preferred_raw = user_input.get(
                 CONF_PREFERRED_AGENT_ID, current_preferred
@@ -1829,6 +1853,9 @@ class HaInsightsOptionsFlow(OptionsFlow):
                     ),
                     CONF_DIGEST_ENABLED: self._digest_enabled,
                     CONF_DIGEST_HOUR: self._digest_hour,
+                    CONF_EMIT_PROPOSALS_TO_REPAIRS: (
+                        self._emit_proposals_to_repairs
+                    ),
                     CONF_PREFERRED_AGENT_ID: self._preferred_agent_id or "",
                     CONF_REFINE_COST_THRESHOLD_USD: self._refine_cost_threshold,
                     CONF_ALLOW_USER_DETECTORS: self._allow_user_detectors,
@@ -1961,6 +1988,18 @@ class HaInsightsOptionsFlow(OptionsFlow):
                     vol.Coerce(int),
                     vol.Range(min=DIGEST_HOUR_RANGE[0], max=DIGEST_HOUR_RANGE[1]),
                 ),
+                # v1.13.1: dual-emit high-confidence proposal insights
+                # (schedule / cooccurrence / stale_automation / etc.) into
+                # HA's Repairs registry. OFF by default — busy installs
+                # produce many high-confidence proposals and the Repairs
+                # surface stays useful only when it's high-signal. Audit
+                # findings (deterministic linter output) have their own
+                # always-on Repairs bridge from v1.2 — this flag only
+                # controls the proposal stream.
+                vol.Optional(
+                    CONF_EMIT_PROPOSALS_TO_REPAIRS,
+                    default=current_emit_proposals,
+                ): bool,
                 # Preferred agent — dropdown of conversation.* entities
                 # built from the registry. Empty value => auto-pick
                 # (Assist default + failover).
@@ -2121,6 +2160,11 @@ class HaInsightsOptionsFlow(OptionsFlow):
                         ),
                         CONF_DIGEST_ENABLED: self._digest_enabled,
                         CONF_DIGEST_HOUR: self._digest_hour,
+                        CONF_EMIT_PROPOSALS_TO_REPAIRS: getattr(
+                            self,
+                            "_emit_proposals_to_repairs",
+                            DEFAULT_EMIT_PROPOSALS_TO_REPAIRS,
+                        ),
                         CONF_PREFERRED_AGENT_ID: self._preferred_agent_id or "",
                         CONF_REFINE_COST_THRESHOLD_USD: self._refine_cost_threshold,
                         CONF_ALLOW_USER_DETECTORS: self._allow_user_detectors,

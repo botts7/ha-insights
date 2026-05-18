@@ -59,6 +59,23 @@ _LOGGER = logging.getLogger(__name__)
 # Heuristic rollup findings (context_only) stay in our panel only.
 _MIN_REPAIRS_CONFIDENCE = 0.7
 
+# v1.13.1 — stricter floor for proposal-style insights (schedule /
+# cooccurrence / stale automations / etc.). The audit pipeline gets
+# the 0.7 floor above because audit findings are deterministic; a
+# 0.7 trigger-drift detection has actionable certainty. Proposals
+# are inferential — a 0.7 schedule could still be a coincidence
+# from a short observation window. Bumping to 0.85 keeps Repairs a
+# high-signal surface even if the user is opted in.
+_MIN_PROPOSAL_REPAIRS_CONFIDENCE = 0.85
+
+# Insight kinds eligible for the proposal-stream Repairs emission.
+# AUTOMATION_PROPOSAL covers schedule / cooccurrence / streak /
+# long_tail / state_shift / etc. AUTOMATION_IMPROVEMENT covers
+# stale_automation + future linter-style detectors.
+_PROPOSAL_ELIGIBLE_KINDS: frozenset[str] = frozenset(
+    {"automation_proposal", "automation_improvement"},
+)
+
 # Observation kinds eligible for Repairs surface. Each has a clear,
 # user-facing remediation that a non-power-user can act on.
 _REPAIRS_ELIGIBLE_KINDS: frozenset[str] = frozenset(
@@ -71,12 +88,19 @@ _REPAIRS_ELIGIBLE_KINDS: frozenset[str] = frozenset(
     }
 )
 
-# Issue-id prefix so our entries are easy to spot and sweep.
+# Issue-id prefixes so our entries are easy to spot and sweep.
+# Two streams: audit (deterministic findings on existing automations)
+# and proposal (inferential pattern discoveries).
 _ISSUE_PREFIX = "audit:"
+_PROPOSAL_PREFIX = "proposal:"
 
 
 def _issue_id_for(insight_id: str) -> str:
     return f"{_ISSUE_PREFIX}{insight_id}"
+
+
+def _proposal_issue_id_for(insight_id: str) -> str:
+    return f"{_PROPOSAL_PREFIX}{insight_id}"
 
 
 def _eligible_observation_kinds(insight: Insight) -> list[str]:
@@ -252,28 +276,34 @@ def _emit_one(
 
 def clear_issue_for_insight(hass: HomeAssistant, insight_id: str) -> bool:
     """Idempotent: drop the Repairs entry for one insight id. Called
-    from ws_dismiss / ws_apply so dismissing in our panel also
-    clears the Repairs surface. Returns True if a row was deleted."""
+    from ws_dismiss / ws_apply so dismissing in our panel also clears
+    the Repairs surface. Tries BOTH prefixes (audit + proposal) since
+    the caller doesn't know which stream emitted the issue. Returns
+    True if any row was deleted."""
     try:
         from homeassistant.helpers import issue_registry as ir
     except Exception:
         return False
-    issue_id = _issue_id_for(insight_id)
     registry = ir.async_get(hass)
-    if registry.async_get_issue(DOMAIN, issue_id) is None:
-        return False
-    try:
-        ir.async_delete_issue(hass, DOMAIN, issue_id)
-        return True
-    except Exception as err:
-        _LOGGER.debug("Repairs clear failed for %s: %s", issue_id, err)
-        return False
+    deleted_any = False
+    for issue_id in (
+        _issue_id_for(insight_id),
+        _proposal_issue_id_for(insight_id),
+    ):
+        if registry.async_get_issue(DOMAIN, issue_id) is None:
+            continue
+        try:
+            ir.async_delete_issue(hass, DOMAIN, issue_id)
+            deleted_any = True
+        except Exception as err:
+            _LOGGER.debug("Repairs clear failed for %s: %s", issue_id, err)
+    return deleted_any
 
 
 def clear_all_audit_issues(hass: HomeAssistant) -> int:
-    """Sweep ALL ha_insights audit Repairs entries. Called on
-    integration unload / purge so we don't leave orphan issues.
-    Returns count deleted."""
+    """Sweep ALL ha_insights Repairs entries (audit + proposal).
+    Called on integration unload / purge so we don't leave orphan
+    issues. Returns count deleted."""
     try:
         from homeassistant.helpers import issue_registry as ir
     except Exception:
@@ -283,7 +313,10 @@ def clear_all_audit_issues(hass: HomeAssistant) -> int:
         issue.issue_id
         for issue in registry.issues.values()
         if issue.domain == DOMAIN
-        and issue.issue_id.startswith(_ISSUE_PREFIX)
+        and (
+            issue.issue_id.startswith(_ISSUE_PREFIX)
+            or issue.issue_id.startswith(_PROPOSAL_PREFIX)
+        )
     ]
     n = 0
     for iid in issue_ids:
@@ -293,3 +326,159 @@ def clear_all_audit_issues(hass: HomeAssistant) -> int:
         except Exception as err:
             _LOGGER.debug("Repairs sweep failed for %s: %s", iid, err)
     return n
+
+
+# v1.13.1 — proposal-stream Repairs emission ----------------------
+
+
+def _proposal_summary_for(insight: Insight) -> str:
+    """One-line summary for a proposal-style insight. Uses the
+    insight's `title` directly (already concise + human-readable
+    by every detector that emits AUTOMATION_PROPOSAL /
+    AUTOMATION_IMPROVEMENT). Caps to 380 chars for Repairs detail
+    panel readability."""
+    summary = insight.title or ""
+    if len(summary) > 380:
+        summary = summary[:377] + "…"
+    return summary
+
+
+def _eligible_proposal(insight: Insight) -> bool:
+    """Gate proposal-stream insights into Repairs.
+
+    Filters (all must hold):
+      - confidence >= _MIN_PROPOSAL_REPAIRS_CONFIDENCE (0.85)
+      - kind in _PROPOSAL_ELIGIBLE_KINDS
+      - detector != "automation_audit" (audit handled by the
+        sync_audit_issues path)
+      - has a non-empty title
+    """
+    if insight.confidence < _MIN_PROPOSAL_REPAIRS_CONFIDENCE:
+        return False
+    if str(insight.kind) not in _PROPOSAL_ELIGIBLE_KINDS:
+        return False
+    if insight.detector == "automation_audit":
+        # audit findings have their own (less-strict) bridge.
+        return False
+    if not insight.title:
+        return False
+    return True
+
+
+def sync_proposal_issues(
+    hass: HomeAssistant,
+    insights: list[Insight],
+) -> dict[str, int]:
+    """Reconcile the issue registry with the high-confidence proposal
+    insight set. Mirror of `sync_audit_issues` but uses the proposal
+    prefix + stricter confidence floor.
+
+    Caller is expected to gate this behind the OptionsFlow toggle
+    `CONF_EMIT_PROPOSALS_TO_REPAIRS`. Off by default — a busy install
+    can produce dozens of high-confidence proposals and we don't want
+    to flood HA's Repairs surface on every user by default.
+
+    Returns counters: {created, updated, deleted}.
+    """
+    try:
+        from homeassistant.helpers import issue_registry as ir
+    except Exception:
+        _LOGGER.debug(
+            "issue_registry import failed — skipping proposal Repairs sync",
+        )
+        return {"created": 0, "updated": 0, "deleted": 0}
+
+    desired: dict[str, Insight] = {}
+    for ins in insights:
+        if not _eligible_proposal(ins):
+            continue
+        desired[_proposal_issue_id_for(ins.id)] = ins
+
+    registry = ir.async_get(hass)
+    existing_ids: set[str] = {
+        issue.issue_id
+        for issue in registry.issues.values()
+        if issue.domain == DOMAIN
+        and issue.issue_id.startswith(_PROPOSAL_PREFIX)
+    }
+    desired_ids = set(desired.keys())
+    to_create = desired_ids - existing_ids
+    to_delete = existing_ids - desired_ids
+
+    created = 0
+    for issue_id in to_create:
+        ins = desired[issue_id]
+        try:
+            _emit_one_proposal(hass, ir, issue_id, ins)
+            created += 1
+        except Exception as err:
+            _LOGGER.debug(
+                "Proposal Repairs emit failed for %s: %s", issue_id, err,
+            )
+
+    updated = 0
+    for issue_id in desired_ids - to_create:
+        ins = desired[issue_id]
+        try:
+            _emit_one_proposal(hass, ir, issue_id, ins)
+            updated += 1
+        except Exception as err:
+            _LOGGER.debug(
+                "Proposal Repairs refresh failed for %s: %s", issue_id, err,
+            )
+
+    deleted = 0
+    for issue_id in to_delete:
+        try:
+            ir.async_delete_issue(hass, DOMAIN, issue_id)
+            deleted += 1
+        except Exception as err:
+            _LOGGER.debug(
+                "Proposal Repairs delete failed for %s: %s", issue_id, err,
+            )
+
+    if created or deleted:
+        _LOGGER.info(
+            "Proposal Repairs sync: %d created, %d updated, %d deleted "
+            "(total proposal issues: %d)",
+            created,
+            updated,
+            deleted,
+            len(desired),
+        )
+    return {"created": created, "updated": updated, "deleted": deleted}
+
+
+def _emit_one_proposal(
+    hass: HomeAssistant,
+    ir_module: Any,
+    issue_id: str,
+    insight: Insight,
+) -> None:
+    """Create-or-refresh ONE Repairs entry for a proposal insight.
+
+    Uses the existing `audit_finding` translation key — the placeholder
+    shape (`automation`, `summary`) is generic enough to render any
+    proposal text. The Fix button isn't surfaced (is_fixable=False)
+    because proposals are reviewed in our panel; clicking the issue
+    deep-links there via learn_more_url.
+    """
+    summary = _proposal_summary_for(insight)
+    # `automation` placeholder is the detector name for proposal-stream;
+    # the audit version uses the automation_alias. Card panel handles
+    # both; Repairs detail panel renders the placeholder verbatim.
+    automation_label = insight.detector or "ha_insights"
+    severity = ir_module.IssueSeverity.WARNING
+    ir_module.async_create_issue(
+        hass,
+        DOMAIN,
+        issue_id,
+        is_fixable=False,
+        severity=severity,
+        translation_key="audit_finding",
+        translation_placeholders={
+            "automation": automation_label,
+            "summary": summary,
+        },
+        learn_more_url="/ha-insights",
+    )
