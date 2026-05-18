@@ -65,6 +65,7 @@ SUPPORTED_METHODS = (
     "test_actions",
     "backfill_status",
     "recorder_status",
+    "export_dev_audit",
     "rollup_progress",
     "redaction_preview",
     "audit_log",
@@ -144,6 +145,7 @@ def async_register(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_test_actions)
     websocket_api.async_register_command(hass, ws_backfill_status)
     websocket_api.async_register_command(hass, ws_recorder_status)
+    websocket_api.async_register_command(hass, ws_export_dev_audit)
     websocket_api.async_register_command(hass, ws_rollup_progress)
     websocket_api.async_register_command(hass, ws_redaction_preview)
     websocket_api.async_register_command(hass, ws_audit_log)
@@ -2444,6 +2446,72 @@ async def ws_recorder_status(
             "effective_window_days": effective_window_days,
         },
     )
+
+
+@websocket_api.websocket_command(
+    {vol.Required("type"): "home_insights/export_dev_audit"}
+)
+@websocket_api.async_response
+async def ws_export_dev_audit(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """v1.12.15: return the redacted dev-audit bundle for diagnostics.
+
+    Admin-only. Calls `lib/dev_audit.build_dev_audit_bundle` which
+    captures install signature + per-detector activity + event buffer
+    signature + config fingerprint — all redacted (no entity friendly
+    names, no automation aliases, no IPs, no lat/long).
+
+    Two intended uses:
+
+    1. **Bug reports**: the user runs `home_insights/export_dev_audit`,
+       attaches the JSON to a GitHub issue. Maintainers and the user
+       community can reproduce the diagnostic context without the user
+       having to manually enumerate their install.
+
+    2. **LLM-driven verification**: the user pastes the JSON into a
+       chat with their preferred AI assistant, asks "are any of my
+       detectors silent for the wrong reason?" The schema (see
+       `SCHEMA_VERSION` in `lib/dev_audit.py`) lets an LLM agent reason
+       deterministically across detectors.
+
+    The future v1.13 in-integration LLM audit will use the same builder
+    + send to the user's chosen `LlmService` agent via the existing
+    failover stack.
+    """
+    if not _require_admin(hass, connection, msg):
+        return
+    store = _get_store(hass)
+    if store is None:
+        connection.send_error(msg["id"], "not_set_up", "Store not initialized")
+        return
+    try:
+        from ..lib.dev_audit import build_dev_audit_bundle
+
+        integration_version = await _get_integration_version(hass)
+        # Pull the buffer from the first config entry's hass.data slot.
+        # Multi-entry installs use the first entry's buffer for the
+        # snapshot; the install-signature numbers below are install-wide
+        # already, so this is fine for a diagnostic dump.
+        buffer_ = None
+        for entry_data in hass.data.get(DOMAIN, {}).values():
+            if isinstance(entry_data, dict) and "buffer" in entry_data:
+                buffer_ = entry_data["buffer"]
+                break
+        bundle = await build_dev_audit_bundle(
+            hass,
+            store,
+            integration_version=integration_version,
+            buffer=buffer_,
+        )
+    except Exception as exc:
+        connection.send_error(
+            msg["id"], "dev_audit_failed", f"Bundle build failed: {exc}"
+        )
+        return
+    connection.send_result(msg["id"], bundle)
 
 
 @websocket_api.websocket_command(
