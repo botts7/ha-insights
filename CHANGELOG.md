@@ -4,6 +4,71 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+## [1.12.20] — 2026-05-18
+
+### Fixed — Identify safety floor + vendor-pairing-mode safe patterns
+
+Three concurrent safety fixes for the identify pipeline + bundled
+card v1.10.9 with the matching card-side hardening:
+
+**Vendor pairing-mode safe light patterns.** Pre-v1.12.20 our
+strobe fired 5 toggles in 1.4 s — that crossed the factory-reset
+threshold of **every** major bulb vendor (Tuya 3×, Aqara 5×, Hue 5×,
+IKEA 6×, Sengled 10×, LIFX 5×). Running identify on a Tuya bulb
+would have factory-reset it. New ordering in `lib/identify_capability.py`:
+
+  1. `FLASH_LIGHT` — native driver flash (no power cycle)
+  2. `BRIGHTNESS_WIGGLE` — NEW: dim → bright → dim → bright with
+     1.5 s gaps, **no off transitions**, always preferred for any
+     light reporting a brightness-capable `color_mode`
+  3. `STROBE_LIGHT` — last-resort 2-toggle 3 s cadence, stays
+     below all vendor thresholds
+
+Switch toggle reduced from 3× at 500 ms to **2× at 2.5 s** — stays
+under Tuya's 3-in-10 s threshold and ends in the starting state.
+
+**Critical-load deny-list.** New `lib/critical_load_keywords.py`
+matches medical, HA-host, network infra, refrigeration, EV charger,
+pumps, safety / security, and solar / battery keywords against
+entity_id + friendly_name. WS handler refuses to fire identify on
+matched entities (admin can't override — entity must be renamed).
+
+Critically prevents the self-destruct case: toggling a switch that
+powers HA itself (matches `homeassistant`, `hass`, `proxmox`,
+`synology`, `raspberry_pi`, etc.) would terminate the running
+session mid-identify and could corrupt the recorder DB.
+
+**Power-cycle confirmation.** Methods that interrupt power
+(`STROBE_LIGHT`, `SWITCH_TOGGLE`, `SIREN_CHIRP`) now require
+`confirm_power_cycle=true` in the WS request. The card sends this
+flag after the user clicks through a `window.confirm()` dialog
+with a device-class-specific warning. Confirmation is session-
+scoped — once acknowledged, subsequent fires proceed silently.
+
+Includes `docs/device_identify_quirks.md` — comprehensive vendor
+pairing-threshold table, current safe-pattern math, the
+v1.10.10–13 roadmap (sensor touch-test integration into Find Device,
+device-graph LED alternative selection, vendor-native primitives
+like ZHA `effect: blink` / Z-Wave Indicator CC / LIFX `flash`, and
+power-consumption-based critical detection).
+
+### Bundled card v1.10.9
+
+Card-side companion ships the same release:
+
+- Identify modal restores entity state on Stop / Found / uncheck
+  (honors Circadian Lighting and pre-identify scenes)
+- 1-at-a-time default for multi-entity insights with "Fire all
+  simultaneously (advanced)" toggle for power users
+- Find Device modal filters to identifiable domains only
+  (`light` / `switch` / `media_player` / `siren`); hides
+  automation / scene / script / sensor with a pointer to 👆 Touch
+  test for perturbable sensors
+- Per-domain cadence (light 5 s, media 6 s, siren 10 s, switch 12 s)
+- 5-min session ceiling + 30-fire-per-entity cap, both displayed
+- Power-cycle confirm() dialog before each first-fire on power-
+  cycling method
+
 ## [1.12.19] — 2026-05-18
 
 ### Added — bundled card v1.10.7 + v1.10.8 panel.js
