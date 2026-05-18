@@ -50,11 +50,26 @@ def _seed_long_spans(
     times: int,
     end_now: datetime | None = None,
 ) -> None:
-    """Seed N (on, off) pairs each lasting `span_minutes`, spaced 1 day apart."""
+    """Seed N (on, off) pairs each lasting ~`span_minutes`, spaced 1 day apart.
+
+    v1.12.12: spans now carry natural variance (±20% deterministic
+    pattern) so the fixed-duty-cycle gate doesn't treat the fixture
+    as a robotic device. Variance pattern is deterministic so tests
+    stay reproducible — sequence: 80%, 110%, 95%, 120%, 90%, repeat.
+    Real "user forgot to turn off" patterns easily exceed 5% CV; this
+    fixture lands around 14% CV which is squarely above the gate.
+    """
     end = end_now or datetime.now(tz=UTC).replace(microsecond=0)
+    # Deterministic per-day jitter factors. Sum to exactly 5.0 over
+    # every 5-element window so the AVERAGE span is exactly
+    # `span_minutes` for any common `times` value (preserves existing
+    # "180" / "240" substring assertions). CV across the window is
+    # ~14% — well above the 5% fixed_cycle gate.
+    jitter_factors = [1.1, 0.9, 1.2, 0.8, 1.0]
     for i in range(times):
+        factor = jitter_factors[i % len(jitter_factors)]
         on_at = end - timedelta(days=i + 1)
-        off_at = on_at + timedelta(minutes=span_minutes)
+        off_at = on_at + timedelta(minutes=span_minutes * factor)
         buf.add(_ev(on_at, entity_id, "on", old_state="off"))
         buf.add(_ev(off_at, entity_id, "off", old_state="on"))
 

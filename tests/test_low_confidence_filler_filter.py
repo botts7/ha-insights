@@ -48,6 +48,80 @@ def test_low_conf_device_managed_is_filtered() -> None:
     assert _is_low_confidence_filler(insight)
 
 
+def test_low_conf_canonical_device_managed_field_filtered() -> None:
+    """v1.12.12: when the payload carries the canonical
+    _is_device_managed=True field, the filter trusts it."""
+    insight = SimpleNamespace(
+        confidence=0.10,
+        conflicts_with=(),
+        payload={"_is_device_managed": True},
+        created_at=datetime.now(tz=UTC),
+    )
+    assert _is_low_confidence_filler(insight)
+
+
+def test_low_conf_persistence_fixed_cycle_filtered() -> None:
+    """v1.12.12: real-install bug fix — streak at 10% with
+    `persistence_class=fixed_cycle` but human-classified timing was
+    rendering the device-managed pill but escaping v1.12.10's filter
+    (which only checked timing_class). Now correctly filtered via
+    payload-recompute fallback."""
+    insight = SimpleNamespace(
+        confidence=0.10,
+        conflicts_with=(),
+        payload={
+            "_timing_assessment": {"timing_class": "human_likely"},
+            "_cooccurrence_assessment": {
+                "cooccurrence_class": "human_context"
+            },
+            "_persistence_assessment": {
+                "persistence_class": "fixed_cycle"
+            },
+        },
+        created_at=datetime.now(tz=UTC),
+    )
+    assert _is_low_confidence_filler(insight)
+
+
+def test_low_conf_three_soft_signals_filtered() -> None:
+    """v1.12.12: 3+ soft signals stacked also fire the verdict."""
+    insight = SimpleNamespace(
+        confidence=0.20,
+        conflicts_with=(),
+        payload={
+            "_timing_assessment": {"timing_class": "tight_pattern"},
+            "_cooccurrence_assessment": {
+                "cooccurrence_class": "ambiguous"
+            },
+            "_persistence_assessment": {
+                "persistence_class": "tight_duration"
+            },
+        },
+        created_at=datetime.now(tz=UTC),
+    )
+    assert _is_low_confidence_filler(insight)
+
+
+def test_low_conf_canonical_false_preserved() -> None:
+    """When canonical field is explicitly False, trust it — do not
+    recompute. Preserves intentional 'this is human' verdicts."""
+    insight = SimpleNamespace(
+        confidence=0.20,
+        conflicts_with=(),
+        payload={
+            "_is_device_managed": False,
+            # Without canonical=False the next field would normally
+            # trigger the recompute path — but canonical=False short-
+            # circuits before that.
+            "_persistence_assessment": {
+                "persistence_class": "fixed_cycle"
+            },
+        },
+        created_at=datetime.now(tz=UTC),
+    )
+    assert not _is_low_confidence_filler(insight)
+
+
 def test_low_conf_both_tags_is_filtered() -> None:
     """Belt + suspenders — both signals present."""
     insight = _ins(

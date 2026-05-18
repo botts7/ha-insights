@@ -60,6 +60,16 @@ class LongTailDetector(Detector):
     # show first. Was producing 500+ "left on too long" insights on a
     # 1000-entity install before this cap.
     MAX_INSIGHTS_PER_SCAN = 30
+    # v1.12.12 — coefficient-of-variation floor. If durations have
+    # CV BELOW this across all observed spans, the entity has a fixed
+    # duty cycle (solar inverter on 7am-5pm, pool pump 8-noon, etc.)
+    # and an "auto-off" suggestion would BREAK its intended operation.
+    # Real-install report 2026-05-18: detector proposed auto-off after
+    # 120 min for a solar inverter that runs ~10 hours every day. If
+    # the user had applied that automation, it would have turned off
+    # the solar generation every afternoon. Matches lib/persistence_
+    # likelihood.py's `fixed_cycle` threshold.
+    _FIXED_CYCLE_CV_THRESHOLD = 0.05
 
     async def scan(self, ctx: DetectorContext) -> list[Insight]:
         if ctx.event_buffer is None:
@@ -94,6 +104,14 @@ class LongTailDetector(Detector):
             ]
             if len(long_spans) < self.MIN_OCCURRENCES:
                 continue
+            # v1.12.12 fixed-cycle gate. Compute CV across all the
+            # observed long spans. If they're all the same length
+            # (solar inverter ~10h/day, scheduled pump cycle, etc.),
+            # the device has an intentional duty cycle and proposing
+            # auto-off would actively break it. Skip rather than
+            # emit a dangerous suggestion.
+            if self._is_fixed_duty_cycle(long_spans):
+                continue
             insight = self._build_insight(
                 entity_id, domain, long_spans, threshold_min
             )
@@ -104,6 +122,31 @@ class LongTailDetector(Detector):
             insights.append(insight)
         insights.sort(key=lambda i: i.confidence, reverse=True)
         return insights[: self.MAX_INSIGHTS_PER_SCAN]
+
+    def _is_fixed_duty_cycle(self, long_spans: list[float]) -> bool:
+        """Return True when the spans are all approximately the same
+        length — a fingerprint for fixed-cycle devices (solar inverter,
+        pool pump, vendor scheduler) where the duration IS the design.
+
+        Calculated as coefficient of variation = stddev / mean. CV
+        below `_FIXED_CYCLE_CV_THRESHOLD` (5%) means every recorded
+        span is within ±5% of the average — robotic precision that
+        only equipment-internal timers produce. Real users leaving a
+        light on too long have CV well above 50%.
+
+        Need at least 3 samples for the variance estimate to be
+        meaningful — _MIN_OCCURRENCES already enforces that gate
+        upstream.
+        """
+        if len(long_spans) < 3:
+            return False
+        mean = sum(long_spans) / len(long_spans)
+        if mean <= 0:
+            return False
+        variance = sum((s - mean) ** 2 for s in long_spans) / len(long_spans)
+        stddev = variance ** 0.5
+        cv = stddev / mean
+        return cv < self._FIXED_CYCLE_CV_THRESHOLD
 
     def _compute_active_spans(self, events: list[StateEvent]) -> list[float]:
         """Walk an entity's chronological event list, return active-span lengths.

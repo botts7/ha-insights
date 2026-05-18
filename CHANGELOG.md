@@ -4,6 +4,162 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+## [1.12.12] — 2026-05-18
+
+### Fixed — human-vs-device fingerprint, multiple real-install bugs
+
+Real-install SQL audit (2026-05-18) on the user's HA database revealed
+three correctness bugs. All three trace to the same root: detectors and
+filters were treating "looks human" and "looks device" as binary
+verdicts when they're actually multi-signal classifications.
+
+#### 1. `_is_low_confidence_filler` (v1.12.10) only checked one of six signals
+
+The card's "🤖 device-managed" pill triggers on any of THREE strong
+signals (`timing_class=device_likely`, `cooccurrence_class=isolated`,
+`persistence_class=fixed_cycle`) OR 3+ stacked soft signals. The
+Python filter only checked `timing_class=device_likely`, so a streak
+with `persistence_class=fixed_cycle` (e.g. user's inverter switch at
+10% confidence) rendered the device-managed pill but escaped
+suppression.
+
+Fix: new canonical `lib/device_managed_signal.py` exposes the verdict
+as a pure function. `HumanLikelihoodFeatures.payload_keys()` now
+stamps `_is_device_managed: bool` on every insight payload at emit
+time — single source of truth instead of re-computing the rule in
+two languages. The filler filter reads this canonical field, with a
+recompute fallback for pre-v1.12.12 stored payloads.
+
+13 new tests in `test_lib_device_managed_signal.py` cover all 7
+classification combinations including the user's exact real-install
+payload.
+
+#### 2. `manual_habit` emitted 100%-confidence "you manually set …" on automation-driven events
+
+The user reported a 7-day `light.porch -> off at ~23:27 (±0 min)`
+insight claiming "you manually set" — but the light runs on a Hue
+schedule inside the Hue bridge, never touched by the user. The
+detector's `is_manual` classifier checked HA `context.user_id` +
+`context.parent_id`, falling back to "local-integration entity =
+physical switch" for events with no HA-side context. Hue is in the
+local allow-list, so Hue-bridge schedules slipped through.
+
+Real human jitter across multiple days is **≥15 seconds**. Zero or
+near-zero stddev is the fingerprint of an automation or vendor-side
+scheduler — even when the source event carries no HA context.
+
+Fix: added `_TIME_STDDEV_MIN_MIN = 0.25` (15s) lower-bound gate
+alongside the existing `_TIME_STDDEV_MAX_MIN = 45.0` upper bound.
+Below the lower bound, the detector returns None instead of emitting
+the misleading "you manually set" insight.
+
+#### 3. `long_tail` proposed dangerous auto-off for fixed-cycle devices (CRITICAL)
+
+Real-install incident: detector emitted at 100% confidence:
+
+> `switch.inverter_5010kmsc252s0046_switch stays active for ~584 min (11 times in 14d, max 609 min). Auto-off after 120 min?`
+
+That switch is a **solar inverter** that runs ~10 hours every day from
+sunrise to sunset. Applying the suggested auto-off automation would
+have **shut off solar generation every afternoon**. Same risk applies
+to pool pumps, scheduled HVAC, vendor-side appliance timers.
+
+The detector saw "active span ≥ threshold" repeated ≥3 times and
+emitted full confidence. It had no signal to distinguish "user forgot
+to turn off" from "device's intentional duty cycle."
+
+Fix: added `_is_fixed_duty_cycle()` gate. Computes coefficient of
+variation across all observed long spans. If CV < 5% (i.e. every
+recorded duration is within ±5% of the average), the device has a
+fixed duty cycle and we **suppress entirely** rather than risk
+breaking a device the user relies on.
+
+User's actual inverter pattern (~584 min mean, ~5 min stddev, CV ≈
+0.85%) was the calibration target. Real-human "forgot to turn off"
+patterns have CV well above 50% and pass through unchanged. 7 new
+tests cover boundary, defensive, and the exact real-install spans.
+
+This is the second pattern in v1.12.12 of "detector treats
+human-vs-device as binary" — same root cause as Bug 1, but in a
+detector that builds **applyable automations** rather than just
+displaying. The blast radius is higher; the fix is more conservative
+(hard suppress, not "downgrade confidence").
+
+#### 4. `seasonality` had the same robotic-precision blind spot
+
+SeasonalityDetector finds weekly patterns ("every Tuesday at 8am").
+Same architecture as ManualHabitDetector: time-bucketed events,
+stddev gate on top — but it *never checked `context.user_id`* AND
+had **no lower bound** on stddev. So a Tuya weekly schedule firing
+every Tuesday at exactly 8am across 4 weeks would emit at high
+confidence as "you do this every Tuesday — automate it!" — even
+though the user can't (the vendor device runs the schedule).
+
+Fix: added `TIME_STDDEV_MIN_MIN = 0.25` (15s) — same threshold
+as manual_habit's lower bound. A unit test asserts the two stay in
+lockstep so a future threshold update propagates cleanly.
+
+#### 5. Detector audit completed — remaining gaps deferred to v1.12.13
+
+Audited every detector for the same human-vs-device blind spot. Most
+are SAFE (informational tier, no applyable output) or already
+defended by `assess_human_likelihood` + the canonical
+`_is_device_managed` field.
+
+Remaining gaps tracked for **v1.12.13**:
+
+- **cooccurrence** + **lagged_correlation**: missing `context.parent_id`
+  filter for cascade events. Existing defences (delta-stddev gate,
+  hierarchy `_pair_is_related`, coupling-strength TIGHT demotion,
+  conflict-scanner `_already_automated`) cover most cases but a
+  user-applied automation whose pattern doesn't strict-match the
+  conflict scanner could still re-emit at lower confidence.
+- **orphan_device**: automation-driven recovery isn't distinguished
+  from user-driven; low-risk because action is just `notify`.
+- **phone_charge_reminder**: drain-rate model can be polluted by
+  automations that toggle charging state; low-risk because the
+  proposed automation is time-triggered, not state-reactive.
+- **weather_correlation**: habit-time observations can be polluted
+  by weather-aware automations; output is report-only so no apply
+  risk.
+
+#### 6. Dev audit export — for community + LLM-driven verification (preview)
+
+New `lib/dev_audit.py` produces a redacted snapshot of install
+signature + per-detector activity + config fingerprint as a single
+JSON dict. Designed for two workflows:
+
+- **Bug reports**: attach the JSON instead of describing your install
+- **LLM verification (opt-in, planned for v1.12.13)**: send the same
+  JSON to your chosen LLM agent to ask "are any of my detectors
+  silent for the wrong reason?"
+
+The WS endpoint + card button land in v1.12.13. v1.12.12 only ships
+the builder so the canonical schema can settle before exposure.
+
+### Documented — the human-vs-device fingerprint
+
+For other detectors to apply the same logic, the canonical fingerprint
+order is:
+
+1. HA `context.user_id` — definitive when set (human triggered via
+   UI / voice / mobile app)
+2. HA `context.parent_id` — definitive when set (event is a
+   downstream consequence of another HA event)
+3. Timing stddev across N days:
+   - `<15s` → device/automation (robotic precision)
+   - `15s–5min` → indeterminate (could be voice routine or strict
+     schedule)
+   - `>5min` → human
+4. Persistence (how long in new state):
+   - `CV<5%` → fixed device timer
+   - `CV>30%` → human-controlled
+5. Co-occurrence (≤±5s consistency across days) → shared source
+
+Steps 1–2 are HA-native semantics; 3–5 are the v1.5.x grader libs
+already wired through `HumanLikelihoodFeatures`. v1.12.12 makes the
+verdict canonical via `_is_device_managed`.
+
 ## [1.12.11] — 2026-05-17
 
 ### Added — 🆕 newly-added entity badge

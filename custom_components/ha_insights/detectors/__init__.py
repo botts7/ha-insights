@@ -60,6 +60,18 @@ def _is_low_confidence_filler(insight: object) -> bool:
     or device-internal logic, AND the detector wasn't even confident
     in the pattern itself. Drop them rather than make the user
     filter them out by hand.
+
+    v1.12.12 fix: previously this checked only
+    `_timing_assessment.timing_class == "device_likely"`, but the
+    card's actual "🤖 device-managed" pill triggers across SIX signal
+    classes (3 strong + 4 soft stacked). A streak with
+    `persistence_class=fixed_cycle` (e.g. user's inverter at 10%)
+    rendered the pill but escaped this filter. Now reads the
+    canonical `_is_device_managed` field stamped by
+    `HumanLikelihoodFeatures.payload_keys()` — or falls back to a
+    full recompute via `is_device_managed()` so older stored
+    insights (pre-v1.12.12) without the canonical field are still
+    correctly filtered.
     """
     confidence = getattr(insight, "confidence", 1.0)
     if confidence >= _FILLER_INSIGHT_MAX_CONFIDENCE:
@@ -68,11 +80,20 @@ def _is_low_confidence_filler(insight: object) -> bool:
     conflicts = getattr(insight, "conflicts_with", ())
     if conflicts:
         return True
-    # Device-managed timing?
-    payload = getattr(insight, "payload", None) or {}
-    timing = payload.get("_timing_assessment") if isinstance(payload, dict) else None
-    if isinstance(timing, dict) and timing.get("timing_class") == "device_likely":
-        return True
+    # Device-managed verdict — canonical field first, then full
+    # recompute for legacy payloads.
+    payload = getattr(insight, "payload", None)
+    if isinstance(payload, dict):
+        canonical = payload.get("_is_device_managed")
+        if canonical is True:
+            return True
+        if canonical is None:
+            # Pre-v1.12.12 payload — recompute from the assessment
+            # blocks to match the card's actual rendering rule.
+            from ..lib.device_managed_signal import is_device_managed
+
+            if is_device_managed(payload):
+                return True
     return False
 
 

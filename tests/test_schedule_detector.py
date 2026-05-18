@@ -46,11 +46,24 @@ def _seed_weekday_routine(
     state_changed listener.
     """
     end = end_now or dt_util.now()
+    # v1.12.12: inject deterministic ±30-second jitter per day so the
+    # fixture stddev clears the new TIME_STDDEV_MIN_MIN (15s) gate.
+    # Real users firing a routine "at ~6:47" land between 6:46:30 and
+    # 6:47:30 across days; perfectly identical timestamps are the
+    # fingerprint of automation/device schedules and would be (correctly)
+    # suppressed by the detector under v1.12.12.
+    #
+    # Pattern sums to 0 over each 5-day window so the AVERAGE second
+    # is exactly 0 — preserves existing "06:47" substring assertions
+    # regardless of which weekdays are sampled. Stddev across the
+    # pattern is ~21s, comfortably above the 15s gate.
+    second_jitter = [30, -30, 15, -15, 0]
     added = 0
     for offset in range(days):
+        sec = second_jitter[offset % len(second_jitter)]
         local_when = (end - timedelta(days=offset)).replace(
             hour=hour, minute=minute, second=0, microsecond=0
-        )
+        ) + timedelta(seconds=sec)
         if local_when.weekday() >= 5:  # skip weekend (local)
             continue
         ev = StateEvent(
