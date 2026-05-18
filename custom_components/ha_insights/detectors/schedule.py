@@ -65,6 +65,14 @@ class ScheduleDetector(Detector):
     # 12min lets us catch "I turn on the lights between 6:55 and 7:15"
     # which is what real humans actually do.
     TIME_STDDEV_MAX_MIN = 12.0
+    # v1.12.12 — lower bound. Same rationale as ManualHabitDetector
+    # and SeasonalityDetector: real humans across 7+ days have ≥15s
+    # jitter. Below that = device/automation scheduler (solar inverter
+    # at exact 07:22 sunrise, Tuya morning schedule, etc.). The
+    # canonical _is_device_managed payload field + v1.12.10 filler
+    # filter ALSO catch these now, but a hard suppress here is
+    # defence-in-depth and keeps stored insights cleaner.
+    TIME_STDDEV_MIN_MIN = 0.25
     WEEKDAY_CONSISTENCY_MIN = 0.75
 
     async def scan(self, ctx: DetectorContext) -> list[Insight]:
@@ -165,6 +173,13 @@ class ScheduleDetector(Detector):
         variance = sum((m - avg_min) ** 2 for m in minutes) / len(minutes)
         stddev = math.sqrt(variance)
         if stddev > self.TIME_STDDEV_MAX_MIN:
+            return None
+        if stddev < self.TIME_STDDEV_MIN_MIN:
+            # v1.12.12 robotic-precision gate. Real human routines
+            # have at least 15s jitter across days; below that it's
+            # an automation or device-side schedule. The persistence/
+            # timing penalties downgrade confidence but don't
+            # suppress; this gate stops the noise at source.
             return None
 
         # v1.5.38: composite human-likelihood assessment. Bundles

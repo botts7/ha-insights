@@ -61,6 +61,18 @@ def _to_utc(dt: datetime) -> datetime:
     return dt.astimezone(UTC)
 
 
+# v1.12.12: deterministic per-event second-jitter. SeasonalityDetector
+# now suppresses patterns with stddev <15s (the fingerprint of a Tuya
+# weekly schedule), so test fixtures need natural human variance.
+_JITTER_SECONDS = [22, -18, 5, -25, 15, -8, 28, -12, 0, 19, -22, 9, -15, 25]
+
+
+def _jitter(dt: datetime, i: int) -> datetime:
+    """Apply a deterministic per-index second offset so test fixtures
+    clear the new robotic-precision gate while staying reproducible."""
+    return dt + timedelta(seconds=_JITTER_SECONDS[i % len(_JITTER_SECONDS)])
+
+
 # --- Empty / no-op ---
 
 
@@ -92,8 +104,8 @@ async def test_strict_friday_pattern_detected() -> None:
     buf = StateEventBuffer(max_age=timedelta(days=40))
     base = dt_util.now().replace(microsecond=0)
     fridays = _last_n_weekdays(4, 4, base)  # weekday 4 = Friday
-    for d in fridays:
-        buf.add(_ev(_to_utc(d.replace(hour=19, minute=30)), "media_player.living_room"))
+    for i, d in enumerate(fridays):
+        buf.add(_ev(_to_utc(_jitter(d.replace(hour=19, minute=30), i)), "media_player.living_room"))
     detector = SeasonalityDetector()
     insights = await detector.scan(_ctx(buf))
     assert len(insights) == 1
@@ -173,8 +185,8 @@ async def test_idempotent_rescan() -> None:
     buf = StateEventBuffer(max_age=timedelta(days=40))
     base = dt_util.now().replace(microsecond=0)
     fridays = _last_n_weekdays(4, 4, base)
-    for d in fridays:
-        buf.add(_ev(_to_utc(d.replace(hour=19, minute=30)), "switch.movie_lights"))
+    for i, d in enumerate(fridays):
+        buf.add(_ev(_to_utc(_jitter(d.replace(hour=19, minute=30), i)), "switch.movie_lights"))
     detector = SeasonalityDetector()
     first = await detector.scan(_ctx(buf))
     second = await detector.scan(_ctx(buf))
