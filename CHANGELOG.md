@@ -4,6 +4,37 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+## [1.12.14] — 2026-05-18
+
+### Fixed — audit_rollups slow-warmup on installs with short recorder retention
+
+Real-install SQL audit (2026-05-18) found 100+ entities sitting at
+the same cursor position with the `audit_rollups` table **empty**
+despite progress being recorded daily. The detector appeared broken
+but was actually working — just walking through pre-recorder-retention
+empty history before reaching any real data.
+
+The math: with `audit_rollup_window_days = 180` (default) and recorder
+retention of 10 days (HA default), the cursor starts at `now − 180d`
+and walks forward in 7-day chunks. Each batch advances at most 56
+days per entity. So it takes **~3 batches per entity** before the
+cursor reaches recorder-retained data. During warmup, every query
+returns empty → cursor advances → no rollups written → user sees a
+broken-looking detector.
+
+Fix: `_probe_recorder_oldest_ts()` probes the recorder's deepest
+retained data **once per batch** (cheap — ~14 1-hour probe queries
+total). Initial cursor is then clamped to `max(now − window_days,
+recorder_oldest_ts)`, so warmup is **eliminated**: the first batch
+starts producing rollups immediately on installs with short retention.
+
+The probe mirrors the strategy in `ws_recorder_status` so the WS
+endpoint and the rollup engine see the same retention number.
+
+3 regression tests assert the probe helper exists, the per-entity
+function accepts the clamp kwarg, and the probe ladder covers
+typical recorder retentions (10–365d).
+
 ## [1.12.13] — 2026-05-18
 
 ### Fixed — cascade-event filter for cooccurrence + lagged_correlation
@@ -33,7 +64,7 @@ LaggedCorrelationDetector inherits from CooccurrenceDetector, so
 the fix applies to both. 3 new regression tests cover the
 automation-driven, manual-user, and device-originated cases.
 
-Remaining low-priority data-quality reviews tracked for v1.12.14:
+Remaining low-priority data-quality reviews tracked for v1.12.15+:
 orphan_device, phone_charge_reminder, weather_correlation.
 
 ## [1.12.12] — 2026-05-18
