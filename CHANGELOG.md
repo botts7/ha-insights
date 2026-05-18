@@ -85,7 +85,21 @@ detector that builds **applyable automations** rather than just
 displaying. The blast radius is higher; the fix is more conservative
 (hard suppress, not "downgrade confidence").
 
-#### 4. Dev audit export — for community + LLM-driven verification (preview)
+#### 4. `seasonality` had the same robotic-precision blind spot
+
+SeasonalityDetector finds weekly patterns ("every Tuesday at 8am").
+Same architecture as ManualHabitDetector: time-bucketed events,
+stddev gate on top — but it *never checked `context.user_id`* AND
+had **no lower bound** on stddev. So a Tuya weekly schedule firing
+every Tuesday at exactly 8am across 4 weeks would emit at high
+confidence as "you do this every Tuesday — automate it!" — even
+though the user can't (the vendor device runs the schedule).
+
+Fix: added `TIME_STDDEV_MIN_MIN = 0.25` (15s) — same threshold
+as manual_habit's lower bound. A unit test asserts the two stay in
+lockstep so a future threshold update propagates cleanly.
+
+#### 5. Dev audit export — for community + LLM-driven verification (preview)
 
 New `lib/dev_audit.py` produces a redacted snapshot of install
 signature + per-detector activity + config fingerprint as a single

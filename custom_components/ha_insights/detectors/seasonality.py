@@ -67,6 +67,15 @@ class SeasonalityDetector(Detector):
     # Max time-of-day stddev (minutes). Looser than ScheduleDetector's 8min
     # because weekly events naturally drift more than daily ones.
     TIME_STDDEV_MAX_MIN = 30.0
+    # v1.12.12 — lower bound on plausible human variance. Same rationale
+    # as ManualHabitDetector: across 3+ weeks, real human routines have
+    # >=15s jitter (tablet taps, voice latency, walking to a switch).
+    # Below that = automation / vendor weekly schedule (Tuya Monday-
+    # morning timer, Z-Wave central-scene weekly routine, Hue
+    # circadian). The detector doesn't check context.user_id at all, so
+    # without this gate, every device-side weekly schedule would emit
+    # at high confidence.
+    TIME_STDDEV_MIN_MIN = 0.25
 
     async def scan(self, ctx: DetectorContext) -> list[Insight]:
         if ctx.event_buffer is None:
@@ -170,6 +179,15 @@ class SeasonalityDetector(Detector):
         variance = sum((m - avg_min) ** 2 for m in minutes) / len(minutes)
         stddev = math.sqrt(variance)
         if stddev > self.TIME_STDDEV_MAX_MIN:
+            return None
+        if stddev < self.TIME_STDDEV_MIN_MIN:
+            # v1.12.12 robotic-precision gate. The detector doesn't
+            # filter on context.user_id, so a Tuya / Hue / Z-Wave
+            # device-side weekly schedule with ±0 min stddev across
+            # 3+ Tuesdays would otherwise emit as a high-confidence
+            # "automate this!" suggestion that the user can't apply
+            # (the source already runs the schedule on the vendor
+            # device). Match ManualHabitDetector's floor.
             return None
 
         # Confidence: how much of the 4-week window the pattern hit
