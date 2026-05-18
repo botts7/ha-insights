@@ -4582,7 +4582,13 @@ async def ws_identify_entity(
 
     from asyncio import sleep as _async_sleep
 
+    from homeassistant.helpers import entity_registry as er
+
     from ..lib.critical_load_keywords import is_critical_load
+    from ..lib.device_alternative_identifier import (
+        SiblingEntity,
+        pick_alternative_identifier,
+    )
     from ..lib.identify_capability import (
         IdentifyMethod,
         identify_capability_for,
@@ -4599,27 +4605,28 @@ async def ws_identify_entity(
         },
     )
 
-    entity_id = msg["entity_id"]
+    original_entity_id: str = msg["entity_id"]
     confirm_power_cycle: bool = bool(msg.get("confirm_power_cycle", False))
-    state = hass.states.get(entity_id)
+    state = hass.states.get(original_entity_id)
     if state is None:
         connection.send_error(
             msg["id"],
             "unknown_entity",
-            f"No state found for {entity_id}",
+            f"No state found for {original_entity_id}",
         )
         return
 
     friendly = state.attributes.get("friendly_name")
     is_critical, matched_kw = is_critical_load(
-        entity_id, friendly if isinstance(friendly, str) else None
+        original_entity_id,
+        friendly if isinstance(friendly, str) else None,
     )
     if is_critical:
         connection.send_error(
             msg["id"],
             "critical_load_refused",
             (
-                f"Refused: {entity_id} matches critical-load keyword "
+                f"Refused: {original_entity_id} matches critical-load keyword "
                 f"'{matched_kw}'. Toggling this could disrupt a fridge, "
                 "server, EV charger, medical device, or similar. If "
                 "this is safe to cycle, rename the entity to remove "
@@ -4627,6 +4634,70 @@ async def ws_identify_entity(
             ),
         )
         return
+
+    # v1.10.11: try to substitute the user's relay/contactor entity
+    # for a safer same-device sibling (status LED, diagnostic light)
+    # when one exists. Tesla Wall Connector / Shelly Plus 1 /
+    # Sonoff with built-in LEDs all benefit — we flash the LED
+    # instead of cycling the contactor / relay.
+    substitution: dict[str, str] | None = None
+    entity_id = original_entity_id
+    try:
+        registry = er.async_get(hass)
+        original_entry = registry.async_get(original_entity_id)
+    except Exception:
+        original_entry = None
+    if original_entry is not None and original_entry.device_id:
+        sibling_pool: list[SiblingEntity] = []
+        for entry in registry.entities.values():
+            if entry.device_id != original_entry.device_id:
+                continue
+            if entry.entity_id == original_entity_id:
+                continue
+            sibling_state = hass.states.get(entry.entity_id)
+            sibling_friendly: str | None = None
+            if sibling_state is not None:
+                fn = sibling_state.attributes.get("friendly_name")
+                if isinstance(fn, str):
+                    sibling_friendly = fn
+            sibling_domain = entry.entity_id.split(".", 1)[0]
+            cat_val = (
+                entry.entity_category.value
+                if entry.entity_category is not None
+                else None
+            )
+            sibling_pool.append(
+                SiblingEntity(
+                    entity_id=entry.entity_id,
+                    domain=sibling_domain,
+                    friendly_name=sibling_friendly,
+                    entity_category=cat_val,
+                ),
+            )
+        alt = pick_alternative_identifier(original_entity_id, sibling_pool)
+        if alt is not None and hass.states.get(alt.entity_id) is not None:
+            # Re-check critical-load on the substitute — defensive,
+            # an LED named "fridge_led" would be safe to cycle but
+            # the rule is consistent.
+            alt_state = hass.states.get(alt.entity_id)
+            alt_friendly = (
+                alt_state.attributes.get("friendly_name")
+                if alt_state is not None
+                else None
+            )
+            alt_critical, _ = is_critical_load(
+                alt.entity_id,
+                alt_friendly if isinstance(alt_friendly, str) else None,
+            )
+            if not alt_critical:
+                entity_id = alt.entity_id
+                state = alt_state  # use substitute's state for capability lookup
+                substitution = {
+                    "from": original_entity_id,
+                    "to": alt.entity_id,
+                    "reason": alt.reason,
+                    "rule": alt.rule,
+                }
 
     cap = identify_capability_for(
         entity_id, {"attributes": dict(state.attributes)}
@@ -4649,6 +4720,7 @@ async def ws_identify_entity(
                 "requires_confirmation": True,
                 "method": cap.method.value,
                 "description": cap.description,
+                "substitution": substitution,
                 "warning": (
                     f"This will power-cycle {entity_id} "
                     f"({cap.description}). If anything important is "
@@ -4700,6 +4772,7 @@ async def ws_identify_entity(
             "method": cap.method.value,
             "description": cap.description,
             "calls_made": calls_made,
+            "substitution": substitution,
         },
     )
 
