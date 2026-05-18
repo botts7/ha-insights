@@ -4590,6 +4590,10 @@ async def ws_identify_entity(
     )
 
     from ..lib.critical_load_keywords import is_critical_load
+    from ..lib.critical_load_power import (
+        DEFAULT_POWER_THRESHOLD_W,
+        is_critical_by_power,
+    )
     from ..lib.device_alternative_identifier import (
         SiblingEntity,
         pick_alternative_identifier,
@@ -4640,6 +4644,33 @@ async def ws_identify_entity(
             ),
         )
         return
+
+    # v1.10.13: live power-consumption gate. Refuses entities whose
+    # linked power sensor reports above the threshold — catches
+    # unlabelled critical loads (cryptic Zigbee IDs powering fridges,
+    # network gear with SKU names, etc.). Only checked on power-
+    # cycling domains (switch / siren) — lights and media players
+    # have safe identify paths regardless of load.
+    original_domain = original_entity_id.split(".", 1)[0]
+    if original_domain in {"switch", "siren"}:
+        power_critical, watts, power_sensor = is_critical_by_power(
+            hass, original_entity_id, threshold_w=DEFAULT_POWER_THRESHOLD_W,
+        )
+        if power_critical:
+            connection.send_error(
+                msg["id"],
+                "critical_load_refused",
+                (
+                    f"Refused: {original_entity_id} is currently drawing "
+                    f"{watts:.0f} W (sensor {power_sensor}). Above the "
+                    f"{DEFAULT_POWER_THRESHOLD_W:.0f} W safety gate — "
+                    "this likely powers a fridge, server, EV charger, or "
+                    "other load-carrying device. If this is safe to cycle, "
+                    "the linked power sensor should drop below the gate "
+                    "first."
+                ),
+            )
+            return
 
     # v1.10.11: try to substitute the user's relay/contactor entity
     # for a safer same-device sibling (status LED, diagnostic light)

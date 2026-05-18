@@ -4,6 +4,33 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+## [1.12.24] — 2026-05-19
+
+### Added — Live power-consumption critical-load gate
+
+New `lib/critical_load_power.py` extends the v1.10.9 keyword-based
+critical-load deny-list with a runtime power check. When a `switch`
+or `siren` entity has a linked power sensor on the same device
+(`device_class: power` or `*_power` name), the WS handler reads the
+current draw before firing identify. Above **50 W** → refused with
+the reading + sensor entity_id in the error.
+
+Catches the cases the keyword list misses:
+
+- `switch.0x00158d000a1b2c3d` powering a 200 W kitchen refrigerator
+- `switch.outlet_4` on a TP-Link strip driving a 90 W home server
+- `switch.zigbee_relay_kc` running an aquarium pump + heater
+- Any unlabelled EV charger reporting 7.4 kW
+
+Unit normalisation handles `W` / `kW` / `mW`. Missing or
+non-numeric state (`unknown`, `unavailable`) treated as "no info"
+— doesn't block when the sensor is broken. Lights and media
+players bypass entirely (their identify paths don't power-cycle).
+
+Refusal message tells the user exactly which sensor triggered:
+"Refused: switch.outlet_4 is currently drawing 92 W (sensor
+sensor.outlet_4_power). Above the 50 W safety gate."
+
 ## [1.12.23] — 2026-05-18
 
 ### Added — Vendor-native identify primitives
