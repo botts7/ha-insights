@@ -64,12 +64,27 @@ class _FakeHass:
 @pytest.fixture(autouse=True)
 def _patch_entity_registry(monkeypatch):
     """Inject a fake `homeassistant.helpers.entity_registry` module
-    so `async_get(hass)` returns our test fixture's registry."""
+    so `async_get(hass)` returns our test fixture's registry.
+
+    Note: `from homeassistant.helpers import entity_registry as er`
+    inside the lib function uses ATTRIBUTE access on the
+    `homeassistant.helpers` package, not sys.modules. We patch
+    both — sys.modules for direct imports + the parent package
+    attribute for `from ... import` lookups."""
     fake_module = types.ModuleType("homeassistant.helpers.entity_registry")
     fake_module.async_get = lambda hass: hass.registry
     monkeypatch.setitem(
         sys.modules, "homeassistant.helpers.entity_registry", fake_module,
     )
+    # Patch the attribute on the parent package if it's already loaded.
+    # If the parent isn't loaded yet (rare in CI but possible locally),
+    # the sys.modules patch above is sufficient.
+    try:
+        import homeassistant.helpers as ha_helpers
+
+        monkeypatch.setattr(ha_helpers, "entity_registry", fake_module)
+    except ImportError:
+        pass
     yield
 
 
