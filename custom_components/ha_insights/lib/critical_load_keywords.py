@@ -146,9 +146,10 @@ def is_critical_load(
     interrupt power.
 
     Match is case-insensitive substring over both ``entity_id`` and
-    ``friendly_name``. We deliberately do not split on underscores
-    — keyword ``ev_charger`` matches ``switch.garage_ev_charger_1``
-    even though token order differs.
+    ``friendly_name`` with whitespace normalised to underscores —
+    so the keyword ``ev_charger`` matches both
+    ``switch.garage_ev_charger_1`` (entity_id) and
+    ``"Garage EV Charger Controller"`` (friendly_name).
 
     Returns:
       ``(True, "freezer")`` if a critical keyword matched.
@@ -159,9 +160,14 @@ def is_critical_load(
     domain = entity_id.split(".", 1)[0]
     if domain not in _GATED_DOMAINS:
         return False, None
+    # Normalise: lowercase + any run of whitespace → single underscore.
+    # Friendly names use spaces ("Tesla Wall Connector"); entity_ids
+    # use underscores; the keyword list uses underscores. Normalisation
+    # makes one substring check match both forms.
     haystack = entity_id.lower()
     if friendly_name:
-        haystack = f"{haystack} {friendly_name.lower()}"
+        haystack = f"{haystack}_{friendly_name.lower()}"
+    haystack = "_".join(haystack.split())
     for kw in _CRITICAL_KEYWORDS:
         if kw in haystack:
             return True, kw
