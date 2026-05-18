@@ -4582,7 +4582,10 @@ async def ws_identify_entity(
 
     from asyncio import sleep as _async_sleep
 
-    from homeassistant.helpers import entity_registry as er
+    from homeassistant.helpers import (
+        device_registry as dr,
+        entity_registry as er,
+    )
 
     from ..lib.critical_load_keywords import is_critical_load
     from ..lib.device_alternative_identifier import (
@@ -4593,6 +4596,7 @@ async def ws_identify_entity(
         IdentifyMethod,
         identify_capability_for,
     )
+    from ..lib.vendor_identify_strategy import vendor_identify_strategy_for
 
     # Methods that interrupt power → require explicit user confirmation
     # each time. BRIGHTNESS_WIGGLE / FLASH_LIGHT / PLAY_CHIME don't
@@ -4699,10 +4703,67 @@ async def ws_identify_entity(
                     "rule": alt.rule,
                 }
 
+    # v1.10.12: try vendor-native identify primitive first. ZHA's
+    # Zigbee Identify cluster, Z-Wave Indicator CC, LIFX pulse,
+    # Yeelight flow — all safer than our generic toggle / strobe.
+    # We resolve the platform from the entity registry. ZHA also
+    # needs the device's IEEE address (looked up from the device
+    # registry's identifiers field).
+    vendor_strategy = None
+    vendor_used = False
+    try:
+        registry_entry = registry.async_get(entity_id)
+    except Exception:
+        registry_entry = None
+    if registry_entry is not None:
+        platform = registry_entry.platform
+        strategy = vendor_identify_strategy_for(entity_id, platform)
+        if strategy is not None and strategy.service_calls:
+            # ZHA path: resolve IEEE from device registry identifiers.
+            if platform == "zha" and registry_entry.device_id:
+                try:
+                    device_reg = dr.async_get(hass)
+                    dev = device_reg.async_get(registry_entry.device_id)
+                except Exception:
+                    dev = None
+                ieee: str | None = None
+                if dev is not None:
+                    for ident in dev.identifiers:
+                        if isinstance(ident, tuple) and len(ident) == 2 and ident[0] == "zha":
+                            ieee = ident[1]
+                            break
+                if ieee is None:
+                    # Can't fire ZHA cluster command without IEEE;
+                    # fall back to generic path silently.
+                    strategy = None
+                else:
+                    # Patch the IEEE into the service call data.
+                    patched_calls = []
+                    for call in strategy.service_calls:
+                        new_data = dict(call.get("data", {}))
+                        if "ieee" in new_data and new_data["ieee"] is None:
+                            new_data["ieee"] = ieee
+                        patched_call = {**call, "data": new_data}
+                        # Strip the internal hint marker before firing.
+                        patched_call.pop("_resolve_ieee_from_entity", None)
+                        patched_calls.append(patched_call)
+                    # Re-wrap; the original strategy is frozen.
+                    from ..lib.vendor_identify_strategy import (
+                        VendorIdentifyStrategy as _VIS,
+                    )
+                    strategy = _VIS(
+                        platform=strategy.platform,
+                        method_label=strategy.method_label,
+                        description=strategy.description,
+                        service_calls=patched_calls,
+                    )
+            if strategy is not None:
+                vendor_strategy = strategy
+
     cap = identify_capability_for(
         entity_id, {"attributes": dict(state.attributes)}
     )
-    if cap.method == IdentifyMethod.NONE:
+    if cap.method == IdentifyMethod.NONE and vendor_strategy is None:
         connection.send_error(
             msg["id"],
             "not_identifiable",
@@ -4713,17 +4774,35 @@ async def ws_identify_entity(
         )
         return
 
-    if cap.method in _POWER_CYCLE_METHODS and not confirm_power_cycle:
+    # Unify on a single "what we're going to fire" record. Vendor
+    # strategy beats the generic capability if both apply — vendor
+    # primitives don't power-cycle and don't trigger pairing modes.
+    if vendor_strategy is not None:
+        fire_calls = vendor_strategy.service_calls
+        method_label = vendor_strategy.method_label
+        description = vendor_strategy.description
+        needs_confirm = False  # vendor primitives are always safe
+        inter_delay_ms = 0
+        vendor_used = True
+    else:
+        fire_calls = cap.service_calls
+        method_label = cap.method.value
+        description = cap.description
+        needs_confirm = cap.method in _POWER_CYCLE_METHODS
+        inter_delay_ms = cap.inter_call_delay_ms
+
+    if needs_confirm and not confirm_power_cycle:
         connection.send_result(
             msg["id"],
             {
                 "requires_confirmation": True,
-                "method": cap.method.value,
-                "description": cap.description,
+                "method": method_label,
+                "description": description,
                 "substitution": substitution,
+                "vendor_native": vendor_used,
                 "warning": (
                     f"This will power-cycle {entity_id} "
-                    f"({cap.description}). If anything important is "
+                    f"({description}). If anything important is "
                     "downstream of this device (smart bulb on dumb "
                     "switch, network gear on outlet, etc.) it will "
                     "blink too. Re-send with confirm_power_cycle=true "
@@ -4735,44 +4814,51 @@ async def ws_identify_entity(
 
     calls_made = 0
     try:
-        for i, call in enumerate(cap.service_calls):
+        for i, call in enumerate(fire_calls):
+            # Vendor strategies may use `target: {entity_id: X}` shape
+            # while generic capabilities pass `entity_id` directly via
+            # data. Honour whichever the call specifies; default to
+            # injecting entity_id into data for back-compat.
+            call_data = dict(call.get("data", {}))
+            target = call.get("target")
+            if target is None and "entity_id" not in call_data:
+                call_data["entity_id"] = entity_id
             await hass.services.async_call(
                 call["domain"],
                 call["service"],
-                {**call["data"], "entity_id": entity_id},
+                call_data,
+                target=target,
                 blocking=False,
             )
             calls_made += 1
             # Pause between sequential calls (strobe / toggle rhythm).
             # Skip on the last call so we don't add a useless trailing
             # sleep before responding to the WS client.
-            if (
-                cap.inter_call_delay_ms > 0
-                and i + 1 < len(cap.service_calls)
-            ):
-                await _async_sleep(cap.inter_call_delay_ms / 1000.0)
+            if inter_delay_ms > 0 and i + 1 < len(fire_calls):
+                await _async_sleep(inter_delay_ms / 1000.0)
     except Exception as err:
         _LOGGER.warning(
             "identify_entity %s failed after %d/%d calls: %s",
             entity_id,
             calls_made,
-            len(cap.service_calls),
+            len(fire_calls),
             err,
         )
         connection.send_error(
             msg["id"],
             "service_call_failed",
-            f"Identify failed after {calls_made}/{len(cap.service_calls)} calls: {err}",
+            f"Identify failed after {calls_made}/{len(fire_calls)} calls: {err}",
         )
         return
 
     connection.send_result(
         msg["id"],
         {
-            "method": cap.method.value,
-            "description": cap.description,
+            "method": method_label,
+            "description": description,
             "calls_made": calls_made,
             "substitution": substitution,
+            "vendor_native": vendor_used,
         },
     )
 
