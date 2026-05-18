@@ -99,7 +99,31 @@ Fix: added `TIME_STDDEV_MIN_MIN = 0.25` (15s) — same threshold
 as manual_habit's lower bound. A unit test asserts the two stay in
 lockstep so a future threshold update propagates cleanly.
 
-#### 5. Dev audit export — for community + LLM-driven verification (preview)
+#### 5. Detector audit completed — remaining gaps deferred to v1.12.13
+
+Audited every detector for the same human-vs-device blind spot. Most
+are SAFE (informational tier, no applyable output) or already
+defended by `assess_human_likelihood` + the canonical
+`_is_device_managed` field.
+
+Remaining gaps tracked for **v1.12.13**:
+
+- **cooccurrence** + **lagged_correlation**: missing `context.parent_id`
+  filter for cascade events. Existing defences (delta-stddev gate,
+  hierarchy `_pair_is_related`, coupling-strength TIGHT demotion,
+  conflict-scanner `_already_automated`) cover most cases but a
+  user-applied automation whose pattern doesn't strict-match the
+  conflict scanner could still re-emit at lower confidence.
+- **orphan_device**: automation-driven recovery isn't distinguished
+  from user-driven; low-risk because action is just `notify`.
+- **phone_charge_reminder**: drain-rate model can be polluted by
+  automations that toggle charging state; low-risk because the
+  proposed automation is time-triggered, not state-reactive.
+- **weather_correlation**: habit-time observations can be polluted
+  by weather-aware automations; output is report-only so no apply
+  risk.
+
+#### 6. Dev audit export — for community + LLM-driven verification (preview)
 
 New `lib/dev_audit.py` produces a redacted snapshot of install
 signature + per-detector activity + config fingerprint as a single
