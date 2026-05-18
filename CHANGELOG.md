@@ -4,6 +4,38 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+## [1.12.13] — 2026-05-18
+
+### Fixed — cascade-event filter for cooccurrence + lagged_correlation
+
+v1.12.12 documented this as a remaining gap. Closing it now.
+
+Pre-fix: a user-created HA automation like _"when front_door opens,
+turn on lounge_light"_ would re-emit as a CooccurrenceDetector
+"automate this!" proposal because:
+- The pair has no structural relationship (not scene/script/group
+  members), so v1.5.20 `_pair_is_related` doesn't catch it
+- HA executor latency (often 1-3s) is above the v1.7
+  coupling-strength TIGHT threshold (<500ms), so coupling demotion
+  doesn't catch it either
+- The conflict scanner's `_already_automated` strict pattern match
+  may miss it if the automation's trigger doesn't textually match
+  the detector's proposed YAML
+
+Fix: drop events with `context.parent_id != None` at the event-
+collection step. Those events are downstream consequences of another
+HA event (automation action, script execution, scene activation).
+Genuine human-driven events have `parent_id=None` regardless of
+whether `user_id` is set (dashboard tap, voice, mobile app, physical
+sensor — all are root events).
+
+LaggedCorrelationDetector inherits from CooccurrenceDetector, so
+the fix applies to both. 3 new regression tests cover the
+automation-driven, manual-user, and device-originated cases.
+
+Remaining low-priority data-quality reviews tracked for v1.12.14:
+orphan_device, phone_charge_reminder, weather_correlation.
+
 ## [1.12.12] — 2026-05-18
 
 ### Fixed — human-vs-device fingerprint, multiple real-install bugs
