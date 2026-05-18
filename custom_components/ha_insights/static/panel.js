@@ -8399,6 +8399,12 @@ class HaInsightsPanel extends i {
         // here for the "Showing X of Y" hint in the panel header.
         this._totalInsightCount = 0;
         this._visibleInsightCount = 0;
+        // v1.10.4 — diagnostics modal (calls home_insights/export_dev_audit
+        // via WS, shows redacted JSON for bug reports + LLM-driven
+        // verification). The modal is open when _diagnosticsJson is set;
+        // _diagnosticsBusy gates the button while the WS call is in flight.
+        this._diagnosticsJson = null;
+        this._diagnosticsBusy = false;
         // Snapshot of distinct values present in the loaded insight set.
         // Drives the chip dropdown options. Refreshed on every list reload.
         this._availableDomains = [];
@@ -8605,6 +8611,70 @@ class HaInsightsPanel extends i {
       font-size: 0.9em;
       z-index: 10;
       box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+    }
+    /* v1.10.4: diagnostics modal */
+    .diagnostics-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.45);
+      z-index: 20;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+    .diagnostics-dialog {
+      background: var(--card-background-color, white);
+      color: var(--primary-text-color, #212121);
+      border-radius: 8px;
+      width: min(900px, 100%);
+      max-height: 85vh;
+      display: flex;
+      flex-direction: column;
+      box-shadow: 0 12px 36px rgba(0, 0, 0, 0.35);
+    }
+    .diagnostics-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px 18px;
+      border-bottom: 1px solid var(--divider-color, rgba(0, 0, 0, 0.08));
+    }
+    .diagnostics-close {
+      background: none;
+      border: none;
+      font-size: 1.5em;
+      cursor: pointer;
+      color: var(--primary-text-color);
+      line-height: 1;
+    }
+    .diagnostics-body {
+      padding: 14px 18px;
+      overflow: auto;
+      flex: 1 1 auto;
+    }
+    .diagnostics-hint {
+      margin: 0 0 12px 0;
+      font-size: 0.9em;
+      color: var(--secondary-text-color);
+    }
+    .diagnostics-json {
+      background: var(--code-editor-background-color, rgba(0, 0, 0, 0.04));
+      color: var(--primary-text-color);
+      padding: 12px;
+      border-radius: 4px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.85em;
+      overflow: auto;
+      max-height: 50vh;
+      white-space: pre;
+    }
+    .diagnostics-actions {
+      display: flex;
+      gap: 8px;
+      padding: 12px 18px;
+      border-top: 1px solid var(--divider-color, rgba(0, 0, 0, 0.08));
+      justify-content: flex-end;
     }
     .filters {
       display: flex;
@@ -9324,6 +9394,52 @@ class HaInsightsPanel extends i {
             this._showToast(`Purge failed: ${err.message ?? String(err)}`);
         }
     }
+    /** v1.10.4: fetch the redacted dev-audit bundle and open the modal.
+     *
+     *  The bundle (see lib/dev_audit.py SCHEMA_VERSION) captures install
+     *  signature + per-detector activity + buffer signature + config
+     *  fingerprint — all redacted so the user can safely paste it into a
+     *  GitHub issue OR into an AI chat asking "are any detectors silent
+     *  for the wrong reason?"
+     *
+     *  Admin-only at the WS layer; the button is only useful for users
+     *  who can also access HA Developer Tools. We don't pre-gate visibility
+     *  on the card side because non-admin users may legitimately want to
+     *  see what's there (the bundle is redacted by design). */
+    async _runDiagnostics() {
+        if (!this.hass)
+            return;
+        this._diagnosticsBusy = true;
+        try {
+            const result = await this.hass.connection.sendMessagePromise({
+                type: "home_insights/export_dev_audit",
+            });
+            this._diagnosticsJson = JSON.stringify(result, null, 2);
+        }
+        catch (err) {
+            this._showToast(`Diagnostics failed: ${err.message ?? String(err)}`);
+        }
+        finally {
+            this._diagnosticsBusy = false;
+        }
+    }
+    /** Copy the loaded diagnostics JSON to the user's clipboard. Uses the
+     *  modern Clipboard API; falls back gracefully when not available
+     *  (e.g. running in an insecure context). */
+    async _copyDiagnostics() {
+        if (!this._diagnosticsJson)
+            return;
+        try {
+            await navigator.clipboard.writeText(this._diagnosticsJson);
+            this._showToast("Diagnostics copied to clipboard. Paste into a GitHub issue or your AI chat.");
+        }
+        catch (err) {
+            this._showToast(`Clipboard copy failed: ${err.message ?? String(err)}`);
+        }
+    }
+    _closeDiagnostics() {
+        this._diagnosticsJson = null;
+    }
     /** Bulk-apply all currently-visible insights (after the panel's filters
      *  have been applied). Confirms first because each apply writes a real
      *  automation. Best for power users triaging a backlog after a long
@@ -9553,6 +9669,17 @@ class HaInsightsPanel extends i {
           </button>
           <button
             class="action"
+            ?disabled=${this._diagnosticsBusy}
+            aria-label="Export redacted diagnostics bundle"
+            title="Capture a redacted snapshot of the install (per-detector activity counts, install signature, config fingerprint). Safe to paste into a GitHub issue or an AI chat to ask 'are any of my detectors silent for the wrong reason?'"
+            @click=${this._runDiagnostics}
+          >
+            ${this._diagnosticsBusy
+            ? "Collecting…"
+            : b `<ha-icon icon="mdi:magnify-expand"></ha-icon> 🔬 Diagnostics`}
+          </button>
+          <button
+            class="action"
             ?disabled=${this._bulkBusy}
             aria-label="Apply every visible automation insight"
             title="Apply every visible automation insight (respects search + confidence filters)"
@@ -9650,7 +9777,54 @@ class HaInsightsPanel extends i {
         ${this._renderCard()}
       </div>
       ${this._renderAuditLog()}
+      ${this._renderDiagnosticsModal()}
       ${this._toast ? b `<div class="toast">${this._toast}</div>` : ""}
+    `;
+    }
+    /** v1.10.4: diagnostics modal — shows the redacted dev-audit JSON
+     *  with copy-to-clipboard for AI chat / bug reports. Only rendered
+     *  when _diagnosticsJson is non-null. */
+    _renderDiagnosticsModal() {
+        if (this._diagnosticsJson === null)
+            return "";
+        return b `
+      <div class="diagnostics-backdrop" @click=${this._closeDiagnostics}>
+        <div
+          class="diagnostics-dialog"
+          @click=${(e) => e.stopPropagation()}
+        >
+          <div class="diagnostics-header">
+            <strong>🔬 Redacted diagnostics</strong>
+            <button
+              class="diagnostics-close"
+              aria-label="Close"
+              @click=${this._closeDiagnostics}
+            >×</button>
+          </div>
+          <div class="diagnostics-body">
+            <p class="diagnostics-hint">
+              Snapshot of your install — entity counts by domain,
+              per-detector activity, config fingerprint. Entity friendly
+              names, automation aliases, IPs and lat/long are NOT
+              included. Safe to paste into a GitHub issue or an AI chat
+              ("are any of my detectors silent for the wrong reason?").
+            </p>
+            <pre class="diagnostics-json">${this._diagnosticsJson}</pre>
+          </div>
+          <div class="diagnostics-actions">
+            <button
+              class="action primary"
+              @click=${this._copyDiagnostics}
+            >
+              <ha-icon icon="mdi:content-copy"></ha-icon>
+              Copy to clipboard
+            </button>
+            <button class="action" @click=${this._closeDiagnostics}>
+              Close
+            </button>
+          </div>
+        </div>
+      </div>
     `;
     }
     _anyChipActive() {
@@ -9935,6 +10109,12 @@ __decorate([
 __decorate([
     r()
 ], HaInsightsPanel.prototype, "_visibleInsightCount", void 0);
+__decorate([
+    r()
+], HaInsightsPanel.prototype, "_diagnosticsJson", void 0);
+__decorate([
+    r()
+], HaInsightsPanel.prototype, "_diagnosticsBusy", void 0);
 __decorate([
     r()
 ], HaInsightsPanel.prototype, "_availableDomains", void 0);

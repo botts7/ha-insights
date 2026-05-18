@@ -4,6 +4,20 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+## [1.12.16] — 2026-05-18
+
+### Added — bundled card v1.10.4 panel.js (🔬 Diagnostics button surfaces)
+
+Bundles the v1.10.4 panel.js which adds the 🔬 Diagnostics button to
+the panel header. The button calls the `home_insights/export_dev_audit`
+WS endpoint shipped in v1.12.15 and opens a modal with the redacted
+JSON, copy-to-clipboard, and a clear hint about what's safe to share.
+
+This closes the most visible "we shipped this but you can't find it"
+gap in the v1.12.x line — until now the dev audit export was only
+invokable via HA Developer Tools → WebSocket, which most users will
+never discover.
+
 ## [1.12.15] — 2026-05-18
 
 ### Added — `home_insights/export_dev_audit` WS endpoint
