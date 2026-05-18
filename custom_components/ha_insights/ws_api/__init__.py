@@ -4584,6 +4584,8 @@ async def ws_identify_entity(
 
     from homeassistant.helpers import (
         device_registry as dr,
+    )
+    from homeassistant.helpers import (
         entity_registry as er,
     )
 
