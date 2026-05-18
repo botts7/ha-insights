@@ -9172,6 +9172,47 @@ const FINDABLE_DOMAINS = new Set([
     "media_player",
     "siren",
 ]);
+/** Sensor device_classes that respond to deliberate physical
+ *  perturbation. Must stay aligned with the keys of
+ *  `lib/perturbation_capability.py::_GUIDES`. Touching, breathing
+ *  on, or covering one of these sensors produces a state spike
+ *  large enough to fingerprint it against siblings. */
+const PERTURBABLE_DEVICE_CLASSES = new Set([
+    "temperature",
+    "humidity",
+    "carbon_dioxide",
+    "illuminance",
+    "sound_pressure",
+    "moisture",
+]);
+/** Per-device_class state-delta threshold that counts as a
+ *  "detected" spike (touch was you, not ambient drift). Mirrors
+ *  `perturbation_capability.py::PerturbationGuide.expected_delta`
+ *  scaled down to ~0.5× so a genuine touch reliably exceeds it
+ *  but ambient noise doesn't. Used by the Find Device sensor-watch
+ *  mode for inline detection without round-tripping to the
+ *  perturbation_test WS endpoint. */
+const PERTURBATION_DETECTION_THRESHOLDS = {
+    temperature: 1.0, // °C
+    humidity: 5.0, // %RH
+    carbon_dioxide: 200.0, // ppm
+    illuminance: 100.0, // lx
+    sound_pressure: 10.0, // dB
+    moisture: 50.0, // %
+};
+/** Binary-sensor device_classes you can "walk and watch" — wave at
+ *  a motion sensor, walk past an occupancy sensor, open a contact
+ *  — and the entity flips off→on right then. Card subscribes to
+ *  state changes and highlights the first off→on transition. */
+const WATCHABLE_BINARY_DEVICE_CLASSES = new Set([
+    "motion",
+    "occupancy",
+    "presence",
+    "opening",
+    "door",
+    "window",
+    "vibration",
+]);
 /** Per-domain loop cadence for the panel-level Find Device modal.
  *  Tuned so total fire rate over a long search session looks like
  *  a curious human poking, not a robotic loop. Switches especially
@@ -9400,6 +9441,16 @@ class HaInsightsPanel extends i {
          *  individual entities (FIND_DEVICE_MAX_FIRES_PER_ENTITY) and the
          *  whole session (FIND_DEVICE_MAX_SESSION_MS). */
         this._findDeviceLastFiredAt = {};
+        // v1.10.10 — Passive-sensor watch mode. When the user checks a
+        // perturbable sensor (temp / humidity / CO₂ / illuminance / etc.)
+        // or a motion / occupancy binary_sensor, we don't fire identify —
+        // we subscribe to state changes and watch for a delta (sensors) or
+        // off→on transition (binary_sensors). Baseline is captured at
+        // first subscription; threshold values from PERTURBATION_DETECTION_THRESHOLDS.
+        this._findDeviceWatchUnsubs = new Map();
+        this._findDeviceWatchBaselines = {};
+        this._findDeviceWatchCurrent = {};
+        this._findDeviceWatchDetected = new Set();
     }
     // Persistent filter storage (v0.8 phase 6). Versioned key so future
     // shape changes can ignore old saved state cleanly.
@@ -9618,6 +9669,30 @@ class HaInsightsPanel extends i {
       font-size: 0.8em;
       color: var(--warning-color, #ef6c00);
       margin-top: 2px;
+    }
+    .find-device-fires {
+      font-size: 0.78em;
+      color: var(--secondary-text-color);
+      margin-top: 2px;
+    }
+    .find-device-watch-hint {
+      font-size: 0.8em;
+      color: var(--secondary-text-color);
+      margin-top: 4px;
+      padding: 4px 8px;
+      border-left: 2px solid var(--info-color, #3b82f6);
+      background: rgba(59, 130, 246, 0.06);
+      border-radius: 2px;
+    }
+    .find-device-row--perturb .find-device-eid::before,
+    .find-device-row--watch .find-device-eid::before {
+      /* Emoji icons supplied inline in the template — no extra CSS
+         pseudo-content needed; keep the selector for potential
+         future per-mode styling. */
+    }
+    .find-device-row--detected {
+      background: rgba(76, 175, 80, 0.08);
+      border-left: 3px solid var(--success-color, #4caf50);
     }
     .find-device-truncated {
       padding: 8px;
@@ -10399,12 +10474,24 @@ class HaInsightsPanel extends i {
         this._findDeviceCount = 0;
         this._findDeviceErrors = {};
     }
-    /** Close the modal and clear the recurring identify timer. */
+    /** Close the modal and clear the recurring identify timer +
+     *  any active watch-mode subscriptions. */
     _closeFindDevice() {
         if (this._findDeviceTimer != null) {
             clearInterval(this._findDeviceTimer);
             this._findDeviceTimer = null;
         }
+        // Tear down every active state_changed subscription. Each unsub
+        // is wrapped so we don't need to await Promises here.
+        for (const unsub of this._findDeviceWatchUnsubs.values()) {
+            try {
+                unsub();
+            }
+            catch {
+                // best-effort cleanup
+            }
+        }
+        this._findDeviceWatchUnsubs.clear();
         const stoppedWithSelection = this._findDeviceSelected.size > 0;
         this._findDeviceOpen = false;
         this._findDeviceSelected = new Set();
@@ -10414,12 +10501,19 @@ class HaInsightsPanel extends i {
         this._findDeviceSessionStartedAt = 0;
         this._findDeviceSessionElapsedMs = 0;
         this._findDevicePowerCycleConfirmed = new Set();
+        this._findDeviceWatchBaselines = {};
+        this._findDeviceWatchCurrent = {};
+        this._findDeviceWatchDetected = new Set();
         if (stoppedWithSelection) {
             this._showToast("🔍 Identification stopped.");
         }
     }
     _toggleFindDeviceEntity(entityId) {
         const next = new Set(this._findDeviceSelected);
+        const state = this.hass?.states?.[entityId];
+        const mode = state
+            ? this._findDeviceMode(entityId, state)
+            : null;
         if (next.has(entityId)) {
             next.delete(entityId);
             const errs = { ...this._findDeviceErrors };
@@ -10428,28 +10522,126 @@ class HaInsightsPanel extends i {
             const counts = { ...this._findDeviceFireCounts };
             delete counts[entityId];
             this._findDeviceFireCounts = counts;
+            // Tear down watch-mode subscription if present.
+            const unsub = this._findDeviceWatchUnsubs.get(entityId);
+            if (unsub) {
+                unsub();
+                this._findDeviceWatchUnsubs.delete(entityId);
+            }
+            const baselines = { ...this._findDeviceWatchBaselines };
+            delete baselines[entityId];
+            this._findDeviceWatchBaselines = baselines;
+            const cur = { ...this._findDeviceWatchCurrent };
+            delete cur[entityId];
+            this._findDeviceWatchCurrent = cur;
+            const det = new Set(this._findDeviceWatchDetected);
+            det.delete(entityId);
+            this._findDeviceWatchDetected = det;
         }
         else {
             next.add(entityId);
+            if (mode === "perturb" || mode === "watch") {
+                this._startEntityWatch(entityId, mode);
+            }
         }
         this._findDeviceSelected = next;
-        // Restart the timer if user added the FIRST entity. If they
-        // unchecked the last one, stop the timer (no point firing on
-        // an empty set). 1 s polling interval is the timer tick — each
-        // entity decides per-tick whether IT is due to fire based on
-        // its per-domain cadence + last-fire timestamp.
-        if (next.size > 0 && this._findDeviceTimer == null) {
+        // Fire-loop timer only matters when at least one fire-mode entity
+        // is selected. Watch-mode entities use HA state subscriptions
+        // independently, so an all-watch selection should NOT spin the
+        // identify loop unnecessarily.
+        const hasFireEntities = Array.from(next).some((eid) => {
+            const st = this.hass?.states?.[eid];
+            return st && this._findDeviceMode(eid, st) === "fire";
+        });
+        if (hasFireEntities && this._findDeviceTimer == null) {
             this._findDeviceSessionStartedAt = Date.now();
             this._findDeviceSessionElapsedMs = 0;
             void this._fireFindDeviceOnce();
             this._findDeviceTimer = setInterval(() => void this._fireFindDeviceOnce(), 1000);
         }
-        else if (next.size === 0 && this._findDeviceTimer != null) {
+        else if (!hasFireEntities && this._findDeviceTimer != null) {
             clearInterval(this._findDeviceTimer);
             this._findDeviceTimer = null;
             this._findDeviceSessionStartedAt = 0;
             this._findDeviceSessionElapsedMs = 0;
         }
+    }
+    /** Subscribe to state changes on an entity and watch for a touch
+     *  (sensor) or trigger (binary_sensor). Captures a baseline value
+     *  on first subscription and stamps `_findDeviceWatchDetected`
+     *  once the delta exceeds the per-device_class threshold.
+     *
+     *  Uses HA's standard `state_changed` event subscription, filtered
+     *  client-side by entity_id. No backend endpoint needed — the
+     *  card watches the regular state stream the user can already
+     *  see in Developer Tools. */
+    _startEntityWatch(entityId, mode) {
+        if (!this.hass || this._findDeviceWatchUnsubs.has(entityId))
+            return;
+        const initial = this.hass.states?.[entityId];
+        if (mode === "perturb") {
+            const baseline = parseFloat(initial?.state ?? "");
+            if (Number.isFinite(baseline)) {
+                this._findDeviceWatchBaselines = {
+                    ...this._findDeviceWatchBaselines,
+                    [entityId]: baseline,
+                };
+            }
+        }
+        if (initial) {
+            this._findDeviceWatchCurrent = {
+                ...this._findDeviceWatchCurrent,
+                [entityId]: initial.state,
+            };
+        }
+        const handle = (evt) => {
+            if (evt.data?.entity_id !== entityId)
+                return;
+            const newState = evt.data.new_state?.state;
+            if (newState === undefined)
+                return;
+            this._findDeviceWatchCurrent = {
+                ...this._findDeviceWatchCurrent,
+                [entityId]: newState,
+            };
+            if (mode === "perturb") {
+                const baseline = this._findDeviceWatchBaselines[entityId];
+                const v = parseFloat(newState);
+                if (!Number.isFinite(v) || !Number.isFinite(baseline))
+                    return;
+                const deviceClass = initial?.attributes?.device_class;
+                if (typeof deviceClass !== "string")
+                    return;
+                const threshold = PERTURBATION_DETECTION_THRESHOLDS[deviceClass] ?? 1.0;
+                if (Math.abs(v - baseline) >= threshold) {
+                    const det = new Set(this._findDeviceWatchDetected);
+                    det.add(entityId);
+                    this._findDeviceWatchDetected = det;
+                }
+            }
+            else if (mode === "watch") {
+                if (newState === "on") {
+                    const det = new Set(this._findDeviceWatchDetected);
+                    det.add(entityId);
+                    this._findDeviceWatchDetected = det;
+                }
+            }
+        };
+        // HassLite types subscribeMessage but not subscribeEvents — the
+        // underlying ha-websocket-js connection exposes both. Cast to
+        // access subscribeEvents since it's the simpler primitive (just
+        // an event type string, vs. a full WS command). Runtime-safe;
+        // HA has shipped subscribeEvents since 2020.
+        const conn = this.hass.connection;
+        void conn.subscribeEvents(handle, "state_changed").then((unsub) => {
+            // If the user already unchecked while we were waiting for
+            // the subscription to be ready, tear it down immediately.
+            if (!this._findDeviceSelected.has(entityId)) {
+                void unsub();
+                return;
+            }
+            this._findDeviceWatchUnsubs.set(entityId, () => void unsub());
+        });
     }
     /** Format remaining session time as `m:ss`. Hits 0:00 right before
      *  the auto-stop fires, so the toast is the visual confirmation. */
@@ -10559,40 +10751,70 @@ class HaInsightsPanel extends i {
         this._findDeviceFireCounts = nextCounts;
         this._findDeviceCount = this._findDeviceCount + 1;
     }
+    /** Decide if an entity is findable via Find Device. Three modes:
+     *
+     *  - "fire": light / switch / media_player / siren — runs the
+     *    backend identify loop (light flash, switch toggle, chime).
+     *  - "perturb": sensor with a perturbable device_class — user
+     *    touches the sensor, we watch for a state delta.
+     *  - "watch": motion / occupancy / contact / vibration binary
+     *    sensor — user walks through / opens, we watch for off→on. */
+    _findDeviceMode(entity_id, state) {
+        const domain = entity_id.split(".", 1)[0];
+        if (FINDABLE_DOMAINS.has(domain))
+            return "fire";
+        const deviceClass = state.attributes?.device_class;
+        if (typeof deviceClass !== "string")
+            return null;
+        if (domain === "sensor" && PERTURBABLE_DEVICE_CLASSES.has(deviceClass)) {
+            return "perturb";
+        }
+        if (domain === "binary_sensor" &&
+            WATCHABLE_BINARY_DEVICE_CLASSES.has(deviceClass)) {
+            return "watch";
+        }
+        return null;
+    }
     /** Filter the entity list to entries matching the user's search
      *  string. Case-insensitive substring match on entity_id +
      *  friendly_name. Capped at 100 results so the DOM stays
      *  responsive on installs with thousands of entities.
      *
-     *  Only physically-findable domains are returned — automation,
-     *  scene, script, sensor, calendar, etc. are software constructs
-     *  with no identify signal (`lib/identify_capability.py` returns
-     *  NONE for them), so listing them in the modal just frustrates
-     *  the user. Domain list must stay aligned with the backend's
-     *  `identify_capability_for` whitelist. */
+     *  Three buckets: physically-firable (light/switch/media/siren),
+     *  perturbable sensors (temp/humidity/CO₂/etc.), and watchable
+     *  binary sensors (motion/occupancy/contact). Software-only
+     *  domains (automation/scene/script/calendar) are dropped because
+     *  they have no physical presence to locate. */
     _findDeviceMatches() {
         if (!this.hass?.states)
             return [];
         const needle = this._findDeviceSearch.trim().toLowerCase();
         const out = [];
         for (const [entity_id, state] of Object.entries(this.hass.states)) {
-            const domain = entity_id.split(".", 1)[0];
-            if (!FINDABLE_DOMAINS.has(domain))
+            const mode = this._findDeviceMode(entity_id, state);
+            if (mode === null)
                 continue;
             const friendly = state.attributes?.friendly_name ?? entity_id;
             if (!needle) {
-                out.push({ entity_id, friendly_name: friendly });
+                out.push({ entity_id, friendly_name: friendly, mode });
             }
             else {
                 const hay = `${entity_id} ${friendly}`.toLowerCase();
                 if (hay.includes(needle)) {
-                    out.push({ entity_id, friendly_name: friendly });
+                    out.push({ entity_id, friendly_name: friendly, mode });
                 }
             }
             if (out.length >= 100)
                 break;
         }
-        return out.sort((a, b) => a.entity_id.localeCompare(b.entity_id));
+        return out.sort((a, b) => {
+            // Group by mode (fire first), then alphabetical inside group —
+            // helps users find the right entity when many domains match.
+            const modeOrder = { fire: 0, perturb: 1, watch: 2 };
+            if (a.mode !== b.mode)
+                return modeOrder[a.mode] - modeOrder[b.mode];
+            return a.entity_id.localeCompare(b.entity_id);
+        });
     }
     /** Bulk-apply all currently-visible insights (after the panel's filters
      *  have been applied). Confirms first because each apply writes a real
@@ -10989,13 +11211,13 @@ class HaInsightsPanel extends i {
               until you uncheck it.
             </p>
             <p class="diagnostics-hint" style="color: var(--secondary-text-color); font-size: 0.85em;">
-              💡 To find a passive sensor (temperature, humidity, CO₂,
-              illuminance, sound, moisture), open the insight where it
-              appears and use the <strong>👆 Touch test</strong> button —
-              touch the sensor and the integration tells you which
-              entity actually spiked. For motion / occupancy sensors,
-              walk through each room and watch the live state for the
-              one that fires.
+              💡 <strong>Passive sensors</strong> (👆 temperature / humidity /
+              CO₂ / illuminance / sound / moisture) and <strong>binary
+              sensors</strong> (👀 motion / occupancy / contact / vibration)
+              are listed here too. Tick one and the row will show its
+              live state — touch / wave at / open the device and the
+              row turns green when the spike is detected. No services
+              fired; just a state-stream watch.
             </p>
             <p class="diagnostics-hint" style="color: var(--secondary-text-color); font-size: 0.85em;">
               ⚠️ <strong>Safety:</strong> sessions auto-stop after 5
@@ -11027,17 +11249,63 @@ class HaInsightsPanel extends i {
             ? b `<div class="find-device-empty">No matching entities.</div>`
             : matches.map((m) => {
                 const err = this._findDeviceErrors[m.entity_id];
+                const checked = this._findDeviceSelected.has(m.entity_id);
+                const detected = this._findDeviceWatchDetected.has(m.entity_id);
+                const baseline = this._findDeviceWatchBaselines[m.entity_id];
+                const current = this._findDeviceWatchCurrent[m.entity_id];
+                const fires = this._findDeviceFireCounts[m.entity_id] ?? 0;
+                const st = this.hass?.states?.[m.entity_id];
+                const deviceClass = st?.attributes?.device_class;
+                const unit = st?.attributes?.unit_of_measurement;
                 return b `
-                      <label class="find-device-row">
+                      <label
+                        class="find-device-row find-device-row--${m.mode} ${detected
+                    ? "find-device-row--detected"
+                    : ""}"
+                      >
                         <input
                           type="checkbox"
-                          ?checked=${this._findDeviceSelected.has(m.entity_id)}
+                          ?checked=${checked}
                           @change=${() => this._toggleFindDeviceEntity(m.entity_id)}
                         />
                         <div class="find-device-row-text">
-                          <span class="find-device-eid">${m.entity_id}</span>
+                          <span class="find-device-eid">
+                            ${m.mode === "perturb"
+                    ? "👆 "
+                    : m.mode === "watch"
+                        ? "👀 "
+                        : ""}${m.entity_id}
+                          </span>
                           <span class="find-device-name">${m.friendly_name}</span>
-                          ${err ? b `<span class="find-device-err">${err}</span>` : ""}
+                          ${m.mode === "fire" && checked && fires > 0
+                    ? b `<span class="find-device-fires"
+                                >fired ${fires}/${FIND_DEVICE_MAX_FIRES_PER_ENTITY}</span
+                              >`
+                    : ""}
+                          ${m.mode === "perturb" && checked
+                    ? b `<span class="find-device-watch-hint">
+                                ${detected
+                        ? b `<strong style="color: var(--success-color, #4caf50);">
+                                      ✅ Spike detected — this is your sensor!
+                                    </strong>`
+                        : b `Touch / breathe on / cover this sensor.
+                                      Baseline ${baseline?.toFixed(1) ?? "—"}${unit ?? ""},
+                                      now <strong>${current ?? "—"}${unit ?? ""}</strong>`}
+                              </span>`
+                    : ""}
+                          ${m.mode === "watch" && checked
+                    ? b `<span class="find-device-watch-hint">
+                                ${detected
+                        ? b `<strong style="color: var(--success-color, #4caf50);">
+                                      ✅ Triggered — this is the ${deviceClass ?? "sensor"}!
+                                    </strong>`
+                        : b `Walk past / open / wave. Current state:
+                                      <strong>${current ?? "—"}</strong>`}
+                              </span>`
+                    : ""}
+                          ${err
+                    ? b `<span class="find-device-err">${err}</span>`
+                    : ""}
                         </div>
                       </label>
                     `;
@@ -11455,6 +11723,15 @@ __decorate([
 __decorate([
     r()
 ], HaInsightsPanel.prototype, "_auditBusy", void 0);
+__decorate([
+    r()
+], HaInsightsPanel.prototype, "_findDeviceWatchBaselines", void 0);
+__decorate([
+    r()
+], HaInsightsPanel.prototype, "_findDeviceWatchCurrent", void 0);
+__decorate([
+    r()
+], HaInsightsPanel.prototype, "_findDeviceWatchDetected", void 0);
 // Guard against double-registration — only relevant if a future Lovelace
 // resource ever imports this bundle directly (today only the integration
 // auto-registers it). Cheap to be safe.
