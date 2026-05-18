@@ -80,14 +80,14 @@ def test_boundary_just_above_threshold_preserved() -> None:
     """CV just above 5% means there IS meaningful human variance —
     preserve (the detector should still emit)."""
     detector = LongTailDetector()
-    # mean=10000, stddev≈600 → CV=6% (just above 5% threshold)
-    spans = [9400, 9700, 10000, 10300, 10600]
+    # mean=10000, stddev≈636 → CV≈6.36% (just above 5% threshold)
+    spans = [9100, 9550, 10000, 10450, 10900]
     assert not detector._is_fixed_duty_cycle(spans)
 
 
 def test_boundary_just_below_threshold_suppressed() -> None:
     """CV just below 5% means robotic precision — suppress."""
     detector = LongTailDetector()
-    # mean=10000, stddev≈300 → CV=3% (below 5%)
+    # mean=10000, stddev≈212 → CV≈2.12% (below 5%)
     spans = [9700, 9850, 10000, 10150, 10300]
     assert detector._is_fixed_duty_cycle(spans)
