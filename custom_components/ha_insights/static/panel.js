@@ -2603,6 +2603,11 @@ class HaInsightsCard extends i {
         /** Per-insight redaction preview state — shown when user clicks "What gets sent?" */
         this._previewById = new Map();
         this._previewBusy = false;
+        /** v1.10.4: in-flight flag for the 🔆 Identify-this-entity button in
+         *  the detail-dialog. Used to disable the button while the WS round-
+         *  trip is in progress. Single boolean (not per-insight) because only
+         *  one identify can fire at a time per dialog. */
+        this._identifyBusy = false;
         /** v1.1 Refine-existing-automation modal state. Separate from the
          *  per-insight dialog because we're not in an insight context here —
          *  user clicked the ✏️ icon on a 🔁/🤖 pill. Carries the loaded
@@ -5100,6 +5105,66 @@ class HaInsightsCard extends i {
         }
         catch {
             // Notification fallback is best-effort; banner already has it.
+        }
+    }
+    /** v1.10.4: pull the primary entity_id out of an insight's fingerprint.
+     *  Mirrors the server-side enrichment in ws_api.ws_list which prefers
+     *  `entity_id`, falls back to `follower_entity_id`, then
+     *  `leader_entity_id`. Returns null when the insight is a cohort
+     *  representative or otherwise doesn't pin a single entity. */
+    _primaryEntityId(insight) {
+        const fp = insight.fingerprint;
+        if (!fp)
+            return null;
+        for (const k of [
+            "entity_id",
+            "follower_entity_id",
+            "leader_entity_id",
+            "target_entity_id",
+        ]) {
+            const v = fp[k];
+            if (typeof v === "string" && v.includes("."))
+                return v;
+        }
+        return null;
+    }
+    /** v1.10.4: fire the entity's native identifier (light flash, speaker
+     *  chime, fan flicker, etc.) so the user can verify which physical
+     *  device corresponds to this insight's entity_id.
+     *
+     *  Calls `home_insights/identify_entity` directly (no pre-capability
+     *  check — the backend already gates on capability and returns a
+     *  descriptive error when unsupported). Toast surfaces the result so
+     *  the user sees BOTH success ("Identifier fired — look/listen for
+     *  it") and graceful "this entity doesn't support identify" failures.
+     *
+     *  Pre-v1.10.4 this functionality was ONLY accessible via the bulk-
+     *  area-assign dialog, which most users never opened. Closes the
+     *  "we built it but you can't find it" UX gap flagged in the audit. */
+    async _identifyEntity(insight) {
+        if (!this.hass)
+            return;
+        const entityId = this._primaryEntityId(insight);
+        if (entityId === null) {
+            this._failModal("No single entity_id on this insight — try clicking Identify on a row "
+                + "from the bulk-area-assign dialog instead.");
+            return;
+        }
+        this._identifyBusy = true;
+        try {
+            const result = await this.hass.connection.sendMessagePromise({
+                type: "home_insights/identify_entity",
+                entity_id: entityId,
+            });
+            const method = result.method ?? "identify";
+            this._toast =
+                `🔆 ${entityId} — fired ${method}. Look / listen for the device.`;
+        }
+        catch (err) {
+            this._failModal(`Identify failed: ${this._asMessage(err)}`);
+        }
+        finally {
+            this._identifyBusy = false;
         }
     }
     async _explain(insight) {
@@ -8026,6 +8091,16 @@ class HaInsightsCard extends i {
                           ${this._testBusy ? "testing…" : "🔥 Test actions"}
                         </button>`
                             : A}
+                    ${this._primaryEntityId(insight) !== null
+                            ? b `<button
+                          class="action"
+                          ?disabled=${this._identifyBusy}
+                          title="Fire the entity's native identifier (light flash, speaker chime, fan flicker, etc.) so you can confirm which physical device this insight refers to."
+                          @click=${() => this._identifyEntity(insight)}
+                        >
+                          ${this._identifyBusy ? "identifying…" : "🔆 Identify entity"}
+                        </button>`
+                            : A}
                   </div>
                   ${!llmEnabled
                             ? b `<div class="subtitle" style="margin-top: 12px;">
@@ -8297,6 +8372,9 @@ __decorate([
 __decorate([
     r()
 ], HaInsightsCard.prototype, "_previewBusy", void 0);
+__decorate([
+    r()
+], HaInsightsCard.prototype, "_identifyBusy", void 0);
 __decorate([
     r()
 ], HaInsightsCard.prototype, "_testResults", void 0);
