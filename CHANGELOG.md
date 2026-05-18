@@ -4,6 +4,40 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+## [1.13.0] — 2026-05-19
+
+### Added — StaleAutomationDetector
+
+Competitive-analysis-driven (May 2026) new detector. Closes the gap
+vs Danm72/home-assistant-automation-suggestions, whose 30-day stale
+list is their most-praised feature.
+
+Walks every `automation.*` entity in the state machine and emits an
+`AUTOMATION_IMPROVEMENT` insight when `last_triggered` is older than
+30 days (or `None` on a sufficiently-aged automation).
+
+**Confidence tiers** scale with staleness:
+- 30–60 days: 0.65
+- 60–120 days: 0.80
+- 120+ days: 0.92
+- Never fired (on an old automation): 0.75
+
+**Skip rules** match the existing AutomationAuditDetector contract:
+- `ha_insights:no-audit` label → skip
+- Entity in `blocked_entities` → skip
+- Disabled automation (state == "off") → skip (user intent)
+- Automation younger than threshold → skip (no signal yet)
+
+Each insight payload includes the entity_id, days_stale, and an
+`automation.remove_automation` action so the card can render a
+delete button. `payload_format="report"` because the action is to
+remove, not propose a new automation.
+
+15 tests cover the four staleness buckets, all skip rules, payload
+shape, fingerprint stability across re-scans, and the
+`last_triggered` parser's defensive paths (None, naive datetime,
+ISO string, datetime object, garbage).
+
 ## [1.12.25] — 2026-05-19
 
 ### Internal — ws_api/_helpers.py extraction (v1.13 step 1)
