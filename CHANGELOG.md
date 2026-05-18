@@ -4,6 +4,39 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+## [1.12.19] — 2026-05-18
+
+### Added — bundled card v1.10.7 + v1.10.8 panel.js
+
+Two card releases bundled in one integration release:
+
+**Card v1.10.7** — 🔆 Identify looping modal + multi-entity support.
+Pre-v1.10.7 the Identify button fired once with a toast outside the
+dialog; users couldn't catch the flash. New flow: focused modal with
+checkbox per referenced entity, fire every 5s (Find My iPhone style),
+"Found it!" / "Stop" buttons. Multi-entity insights (cohorts,
+physical_device_link with same device having both light + temp
+sensor) work end-to-end — uncheck each row as you find it.
+
+**Card v1.10.8** — 🔍 Find My HA Device in panel header. Top-level
+entity picker — not scoped to insights. Open from panel header,
+search by entity_id or friendly_name, tick checkboxes on candidates,
+loop fires identify on each every 5s until you uncheck (found) or
+close (done). Use cases: locate a Zigbee bulb after a rename, find
+which Hue light is `light.kitchen_4` of 30 unnamed, identify a moved
+switch with a cryptic name. Same backend as per-insight Identify;
+different entry point so the feature is discoverable for ALL
+entities, not just insight-referenced ones.
+
+Also — v1.10.8 ships an honest BLE-find modal hint. Pre-v1.10.8 the
+modal claimed "wave your phone around" but every BLE scanner in a
+typical HA install is stationary, so the trend arrow was reading
+per-advertisement RSSI noise, not user movement. Updated hint to
+say "room-level localization via stationary proxies; true
+warmer/colder UX requires a mobile scanner — pending an HA
+Companion app active-scan feature." Memory roadmap captures the
+upstream contribution path.
+
 ## [1.12.18] — 2026-05-18
 
 ### Added — bundled card v1.10.6 panel.js (📡 BLE find button surfaces)
