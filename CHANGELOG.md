@@ -4,6 +4,23 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+## [1.12.18] — 2026-05-18
+
+### Added — bundled card v1.10.6 panel.js (📡 BLE find button surfaces)
+
+Bundles card v1.10.6 which adds the 📡 BLE find button to the insight
+detail-dialog action row, alongside v1.10.5's 🔆 Identify entity.
+
+For BLE-trackable entities, one click subscribes to the live RSSI
+stream and shows a focused modal with: big dBm readout, color bucket
+(HOT/warm/cool/cold), trend arrow (↑↓→), last-seen scanner. Users
+walk around with their phone and watch the trend tell them whether
+they're closer or further.
+
+Closes the last v1.12.16 UX-audit gap — physical device discovery
+that was previously buried inside bulk-area-assign is now one click
+from any insight.
+
 ## [1.12.17] — 2026-05-18
 
 ### Added — bundled card v1.10.5 panel.js (🔆 Identify entity button)
