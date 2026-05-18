@@ -4,6 +4,26 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+## [1.12.21] — 2026-05-18
+
+### Bundled card v1.10.10 — Find Device touch-test + watch mode for sensors
+
+Bundles the new card panel.js. No integration-side code changes
+— v1.10.10 is purely a card-side enhancement that uses HA's
+existing `state_changed` event subscription.
+
+Two new modes in the panel-level Find Device modal:
+
+- **👆 Touch-test** for perturbable sensors (temperature, humidity,
+  CO₂, illuminance, sound_pressure, moisture). Baseline + state
+  subscription + per-class delta detection.
+- **👀 Watch** for motion / occupancy / contact / vibration binary
+  sensors. Off→on transition triggers detected state.
+
+No services fired, no aggregate-rate concerns, no power-cycling
+risk. Existing fire-mode safety (vendor pairing thresholds,
+critical-load deny-list, 5-min ceiling) unchanged.
+
 ## [1.12.20] — 2026-05-18
 
 ### Fixed — Identify safety floor + vendor-pairing-mode safe patterns
