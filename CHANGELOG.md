@@ -53,7 +53,39 @@ alongside the existing `_TIME_STDDEV_MAX_MIN = 45.0` upper bound.
 Below the lower bound, the detector returns None instead of emitting
 the misleading "you manually set" insight.
 
-#### 3. Dev audit export — for community + LLM-driven verification (preview)
+#### 3. `long_tail` proposed dangerous auto-off for fixed-cycle devices (CRITICAL)
+
+Real-install incident: detector emitted at 100% confidence:
+
+> `switch.inverter_5010kmsc252s0046_switch stays active for ~584 min (11 times in 14d, max 609 min). Auto-off after 120 min?`
+
+That switch is a **solar inverter** that runs ~10 hours every day from
+sunrise to sunset. Applying the suggested auto-off automation would
+have **shut off solar generation every afternoon**. Same risk applies
+to pool pumps, scheduled HVAC, vendor-side appliance timers.
+
+The detector saw "active span ≥ threshold" repeated ≥3 times and
+emitted full confidence. It had no signal to distinguish "user forgot
+to turn off" from "device's intentional duty cycle."
+
+Fix: added `_is_fixed_duty_cycle()` gate. Computes coefficient of
+variation across all observed long spans. If CV < 5% (i.e. every
+recorded duration is within ±5% of the average), the device has a
+fixed duty cycle and we **suppress entirely** rather than risk
+breaking a device the user relies on.
+
+User's actual inverter pattern (~584 min mean, ~5 min stddev, CV ≈
+0.85%) was the calibration target. Real-human "forgot to turn off"
+patterns have CV well above 50% and pass through unchanged. 7 new
+tests cover boundary, defensive, and the exact real-install spans.
+
+This is the second pattern in v1.12.12 of "detector treats
+human-vs-device as binary" — same root cause as Bug 1, but in a
+detector that builds **applyable automations** rather than just
+displaying. The blast radius is higher; the fix is more conservative
+(hard suppress, not "downgrade confidence").
+
+#### 4. Dev audit export — for community + LLM-driven verification (preview)
 
 New `lib/dev_audit.py` produces a redacted snapshot of install
 signature + per-detector activity + config fingerprint as a single
