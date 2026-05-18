@@ -4,6 +4,20 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+## [1.12.17] — 2026-05-18
+
+### Added — bundled card v1.10.5 panel.js (🔆 Identify entity button)
+
+Bundles card v1.10.5 which adds a 🔆 Identify entity button to the
+insight detail-dialog action row. Calls `home_insights/identify_entity`
+to make the device flash / chime / flicker so users can confirm
+which physical device an insight refers to.
+
+Closes the largest "we built it but you can't find it" gap flagged
+in the v1.12.16 UX audit. The capability already existed but was
+only reachable via the bulk-area-assign dialog; now it's one click
+from any insight that pins a primary entity.
+
 ## [1.12.16] — 2026-05-18
 
 ### Added — bundled card v1.10.4 panel.js (🔬 Diagnostics button surfaces)
