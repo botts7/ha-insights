@@ -4,6 +4,22 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+## [1.13.3] — 2026-05-19
+
+### Bundled card v1.10.13 — 💬 Ask AI to write an automation
+
+Pure panel.js bundle of card v1.10.13. No backend code changes.
+
+Card v1.10.13 adds the 💬 button in the panel header → modal with
+textarea → calls the v1.13.2 \`home_insights/chat_create_automation\`
+endpoint → YAML preview → Apply via existing \`home_insights/apply\`
+flow with payload_override.
+
+This completes the competitive-analysis sweep: three gaps closed
+across v1.13.0 (StaleAutomationDetector), v1.13.1 (Repairs proposal
+dual-emit), and v1.13.2 + v1.13.3 (chat-create-automation
+backend + card).
+
 ## [1.13.2] — 2026-05-19
 
 ### Added — Blank-canvas automation chat WS endpoint (backend MVP)

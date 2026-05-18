@@ -9264,6 +9264,15 @@ class HaInsightsPanel extends i {
         this._bulkBusy = false;
         this._scanBusy = false;
         this._rollupBusy = false;
+        // v1.13.3 — Chat modal state. The 💬 button opens a textarea
+        // for the user's automation request; submit calls
+        // home_insights/chat_create_automation. Result has YAML preview +
+        // rationale + apply button (re-uses existing home_insights/apply).
+        this._chatOpen = false;
+        this._chatPrompt = "";
+        this._chatBusy = false;
+        this._chatError = "";
+        this._chatResult = null;
         this._rollupProgress = null;
         this._rollupPollTimer = null;
         this._recorderStatus = null;
@@ -9602,6 +9611,65 @@ class HaInsightsPanel extends i {
       margin: 0 0 12px 0;
       font-size: 0.9em;
       color: var(--secondary-text-color);
+    }
+    .chat-textarea {
+      width: 100%;
+      box-sizing: border-box;
+      font-family: inherit;
+      font-size: 0.95em;
+      padding: 10px 12px;
+      border: 1px solid var(--divider-color, rgba(0, 0, 0, 0.12));
+      border-radius: 4px;
+      background: var(--primary-background-color, #fff);
+      color: var(--primary-text-color);
+      resize: vertical;
+      min-height: 80px;
+    }
+    .chat-textarea:focus {
+      outline: 2px solid var(--primary-color, #3b82f6);
+      outline-offset: -1px;
+      border-color: transparent;
+    }
+    .chat-counter {
+      font-size: 0.78em;
+      color: var(--secondary-text-color);
+      text-align: right;
+      margin-top: 4px;
+    }
+    .chat-error {
+      margin-top: 8px;
+      padding: 8px 12px;
+      border-left: 3px solid var(--warning-color, #ef6c00);
+      background: rgba(239, 108, 0, 0.08);
+      font-size: 0.88em;
+      color: var(--primary-text-color);
+      white-space: pre-wrap;
+    }
+    .chat-rationale {
+      margin: 0 0 12px 0;
+      padding: 10px 12px;
+      border-left: 3px solid var(--info-color, #3b82f6);
+      background: rgba(59, 130, 246, 0.06);
+      font-size: 0.88em;
+      color: var(--primary-text-color);
+      border-radius: 2px;
+    }
+    .chat-yaml {
+      background: var(--code-editor-background-color, rgba(0, 0, 0, 0.04));
+      color: var(--primary-text-color);
+      padding: 12px;
+      border-radius: 4px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.85em;
+      overflow: auto;
+      max-height: 45vh;
+      white-space: pre;
+      margin: 0 0 8px 0;
+    }
+    .chat-stats {
+      font-size: 0.78em;
+      color: var(--secondary-text-color);
+      text-align: right;
     }
     .diagnostics-json {
       background: var(--code-editor-background-color, rgba(0, 0, 0, 0.04));
@@ -10493,6 +10561,81 @@ class HaInsightsPanel extends i {
     _closeDiagnostics() {
         this._diagnosticsJson = null;
     }
+    // ===== v1.13.3 — Chat → automation =====
+    /** Open the chat modal. Resets state so each session starts clean. */
+    _openChat() {
+        this._chatOpen = true;
+        this._chatPrompt = "";
+        this._chatBusy = false;
+        this._chatError = "";
+        this._chatResult = null;
+    }
+    _closeChat() {
+        this._chatOpen = false;
+        this._chatPrompt = "";
+        this._chatBusy = false;
+        this._chatError = "";
+        this._chatResult = null;
+    }
+    /** Submit the chat prompt. Calls `home_insights/chat_create_automation`,
+     *  stores the YAML preview + rationale in `_chatResult` for the
+     *  modal to render. Errors are surfaced inline rather than via toast
+     *  so the user can read + retry without losing their prompt. */
+    async _submitChat() {
+        if (!this.hass)
+            return;
+        const prompt = this._chatPrompt.trim();
+        if (!prompt) {
+            this._chatError = "Prompt is empty — describe the automation you want.";
+            return;
+        }
+        if (prompt.length > 2000) {
+            this._chatError =
+                "Prompt is too long (max 2000 chars). Trim it down to one or two sentences.";
+            return;
+        }
+        this._chatBusy = true;
+        this._chatError = "";
+        this._chatResult = null;
+        try {
+            const result = await this.hass.connection.sendMessagePromise({
+                type: "home_insights/chat_create_automation",
+                prompt,
+            });
+            this._chatResult = result;
+        }
+        catch (err) {
+            const message = err.message ?? String(err);
+            this._chatError = message;
+        }
+        finally {
+            this._chatBusy = false;
+        }
+    }
+    /** Apply the chat-generated automation. Uses the existing
+     *  `home_insights/apply` flow with a virtual insight_id + payload
+     *  override — same plumbing as Refine apply, no new backend
+     *  endpoint needed. */
+    async _applyChat() {
+        if (!this.hass || !this._chatResult)
+            return;
+        try {
+            await this.hass.connection.sendMessagePromise({
+                type: "home_insights/apply",
+                // Chat-generated automations don't have a real stored insight;
+                // backend tolerates `chat:` prefix as a synthetic id for the
+                // audit row + treats payload_override as authoritative.
+                insight_id: `chat:${Date.now()}`,
+                payload_override: this._chatResult.refined_payload,
+            });
+            this._showToast("✅ Automation created. Find it in Settings → Automations.");
+            this._closeChat();
+        }
+        catch (err) {
+            const message = err.message ?? String(err);
+            this._chatError = `Apply failed: ${message}`;
+        }
+    }
     // ===== v1.10.8 — Find My HA Device =====
     /** Open the Find Device modal. Resets selection + counter so each
      *  session starts clean. */
@@ -11123,6 +11266,14 @@ class HaInsightsPanel extends i {
           </button>
           <button
             class="action"
+            aria-label="Ask AI to write an automation"
+            title="Type a sentence describing what you want — e.g. 'turn on porch light at sunset' — and the configured Conversation agent generates a working automation YAML you can preview and apply. Uses the same redactor + audit log as Refine."
+            @click=${this._openChat}
+          >
+            <ha-icon icon="mdi:robot-happy-outline"></ha-icon> 💬 Ask AI
+          </button>
+          <button
+            class="action"
             ?disabled=${this._bulkBusy}
             aria-label="Apply every visible automation insight"
             title="Apply every visible automation insight (respects search + confidence filters)"
@@ -11222,6 +11373,7 @@ class HaInsightsPanel extends i {
       ${this._renderAuditLog()}
       ${this._renderDiagnosticsModal()}
       ${this._renderFindDeviceModal()}
+      ${this._renderChatModal()}
       ${this._toast ? b `<div class="toast">${this._toast}</div>` : ""}
     `;
     }
@@ -11240,6 +11392,193 @@ class HaInsightsPanel extends i {
      *  unchecking removes it. Loop is started/stopped automatically by
      *  _toggleFindDeviceEntity based on set size. No per-entity action
      *  needed — just check, listen, uncheck when found. */
+    /** v1.13.3 — Chat modal. Two-phase flow:
+     *
+     *    Phase 1 (default): textarea + Submit. User types their request,
+     *    we POST to home_insights/chat_create_automation.
+     *    Phase 2 (after _chatResult is set): show the generated YAML +
+     *    rationale + Apply / Cancel buttons.
+     *
+     *  Errors render inline beneath the textarea so the user can retry
+     *  without losing their prompt. */
+    _renderChatModal() {
+        if (!this._chatOpen)
+            return "";
+        const hasResult = this._chatResult != null;
+        return b `
+      <div class="diagnostics-backdrop" @click=${this._closeChat}>
+        <div
+          class="diagnostics-dialog"
+          @click=${(e) => e.stopPropagation()}
+          style="max-width: 720px;"
+        >
+          <div class="diagnostics-header">
+            <strong>💬 Ask AI to write an automation</strong>
+            <button
+              class="diagnostics-close"
+              aria-label="Close"
+              @click=${this._closeChat}
+            >×</button>
+          </div>
+          <div class="diagnostics-body">
+            ${hasResult
+            ? this._renderChatResult()
+            : this._renderChatInput()}
+          </div>
+        </div>
+      </div>
+    `;
+    }
+    _renderChatInput() {
+        return b `
+      <p class="diagnostics-hint">
+        Describe what you want in one or two sentences — e.g.
+        <em>"turn on porch light at sunset"</em> or
+        <em>"send me a notification when the basement door stays open for
+        more than 5 minutes"</em>. The configured Conversation agent
+        generates a working YAML automation you can preview and apply.
+      </p>
+      <p
+        class="diagnostics-hint"
+        style="color: var(--secondary-text-color); font-size: 0.85em;"
+      >
+        💡 Privacy: the prompt goes through the same redactor + audit
+        log as Refine. Entity names you reference are pseudonymised
+        before they leave your network.
+      </p>
+      <textarea
+        class="chat-textarea"
+        rows="4"
+        maxlength="2000"
+        placeholder="Turn on porch light at sunset…"
+        ?disabled=${this._chatBusy}
+        .value=${this._chatPrompt}
+        @input=${(e) => (this._chatPrompt = e.target.value)}
+      ></textarea>
+      <div class="chat-counter">${this._chatPrompt.length} / 2000</div>
+      ${this._chatError
+            ? b `<div class="chat-error">${this._chatError}</div>`
+            : ""}
+      <div class="diagnostics-actions">
+        <button class="action" @click=${this._closeChat}>Cancel</button>
+        <button
+          class="action primary"
+          ?disabled=${this._chatBusy || !this._chatPrompt.trim()}
+          @click=${this._submitChat}
+        >
+          ${this._chatBusy
+            ? "Generating…"
+            : b `<ha-icon icon="mdi:send"></ha-icon> Generate`}
+        </button>
+      </div>
+    `;
+    }
+    _renderChatResult() {
+        const result = this._chatResult;
+        const yaml = this._formatYamlPayload(result.refined_payload);
+        return b `
+      <p class="diagnostics-hint">
+        ✅ Here's the automation. Review the YAML below, then click
+        <strong>Apply</strong> to create it in HA, or
+        <strong>Edit prompt</strong> to refine your request.
+      </p>
+      ${result.rationale
+            ? b `<div class="chat-rationale">${result.rationale}</div>`
+            : ""}
+      <pre class="chat-yaml">${yaml}</pre>
+      ${result.bytes_sent != null && result.bytes_received != null
+            ? b `<div class="chat-stats">
+            ↑${result.bytes_sent}b sent · ↓${result.bytes_received}b
+            received
+          </div>`
+            : ""}
+      ${this._chatError
+            ? b `<div class="chat-error">${this._chatError}</div>`
+            : ""}
+      <div class="diagnostics-actions">
+        <button
+          class="action"
+          @click=${() => {
+            this._chatResult = null;
+            this._chatError = "";
+        }}
+        >
+          ← Edit prompt
+        </button>
+        <button class="action primary" @click=${this._applyChat}>
+          <ha-icon icon="mdi:check"></ha-icon> Apply
+        </button>
+      </div>
+    `;
+    }
+    /** Convert the LLM-generated payload (a dict) to readable YAML for
+     *  the preview pre. We do not have a heavy YAML lib in the bundle,
+     *  so a simple key-by-key serializer is used. Good enough for the
+     *  preview; the backend keeps the canonical YAML form on apply. */
+    _formatYamlPayload(payload) {
+        const lines = [];
+        const writeValue = (value, indent) => {
+            if (value === null || value === undefined) {
+                lines.push(`${indent}null`);
+            }
+            else if (typeof value === "string") {
+                const needsQuote = /[:#\n]/.test(value) || /^\s/.test(value);
+                lines.push(needsQuote
+                    ? `${indent}${JSON.stringify(value)}`
+                    : `${indent}${value}`);
+            }
+            else if (typeof value === "number" || typeof value === "boolean") {
+                lines.push(`${indent}${value}`);
+            }
+            else if (Array.isArray(value)) {
+                if (value.length === 0) {
+                    lines.push(`${indent}[]`);
+                    return;
+                }
+                for (const item of value) {
+                    if (item && typeof item === "object" && !Array.isArray(item)) {
+                        const entries = Object.entries(item);
+                        const firstKey = entries[0];
+                        if (firstKey) {
+                            lines.push(`${indent}- ${firstKey[0]}:`);
+                            writeValue(firstKey[1], `${indent}    `);
+                            for (const [k, v] of entries.slice(1)) {
+                                lines.push(`${indent}  ${k}:`);
+                                writeValue(v, `${indent}    `);
+                            }
+                        }
+                    }
+                    else {
+                        lines.push(`${indent}-`);
+                        writeValue(item, `${indent}  `);
+                    }
+                }
+            }
+            else if (typeof value === "object") {
+                for (const [k, v] of Object.entries(value)) {
+                    if (v && typeof v === "object") {
+                        lines.push(`${indent}${k}:`);
+                        writeValue(v, `${indent}  `);
+                    }
+                    else {
+                        lines.push(`${indent}${k}:`);
+                        writeValue(v, `${indent}  `);
+                    }
+                }
+            }
+        };
+        for (const [k, v] of Object.entries(payload)) {
+            if (v && typeof v === "object") {
+                lines.push(`${k}:`);
+                writeValue(v, "  ");
+            }
+            else {
+                lines.push(`${k}:`);
+                writeValue(v, "  ");
+            }
+        }
+        return lines.join("\n");
+    }
     _renderFindDeviceModal() {
         if (!this._findDeviceOpen)
             return "";
@@ -11692,6 +12031,21 @@ __decorate([
 __decorate([
     r()
 ], HaInsightsPanel.prototype, "_rollupBusy", void 0);
+__decorate([
+    r()
+], HaInsightsPanel.prototype, "_chatOpen", void 0);
+__decorate([
+    r()
+], HaInsightsPanel.prototype, "_chatPrompt", void 0);
+__decorate([
+    r()
+], HaInsightsPanel.prototype, "_chatBusy", void 0);
+__decorate([
+    r()
+], HaInsightsPanel.prototype, "_chatError", void 0);
+__decorate([
+    r()
+], HaInsightsPanel.prototype, "_chatResult", void 0);
 __decorate([
     r()
 ], HaInsightsPanel.prototype, "_rollupProgress", void 0);
