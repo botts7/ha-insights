@@ -2608,6 +2608,18 @@ class HaInsightsCard extends i {
          *  trip is in progress. Single boolean (not per-insight) because only
          *  one identify can fire at a time per dialog. */
         this._identifyBusy = false;
+        /** v1.10.6: BLE live-find state. Populated when user clicks the
+         *  📡 BLE find button in the insight detail-dialog. Subscription
+         *  delivers per-scanner RSSI updates; modal shows latest reading +
+         *  trend arrow so the user can wave their phone around and watch the
+         *  signal get stronger/weaker. */
+        this._bleFindOpen = false;
+        this._bleFindEntity = "";
+        this._bleFindAddress = "";
+        this._bleFindLatest = null;
+        this._bleTrendBuffer = [];
+        this._bleFindError = "";
+        this._bleFindUnsub = null;
         /** v1.1 Refine-existing-automation modal state. Separate from the
          *  per-insight dialog because we're not in an insight context here —
          *  user clicked the ✏️ icon on a 🔁/🤖 pill. Carries the loaded
@@ -3275,6 +3287,43 @@ class HaInsightsCard extends i {
       flex-direction: column;
       overflow: hidden;
       box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+    }
+    /* v1.10.6: BLE find modal — narrow + tall, centered RSSI readout */
+    .ble-find-dialog { max-width: 480px; }
+    .ble-rssi-block {
+      text-align: center;
+      padding: 24px 0;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+    .ble-rssi-num { font-size: 3em; font-weight: 600; line-height: 1; }
+    .ble-rssi-label {
+      font-size: 1.1em;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      margin-top: 4px;
+    }
+    .ble-trend {
+      margin-top: 12px;
+      font-size: 1.4em;
+      color: var(--primary-text-color);
+    }
+    .ble-scanner {
+      margin-top: 6px;
+      font-size: 0.85em;
+      color: var(--secondary-text-color);
+    }
+    .ble-hint {
+      font-size: 0.9em;
+      color: var(--secondary-text-color);
+      margin-top: 16px;
+    }
+    .ble-error {
+      background: rgba(239, 68, 68, 0.1);
+      color: var(--error-color, #ef4444);
+      padding: 10px 12px;
+      border-radius: 6px;
+      margin-bottom: 12px;
+      font-size: 0.9em;
     }
     /* Wide variant for the diff modal — YAML needs horizontal room */
     .dialog.dialog-wide {
@@ -5166,6 +5215,151 @@ class HaInsightsCard extends i {
         finally {
             this._identifyBusy = false;
         }
+    }
+    /** v1.10.6: open the BLE live-find modal scoped to ONE entity.
+     *  Checks BLE capability first; if the entity is trackable, opens
+     *  the modal + subscribes to the per-scanner RSSI stream. */
+    async _openBleFindForInsight(insight) {
+        if (!this.hass)
+            return;
+        const entityId = this._primaryEntityId(insight);
+        if (entityId === null) {
+            this._failModal("No entity_id on this insight.");
+            return;
+        }
+        try {
+            const cap = await this.hass.connection.sendMessagePromise({
+                type: "home_insights/ble_capability",
+                entity_ids: [entityId],
+            });
+            const info = cap.capabilities?.[entityId];
+            if (!info || !info.is_trackable || !info.bluetooth_address) {
+                this._failModal(`BLE find not available for ${entityId}: ${info?.reason ?? "no capability info"}`);
+                return;
+            }
+            this._bleFindEntity = entityId;
+            this._bleFindAddress = info.bluetooth_address;
+            this._bleFindLatest = null;
+            this._bleTrendBuffer = [];
+            this._bleFindError = "";
+            this._bleFindOpen = true;
+            void this._subscribeBleFind();
+        }
+        catch (err) {
+            this._failModal(`BLE capability check failed: ${this._asMessage(err)}`);
+        }
+    }
+    async _subscribeBleFind() {
+        if (!this.hass)
+            return;
+        if (this._bleFindUnsub != null) {
+            this._bleFindUnsub();
+            this._bleFindUnsub = null;
+        }
+        try {
+            this._bleFindUnsub =
+                await this.hass.connection.subscribeMessage((event) => {
+                    this._bleFindLatest = { ...event, received_at: Date.now() };
+                    const next = [...this._bleTrendBuffer, event.rssi_smoothed];
+                    if (next.length > 8)
+                        next.shift();
+                    this._bleTrendBuffer = next;
+                }, {
+                    type: "home_insights/ble_live_find",
+                    bluetooth_address: this._bleFindAddress,
+                });
+        }
+        catch (err) {
+            this._bleFindError = this._asMessage(err);
+        }
+    }
+    _closeBleFind() {
+        if (this._bleFindUnsub != null) {
+            this._bleFindUnsub();
+            this._bleFindUnsub = null;
+        }
+        this._bleFindOpen = false;
+        this._bleFindLatest = null;
+        this._bleTrendBuffer = [];
+        this._bleFindError = "";
+    }
+    _bleTrend() {
+        const buf = this._bleTrendBuffer;
+        if (buf.length < 4)
+            return { arrow: "·", label: "settling" };
+        const recent = (buf[buf.length - 1] + buf[buf.length - 2]) / 2;
+        const earlier = (buf[buf.length - 4] + buf[buf.length - 3]) / 2;
+        const delta = recent - earlier;
+        if (delta > 2)
+            return { arrow: "↑", label: "getting closer" };
+        if (delta < -2)
+            return { arrow: "↓", label: "getting further" };
+        return { arrow: "→", label: "stable" };
+    }
+    _rssiBucket(rssi) {
+        if (rssi >= -55)
+            return { label: "HOT", color: "#ef4444" };
+        if (rssi >= -70)
+            return { label: "warm", color: "#f97316" };
+        if (rssi >= -85)
+            return { label: "cool", color: "#3b82f6" };
+        return { label: "cold", color: "#6b7280" };
+    }
+    /** v1.10.6: render the BLE find modal — latest RSSI + trend arrow.
+     *
+     *  The strategy is the same as the bulk-area-assign BLE modal but
+     *  scoped to a single entity (passed by the user clicking 📡 in the
+     *  insight detail-dialog). Shows:
+     *    - Big RSSI number with color bucket (HOT/warm/cool/cold)
+     *    - Trend arrow (↑↓→) telling user which direction signal is
+     *      moving — wave the phone around to find the device
+     *    - Last scanner that saw it (helps in multi-proxy setups)
+     *
+     *  Subscription auto-tears down on close. EXPERIMENTAL — only works
+     *  for entities the BLE-capability endpoint says are trackable. */
+    _renderBleFindModal() {
+        if (!this._bleFindOpen)
+            return A;
+        const latest = this._bleFindLatest;
+        const trend = this._bleTrend();
+        const bucket = latest ? this._rssiBucket(latest.rssi_smoothed) : null;
+        return b `
+      <div class="dialog-backdrop" @click=${this._closeBleFind}>
+        <div class="dialog ble-find-dialog" @click=${(e) => e.stopPropagation()}>
+          <div class="dialog-header">
+            <div class="dialog-title">📡 BLE find — ${this._bleFindEntity}</div>
+            <button class="dialog-close" aria-label="Close" @click=${this._closeBleFind}>×</button>
+          </div>
+          <div class="dialog-body">
+            ${this._bleFindError
+            ? b `<div class="ble-error">${this._bleFindError}</div>`
+            : ""}
+            ${latest && bucket
+            ? b `
+                  <div class="ble-rssi-block" style="color: ${bucket.color};">
+                    <div class="ble-rssi-num">${latest.rssi_smoothed.toFixed(0)} dBm</div>
+                    <div class="ble-rssi-label">${bucket.label}</div>
+                    <div class="ble-trend">${trend.arrow} ${trend.label}</div>
+                    <div class="ble-scanner">last seen by: ${latest.scanner}</div>
+                  </div>
+                `
+            : b `<div class="ble-rssi-block" style="color: var(--secondary-text-color);">
+                  <div class="ble-rssi-num">— dBm</div>
+                  <div class="ble-rssi-label">waiting…</div>
+                </div>`}
+            <p class="ble-hint">
+              Wave your phone around. The arrow tells you whether you're
+              getting closer (↑) or further (↓) from the device. This
+              works best with a Bluetooth proxy in each major area, or
+              the HA Companion app's BLE scanner running on your phone.
+            </p>
+          </div>
+          <div class="dialog-footer">
+            <button class="action" @click=${this._closeBleFind}>Stop &amp; close</button>
+          </div>
+        </div>
+      </div>
+    `;
     }
     async _explain(insight) {
         if (!this.hass)
@@ -8099,6 +8293,13 @@ class HaInsightsCard extends i {
                           @click=${() => this._identifyEntity(insight)}
                         >
                           ${this._identifyBusy ? "identifying…" : "🔆 Identify entity"}
+                        </button>
+                        <button
+                          class="action"
+                          title="Live RSSI from the entity's BLE advertisements. Walk around with your phone — the trend arrow tells you whether you're getting closer or further. EXPERIMENTAL — requires the entity to be BLE-trackable (companion app or a BLE proxy)."
+                          @click=${() => this._openBleFindForInsight(insight)}
+                        >
+                          📡 BLE find
                         </button>`
                             : A}
                   </div>
@@ -8247,6 +8448,7 @@ class HaInsightsCard extends i {
         ${this._renderTruncationFooter(rows.length)}
       </ha-card>
       ${this._renderDialog()}
+      ${this._renderBleFindModal()}
       ${this._renderRefineAutomationModal()}
       ${this._renderSuggestAddDialog()}
       <bulk-area-assign-dialog
@@ -8375,6 +8577,24 @@ __decorate([
 __decorate([
     r()
 ], HaInsightsCard.prototype, "_identifyBusy", void 0);
+__decorate([
+    r()
+], HaInsightsCard.prototype, "_bleFindOpen", void 0);
+__decorate([
+    r()
+], HaInsightsCard.prototype, "_bleFindEntity", void 0);
+__decorate([
+    r()
+], HaInsightsCard.prototype, "_bleFindAddress", void 0);
+__decorate([
+    r()
+], HaInsightsCard.prototype, "_bleFindLatest", void 0);
+__decorate([
+    r()
+], HaInsightsCard.prototype, "_bleTrendBuffer", void 0);
+__decorate([
+    r()
+], HaInsightsCard.prototype, "_bleFindError", void 0);
 __decorate([
     r()
 ], HaInsightsCard.prototype, "_testResults", void 0);
