@@ -228,7 +228,7 @@ def _():
 
 @t("version: INTEGRATION_VERSION read dynamically from manifest")
 def _():
-    src = open("custom_components/ha_insights/ws_api.py", encoding="utf-8").read()
+    src = open("custom_components/ha_insights/ws_api/__init__.py", encoding="utf-8").read()
     assert "_get_integration_version" in src
     assert "async_get_integration" in src
 

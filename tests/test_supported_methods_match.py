@@ -19,7 +19,8 @@ def test_supported_methods_matches_async_register() -> None:
         Path(__file__).parent.parent
         / "custom_components"
         / "ha_insights"
-        / "ws_api.py"
+        / "ws_api"
+        / "__init__.py"
     ).read_text(encoding="utf-8")
     # Find every `websocket_api.async_register_command(hass, ws_<name>)` call
     handlers = set(

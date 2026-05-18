@@ -362,7 +362,7 @@ def _():
 
 @t("ws: detector_directory handler is registered + in SUPPORTED_METHODS")
 def _():
-    src = _read("custom_components/ha_insights/ws_api.py")
+    src = _read("custom_components/ha_insights/ws_api/__init__.py")
     assert "ws_detector_directory" in src
     assert '"detector_directory"' in src  # in SUPPORTED_METHODS tuple
     assert "_check_dependency_satisfied" in src
@@ -370,7 +370,7 @@ def _():
 
 @t("ws: detector_directory tiers USELESS/LIMITED/GOOD/GREAT computed")
 def _():
-    src = _read("custom_components/ha_insights/ws_api.py")
+    src = _read("custom_components/ha_insights/ws_api/__init__.py")
     for tier in ("USELESS", "LIMITED", "GOOD", "GREAT"):
         assert f'"{tier}"' in src or f"'{tier}'" in src, f"missing {tier}"
 
@@ -541,7 +541,7 @@ def _():
 
 @t("maturity: ws detector_directory returns maturity per detector")
 def _():
-    src = _read("custom_components/ha_insights/ws_api.py")
+    src = _read("custom_components/ha_insights/ws_api/__init__.py")
     assert '"maturity": maturity' in src
 
 
@@ -570,7 +570,7 @@ def _():
 
 @t("examples: WS inject + clear handlers registered + in SUPPORTED_METHODS")
 def _():
-    src = _read("custom_components/ha_insights/ws_api.py")
+    src = _read("custom_components/ha_insights/ws_api/__init__.py")
     assert "ws_inject_examples" in src
     assert "ws_clear_examples" in src
     assert '"inject_examples"' in src  # in SUPPORTED_METHODS
@@ -579,7 +579,7 @@ def _():
 
 @t("examples: clear walks active + dismissed + applied to find marked rows")
 def _():
-    src = _read("custom_components/ha_insights/ws_api.py")
+    src = _read("custom_components/ha_insights/ws_api/__init__.py")
     assert "include_dismissed=True" in src
     assert "include_applied=True" in src
     assert "EXAMPLE_PAYLOAD_KEY" in src
@@ -684,7 +684,7 @@ def _():
 
 @t("analytics: WS preview endpoint lets users inspect payload before opting in")
 def _():
-    src = _read("custom_components/ha_insights/ws_api.py")
+    src = _read("custom_components/ha_insights/ws_api/__init__.py")
     assert "ws_analytics_preview" in src
     assert '"analytics_preview"' in src  # in SUPPORTED_METHODS
     # Returns the EXACT payload + the default endpoint so users
@@ -833,7 +833,7 @@ def _():
 
 @t("per-user: ws endpoints registered + in SUPPORTED_METHODS")
 def _():
-    src = _read("custom_components/ha_insights/ws_api.py")
+    src = _read("custom_components/ha_insights/ws_api/__init__.py")
     for name in (
         "ws_list_ha_users",
         "ws_get_user_overrides",
@@ -850,7 +850,7 @@ def _():
 
 @t("per-user: write/list endpoints are admin-gated")
 def _():
-    src = _read("custom_components/ha_insights/ws_api.py")
+    src = _read("custom_components/ha_insights/ws_api/__init__.py")
     assert "def _require_admin(" in src
     assert '"admin_required"' in src
     # The gate is actually called from each of the three endpoints
@@ -859,7 +859,7 @@ def _():
 
 @t("per-user: list_ha_users surfaces mobile_app device count per user")
 def _():
-    src = _read("custom_components/ha_insights/ws_api.py")
+    src = _read("custom_components/ha_insights/ws_api/__init__.py")
     assert "mobile_app_device_count" in src
     # System-generated users (Supervisor etc) are filtered out
     assert "system_generated" in src
@@ -988,7 +988,7 @@ def _():
     hello handshake lies to the card about what's available."""
     import re
 
-    src = _read("custom_components/ha_insights/ws_api.py")
+    src = _read("custom_components/ha_insights/ws_api/__init__.py")
     # Pull registered names
     registered = set(
         re.findall(r"async_register_command\(hass, ws_(\w+)\)", src)
@@ -2414,7 +2414,7 @@ def _():
     assert "Automate" in lib_src
     assert "Build" in lib_src
     # ws_api still applies on conflicts_with for stored insights pre-v1.5.42
-    ws_src = _read("custom_components/ha_insights/ws_api.py")
+    ws_src = _read("custom_components/ha_insights/ws_api/__init__.py")
     assert "from .lib.title_cleanup import" in ws_src
     assert "_strip_already_automated_cta" in ws_src
     assert "if ins.conflicts_with:" in ws_src
@@ -2432,7 +2432,7 @@ def _():
     and group_by; both need the WS list to carry the labels per
     insight. ws_api reads hierarchy.labels_of for the primary entity
     and emits a sorted list (empty when no labels)."""
-    src = _read("custom_components/ha_insights/ws_api.py")
+    src = _read("custom_components/ha_insights/ws_api/__init__.py")
     assert "d[\"labels\"]" in src
     assert "hierarchy.labels_of.get(eid)" in src
     # Card mirrors with label_filter + group_by:label. Skip when the
@@ -2752,7 +2752,7 @@ def _():
     the same entity_id in two rows with different badges. Fix: include
     per-member metadata in the cohort payload so the expanded dropdown
     can render the badge next to each entity individually."""
-    src = _read("custom_components/ha_insights/ws_api.py")
+    src = _read("custom_components/ha_insights/ws_api/__init__.py")
     assert "cohort_member_info" in src
     # Per-member external check must respect the same suppression rule
     # used at row level: if HA has an automation referencing this
@@ -2957,7 +2957,7 @@ def _():
 
 @t("v1.5.44: WS endpoint home_insights/suggest_additions registered")
 def _():
-    src = _read("custom_components/ha_insights/ws_api.py")
+    src = _read("custom_components/ha_insights/ws_api/__init__.py")
     assert '"suggest_additions"' in src  # SUPPORTED_METHODS registration
     assert 'vol.Required("type"): "home_insights/suggest_additions"' in src
     assert "async def ws_suggest_additions(" in src
@@ -2971,7 +2971,7 @@ def _():
 
 @t("v1.5.44: home_insights/apply accepts additional_entity_ids for deterministic add")
 def _():
-    src = _read("custom_components/ha_insights/ws_api.py")
+    src = _read("custom_components/ha_insights/ws_api/__init__.py")
     # New optional field on the apply schema
     assert 'vol.Optional("additional_entity_ids"): [str]' in src
     # Uses the lib helper (not a hand-rolled YAML mutator)
@@ -3009,7 +3009,7 @@ def _():
 
 @t("v1.5.45: ws_suggest_additions populates coactivation_days from buffer")
 def _():
-    src = _read("custom_components/ha_insights/ws_api.py")
+    src = _read("custom_components/ha_insights/ws_api/__init__.py")
     # Import wired
     assert "from .lib.coactivation import compute_coactivation_days" in src
     # Stubbed `coactivation_days=None` comment is gone
@@ -3076,7 +3076,7 @@ def _():
 
 @t("v1.5.46: WS endpoints home_insights/retire + /unretire registered")
 def _():
-    src = _read("custom_components/ha_insights/ws_api.py")
+    src = _read("custom_components/ha_insights/ws_api/__init__.py")
     # Method names listed
     assert '"retire"' in src
     assert '"unretire"' in src
@@ -3095,14 +3095,14 @@ def _():
 
 @t("v1.5.46: ws_list passes include_retired through to the store")
 def _():
-    src = _read("custom_components/ha_insights/ws_api.py")
+    src = _read("custom_components/ha_insights/ws_api/__init__.py")
     assert 'vol.Optional("include_retired", default=False): bool' in src
     assert "include_retired=msg[\"include_retired\"]" in src
 
 
 @t("v1.5.46: ws_apply emits a logbook entry on success")
 def _():
-    src = _read("custom_components/ha_insights/ws_api.py")
+    src = _read("custom_components/ha_insights/ws_api/__init__.py")
     assert "from homeassistant.components import logbook" in src
     assert "logbook.async_log_entry(" in src
     # Attached to the resulting automation so it shows on that row
