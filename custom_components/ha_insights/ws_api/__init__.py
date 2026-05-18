@@ -4543,6 +4543,7 @@ def _collect_ip_attrs_for_candidates(
     {
         vol.Required("type"): "home_insights/identify_entity",
         vol.Required("entity_id"): str,
+        vol.Optional("confirm_power_cycle", default=False): bool,
     }
 )
 @websocket_api.async_response
@@ -4557,21 +4558,49 @@ async def ws_identify_entity(
     media_player.play_media, etc.) — a non-admin token shouldn't be
     able to toggle every switch in the house via this endpoint.
 
-    Returns ``{"method": "<method>", "calls_made": N}`` on success
-    or an error code on failure. The card uses the response to render
-    "Flashed light.foo — look for it!" toast.
+    Two safety gates apply before the service calls run:
+
+    1. **Critical-load keyword match** — entities whose entity_id or
+       friendly_name suggests a critical load (fridge, server, EV
+       charger, medical device, etc.) are refused outright. See
+       ``lib/critical_load_keywords.py`` for the full list. The user
+       cannot override this gate; they must rename the entity or use
+       a different identify path.
+    2. **Power-cycle confirmation** — methods that cut power
+       (STROBE_LIGHT, SWITCH_TOGGLE, SIREN_CHIRP) require
+       ``confirm_power_cycle=True`` in the request. The card shows a
+       confirmation dialog before sending this flag. This forces the
+       user to acknowledge that the device will be cycled — important
+       on unlabelled gear or shared infra.
+
+    Returns ``{"method": "<method>", "calls_made": N}`` on success,
+    ``requires_confirmation`` with method info if the user hasn't
+    confirmed a power-cycle yet, or an error code on terminal failure.
     """
     if not _require_admin(hass, connection, msg):
         return
 
     from asyncio import sleep as _async_sleep
 
+    from ..lib.critical_load_keywords import is_critical_load
     from ..lib.identify_capability import (
         IdentifyMethod,
         identify_capability_for,
     )
 
+    # Methods that interrupt power → require explicit user confirmation
+    # each time. BRIGHTNESS_WIGGLE / FLASH_LIGHT / PLAY_CHIME don't
+    # cut power and are always safe.
+    _POWER_CYCLE_METHODS: frozenset[IdentifyMethod] = frozenset(
+        {
+            IdentifyMethod.STROBE_LIGHT,
+            IdentifyMethod.SWITCH_TOGGLE,
+            IdentifyMethod.SIREN_CHIRP,
+        },
+    )
+
     entity_id = msg["entity_id"]
+    confirm_power_cycle: bool = bool(msg.get("confirm_power_cycle", False))
     state = hass.states.get(entity_id)
     if state is None:
         connection.send_error(
@@ -4580,6 +4609,25 @@ async def ws_identify_entity(
             f"No state found for {entity_id}",
         )
         return
+
+    friendly = state.attributes.get("friendly_name")
+    is_critical, matched_kw = is_critical_load(
+        entity_id, friendly if isinstance(friendly, str) else None
+    )
+    if is_critical:
+        connection.send_error(
+            msg["id"],
+            "critical_load_refused",
+            (
+                f"Refused: {entity_id} matches critical-load keyword "
+                f"'{matched_kw}'. Toggling this could disrupt a fridge, "
+                "server, EV charger, medical device, or similar. If "
+                "this is safe to cycle, rename the entity to remove "
+                "the keyword."
+            ),
+        )
+        return
+
     cap = identify_capability_for(
         entity_id, {"attributes": dict(state.attributes)}
     )
@@ -4591,6 +4639,25 @@ async def ws_identify_entity(
                 f"{entity_id} has no built-in identify signal. Try "
                 "the touch-test mode (v1.10 Phase B) for passive sensors."
             ),
+        )
+        return
+
+    if cap.method in _POWER_CYCLE_METHODS and not confirm_power_cycle:
+        connection.send_result(
+            msg["id"],
+            {
+                "requires_confirmation": True,
+                "method": cap.method.value,
+                "description": cap.description,
+                "warning": (
+                    f"This will power-cycle {entity_id} "
+                    f"({cap.description}). If anything important is "
+                    "downstream of this device (smart bulb on dumb "
+                    "switch, network gear on outlet, etc.) it will "
+                    "blink too. Re-send with confirm_power_cycle=true "
+                    "to proceed."
+                ),
+            },
         )
         return
 

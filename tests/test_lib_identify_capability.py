@@ -39,26 +39,81 @@ def test_light_with_multiple_features_still_uses_flash_if_set() -> None:
     assert cap.method == IdentifyMethod.FLASH_LIGHT
 
 
-# ---------- Tier 2: STROBE_LIGHT fallback for lights without flash ------
+# ---------- Tier 2: BRIGHTNESS_WIGGLE — safe for vendor pairing modes ----
 
 
-def test_light_without_flash_uses_strobe() -> None:
-    """Light without SUPPORT_FLASH falls back to manual on/off/
-    on/off/on at 350ms cadence."""
+def test_dimmable_light_without_flash_uses_brightness_wiggle() -> None:
+    """Light with brightness-capable color_mode but no flash uses
+    BRIGHTNESS_WIGGLE — no power-off transitions, so vendor pairing
+    thresholds (Tuya 3×, Aqara 5×, Hue 5×, IKEA 6×, Sengled 10×) are
+    never approached. Pattern: dim → bright → dim → bright."""
     cap = identify_capability_for(
-        "light.foo",
-        {"attributes": {"supported_features": 0}},
+        "light.tuya_bulb",
+        {
+            "attributes": {
+                "supported_features": 0,
+                "supported_color_modes": ["color_temp"],
+            },
+        },
+    )
+    assert cap.method == IdentifyMethod.BRIGHTNESS_WIGGLE
+    assert len(cap.service_calls) == 4
+    # 1.5s cadence keeps total ~6s; well above human reflex but
+    # nowhere near any vendor reset threshold.
+    assert cap.inter_call_delay_ms == 1500
+    # No turn_off calls — power stays on the whole time.
+    services = [c["service"] for c in cap.service_calls]
+    assert services == ["turn_on", "turn_on", "turn_on", "turn_on"]
+    # Final state at full brightness so the user can see it.
+    assert cap.service_calls[-1]["data"]["brightness"] == 255
+
+
+def test_brightness_wiggle_detected_from_supported_color_modes_list() -> None:
+    """Any color_mode in the brightness-capable set qualifies."""
+    for mode in ["brightness", "color_temp", "hs", "rgb", "rgbw", "rgbww", "xy"]:
+        cap = identify_capability_for(
+            "light.test",
+            {"attributes": {"supported_color_modes": [mode]}},
+        )
+        assert cap.method == IdentifyMethod.BRIGHTNESS_WIGGLE, (
+            f"color_mode={mode} should enable BRIGHTNESS_WIGGLE"
+        )
+
+
+def test_brightness_wiggle_detected_from_current_color_mode() -> None:
+    """Lights reporting only `color_mode` (not supported_color_modes)
+    also qualify — handles older integrations."""
+    cap = identify_capability_for(
+        "light.legacy",
+        {"attributes": {"color_mode": "brightness"}},
+    )
+    assert cap.method == IdentifyMethod.BRIGHTNESS_WIGGLE
+
+
+def test_onoff_light_falls_back_to_safe_strobe() -> None:
+    """Light with no flash AND no brightness → 2-toggle strobe at
+    3s cadence. Stays below every known vendor pairing threshold.
+    """
+    cap = identify_capability_for(
+        "light.dumb_onoff",
+        {
+            "attributes": {
+                "supported_features": 0,
+                "supported_color_modes": ["onoff"],
+            },
+        },
     )
     assert cap.method == IdentifyMethod.STROBE_LIGHT
-    assert len(cap.service_calls) == 5
-    assert cap.inter_call_delay_ms == 350
-    # Sequence: on, off, on, off, on (ends ON so user can see it).
+    # 2 toggles total (on/off/on), 3 s apart → 6 s session.
+    assert len(cap.service_calls) == 3
+    assert cap.inter_call_delay_ms == 3000
     services = [c["service"] for c in cap.service_calls]
-    assert services == ["turn_on", "turn_off", "turn_on", "turn_off", "turn_on"]
+    assert services == ["turn_on", "turn_off", "turn_on"]
 
 
-def test_light_with_no_attributes_still_gets_strobe() -> None:
-    """Defensive: no state info → strobe is safe default for any light."""
+def test_light_with_no_attributes_falls_back_to_strobe() -> None:
+    """Defensive: no state info → strobe is the only safe default
+    when we can't determine brightness capability."""
     cap = identify_capability_for("light.unknown_attrs", None)
     assert cap.method == IdentifyMethod.STROBE_LIGHT
 
@@ -91,15 +146,20 @@ def test_siren_chirps() -> None:
 # ---------- Tier 5: SWITCH_TOGGLE ---------------------------------------
 
 
-def test_switch_toggles_three_times() -> None:
+def test_switch_toggles_twice_at_slow_cadence() -> None:
+    """v1.10.9: reduced from 3× at 500ms to 2× at 2.5s to stay below
+    Tuya's 3-toggles-in-10s pairing threshold. Also returns the
+    switch to its starting state (2 toggles cancel out)."""
     cap = identify_capability_for(
         "switch.bedside_lamp",
         {"attributes": {}},
     )
     assert cap.method == IdentifyMethod.SWITCH_TOGGLE
-    assert len(cap.service_calls) == 3
+    assert len(cap.service_calls) == 2
     assert all(c["service"] == "toggle" for c in cap.service_calls)
-    assert cap.inter_call_delay_ms == 500
+    # 2.5s cadence keeps aggregate well below any vendor pairing
+    # threshold even if the panel loop fires this every 12s.
+    assert cap.inter_call_delay_ms == 2500
 
 
 # ---------- Tier 6: NONE for unsupported domains ------------------------
@@ -159,7 +219,7 @@ def test_supported_features_non_int_handled() -> None:
         "light.foo",
         {"attributes": {"supported_features": "not a number"}},
     )
-    # Treated as 0 → no flash bit → strobe fallback
+    # Treated as 0 + no brightness info → strobe fallback
     assert cap.method == IdentifyMethod.STROBE_LIGHT
 
 
@@ -188,6 +248,7 @@ def test_method_enum_values_stable() -> None:
     """The WS contract serializes method.value as a string — the
     enum values must stay stable for the card to consume them."""
     assert IdentifyMethod.FLASH_LIGHT.value == "flash_light"
+    assert IdentifyMethod.BRIGHTNESS_WIGGLE.value == "brightness_wiggle"
     assert IdentifyMethod.STROBE_LIGHT.value == "strobe_light"
     assert IdentifyMethod.PLAY_CHIME.value == "play_chime"
     assert IdentifyMethod.SIREN_CHIRP.value == "siren_chirp"

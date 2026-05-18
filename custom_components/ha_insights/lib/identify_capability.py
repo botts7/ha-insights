@@ -10,25 +10,53 @@ toward it and identify the device.
 ## Capability hierarchy
 
 The lib returns the BEST method available for an entity, in priority
-order:
+order. Methods are ordered so safer (non-power-cycling, non-pairing-
+trigger) methods come first:
 
 1. **FLASH_LIGHT** — `light.*` with the ``SUPPORT_FLASH`` feature
    bit set. Calls ``light.turn_on`` with ``flash: short`` so the
-   device blinks once. Most lights support this.
-2. **STROBE_LIGHT** — `light.*` without flash, but with a brightness
-   or color attribute. We toggle on/off three times manually with
-   short delays. Works for any light that responds to turn_on/off.
-3. **PLAY_CHIME** — `media_player.*` that exposes ``play_media``.
+   device blinks once. Most lights support this. Safe — driver-level
+   flash signal, does not power-cycle the bulb.
+2. **BRIGHTNESS_WIGGLE** — `light.*` without flash but supporting
+   brightness. We dim from 100% → 30% → 100% with 1.5s gaps. Visible
+   change but **no off transitions**, so vendor pairing-mode
+   thresholds are never approached. Safer than strobe for Tuya /
+   Aqara / Hue / IKEA bulbs.
+3. **STROBE_LIGHT** — `light.*` with no flash and no brightness
+   (rare: dumb on/off bulbs). Last-resort fallback: 2 slow toggles
+   at 3 s cadence (well below every known vendor pairing threshold).
+4. **PLAY_CHIME** — `media_player.*` that exposes ``play_media``.
    Plays a built-in chime tone so the user can hear which speaker
    is which.
-4. **SIREN_CHIRP** — `siren.*` calls ``siren.turn_on`` with the
+5. **SIREN_CHIRP** — `siren.*` calls ``siren.turn_on`` with the
    shortest configured duration. Built for this exact use case.
-5. **SWITCH_TOGGLE** — `switch.*` toggles on/off three times. The
-   relay click is often audible at close range, and if the switch
-   has a connected load the load cycles too.
-6. **NONE** — passive sensors, scripts, automations, device_tracker,
+6. **SWITCH_TOGGLE** — `switch.*` toggles on/off twice at 2.5s
+   cadence. Below Tuya / Aqara pairing thresholds. The relay click
+   is often audible at close range; if the switch drives a load,
+   the load cycles too — the card warns about this so users with
+   smart bulbs downstream of dumb switches don't get confused.
+7. **NONE** — passive sensors, scripts, automations, device_tracker,
    and other domains we can't make announce. Caller falls back to
    v1.10 Phase B perturbation testing.
+
+## Vendor pairing-mode safety
+
+Many smart-light vendors interpret rapid on/off cycles as a factory-
+reset / re-pair trigger:
+
+  - Tuya / Smart Life: 3× on/off within 10 s
+  - Aqara: 5× toggles in 5 s
+  - IKEA Trådfri: 6× toggles in 10 s
+  - Philips Hue: 5× off/on within ~10 s
+  - Sengled: 10× off/on within 10 s
+  - LIFX: 5× off/on (≤2 s each)
+
+Our strobe pre-v1.10.9 fired 5 toggles in 1.4 s, which crossed
+**every** threshold listed above — running identify on a Tuya bulb
+would have factory-reset it. Post-v1.10.9, the active light pattern
+is brightness-wiggle (zero power transitions) wherever brightness
+is supported, with a 2-toggle 3-s strobe fallback that stays safely
+below all known thresholds.
 
 ## Architecture
 
@@ -60,6 +88,7 @@ class IdentifyMethod(StrEnum):
     """Discrete identify methods, ordered by preference (best first)."""
 
     FLASH_LIGHT = "flash_light"
+    BRIGHTNESS_WIGGLE = "brightness_wiggle"
     STROBE_LIGHT = "strobe_light"
     PLAY_CHIME = "play_chime"
     SIREN_CHIRP = "siren_chirp"
@@ -71,6 +100,14 @@ class IdentifyMethod(StrEnum):
 # the lib stays HA-import-free; sourced from
 # homeassistant/components/light/__init__.py::LightEntityFeature.FLASH.
 _LIGHT_SUPPORT_FLASH: int = 8
+
+# HA color-mode strings that indicate the light has dimmable brightness.
+# Sourced from homeassistant/components/light/const.py::ColorMode. We
+# treat any of these as "brightness is settable". ONOFF and UNKNOWN
+# are deliberately excluded.
+_BRIGHTNESS_COLOR_MODES: frozenset[str] = frozenset(
+    {"brightness", "color_temp", "hs", "rgb", "rgbw", "rgbww", "white", "xy"},
+)
 
 # Default chime URL — uses HA's built-in TTS chime sound. The
 # integration-side WS handler may override this with a user-set URL
@@ -157,7 +194,11 @@ def identify_capability_for(
 
 
 def _light_capability(attributes: dict[str, Any]) -> IdentifyCapability:
-    """Lights: prefer flash if supported, else strobe via turn_on/off."""
+    """Lights: prefer driver flash, then brightness wiggle, then a
+    slow 2-toggle strobe. Pattern selection is safety-driven — see
+    module docstring for vendor pairing-mode thresholds we must
+    stay below.
+    """
     supported = attributes.get("supported_features", 0)
     if not isinstance(supported, int):
         supported = 0
@@ -173,22 +214,67 @@ def _light_capability(attributes: dict[str, Any]) -> IdentifyCapability:
                 },
             ],
         )
-    # Manual strobe: on / off / on / off / on (final state ON so a
-    # light the user couldn't see remains visible when they walk into
-    # the room). 350ms cadence is fast enough to look intentional,
-    # slow enough that HA's event bus + the device's response time
-    # don't merge them into one transition.
+    # Brightness wiggle: dim → bright → dim → bright. No power-off
+    # transitions, so vendor pairing thresholds are never approached.
+    # Works on any bulb that reports a brightness-capable color_mode
+    # or a populated `supported_color_modes` list. Visible at any
+    # ambient light because the relative change is ~70%.
+    supported_color_modes = attributes.get("supported_color_modes")
+    color_mode = attributes.get("color_mode")
+    has_brightness = False
+    if isinstance(supported_color_modes, list | tuple | set):
+        has_brightness = any(
+            isinstance(m, str) and m in _BRIGHTNESS_COLOR_MODES
+            for m in supported_color_modes
+        )
+    if not has_brightness and isinstance(color_mode, str):
+        has_brightness = color_mode in _BRIGHTNESS_COLOR_MODES
+    if has_brightness:
+        # 1.5s cadence × 4 calls = 6s total. Final brightness=255 so
+        # the user can still see the light at full intensity when they
+        # walk into the room. Transition=0.5s makes the dim/bright
+        # change feel like a deliberate pulse rather than a glitch.
+        return IdentifyCapability(
+            method=IdentifyMethod.BRIGHTNESS_WIGGLE,
+            description="pulse the light brightness (no power cycle)",
+            service_calls=[
+                {
+                    "domain": "light",
+                    "service": "turn_on",
+                    "data": {"brightness": 77, "transition": 0.5},
+                },
+                {
+                    "domain": "light",
+                    "service": "turn_on",
+                    "data": {"brightness": 255, "transition": 0.5},
+                },
+                {
+                    "domain": "light",
+                    "service": "turn_on",
+                    "data": {"brightness": 77, "transition": 0.5},
+                },
+                {
+                    "domain": "light",
+                    "service": "turn_on",
+                    "data": {"brightness": 255, "transition": 0.5},
+                },
+            ],
+            inter_call_delay_ms=1500,
+        )
+    # Last-resort strobe for dumb on/off bulbs. 2 toggles total
+    # (on→off→on) at 3 s cadence — total 6 s. Stays safely below
+    # every vendor pairing-mode threshold (Tuya needs 3×, Aqara 5×,
+    # Hue 5×, IKEA 6×, Sengled 10×). Final state ON so the user
+    # can see the bulb when they walk in.
     return IdentifyCapability(
         method=IdentifyMethod.STROBE_LIGHT,
-        description="strobe the light (on/off pattern)",
+        description="strobe the light (slow on/off pattern)",
         service_calls=[
             {"domain": "light", "service": "turn_on", "data": {}},
             {"domain": "light", "service": "turn_off", "data": {}},
             {"domain": "light", "service": "turn_on", "data": {}},
-            {"domain": "light", "service": "turn_off", "data": {}},
-            {"domain": "light", "service": "turn_on", "data": {}},
         ],
-        inter_call_delay_ms=350,
+        inter_call_delay_ms=3000,
     )
 
 
@@ -239,23 +325,28 @@ def _siren_capability(attributes: dict[str, Any]) -> IdentifyCapability:
 
 
 def _switch_capability(attributes: dict[str, Any]) -> IdentifyCapability:
-    """Switches: toggle 3× — relay click is audible at close range,
-    and if the switch drives a load the load cycles too.
+    """Switches: 2 toggles at 2.5 s cadence.
 
-    We don't return to a known state because we don't know whether
-    "off" or "on" is the user-intended baseline. After identify the
-    switch ends in the OPPOSITE state from where it started, which
-    the user can flip back manually after locating it.
+    Pre-v1.10.9 fired 3× at 500 ms — that's the Tuya pairing-mode
+    threshold (3 toggles in 10 s). Reducing to 2 toggles stays under
+    every vendor threshold including Tuya (3×) and Aqara (5×).
+
+    The card surfaces a warning that if the switch is hard-wired to
+    a smart bulb downstream, the bulb will flicker too — that's how
+    the user discovers wired pairs (deferred to v1.10.10 for
+    automated detection).
+
+    The switch returns to its starting state (2 toggles cancel out),
+    so we don't strand the user's load in an unexpected position.
     """
     return IdentifyCapability(
         method=IdentifyMethod.SWITCH_TOGGLE,
-        description="toggle the switch three times (audible click)",
+        description="toggle the switch twice (audible click)",
         service_calls=[
             {"domain": "switch", "service": "toggle", "data": {}},
             {"domain": "switch", "service": "toggle", "data": {}},
-            {"domain": "switch", "service": "toggle", "data": {}},
         ],
-        inter_call_delay_ms=500,
+        inter_call_delay_ms=2500,
     )
 
 
