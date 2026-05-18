@@ -47,6 +47,19 @@ _MIN_MANUAL_DAYS = 5
 # actions at exactly the same minute every day — 45 min covers most
 # "around 7:30am" cases (07:00–08:00 with occasional outliers).
 _TIME_STDDEV_MAX_MIN = 45.0
+# v1.12.12 — lower bound on human variance. Real human actions across
+# 5+ days have non-zero stddev because:
+#   - tablet/dashboard taps land ±5–30s of intent
+#   - voice commands carry variable processing latency (±15–60s)
+#   - physical switches need walking-to-the-switch time (±15–60s)
+# Zero or near-zero stddev across many days is the fingerprint of an
+# automation or a vendor-side schedule (Hue routine, Tuya timer, etc.)
+# even when the source event has no HA context.user_id and the entity's
+# integration is in the "local" allow-list. Caught when the user
+# reported a 7-day light.porch → off at 23:27 (±0 min) that they did
+# not do manually. 15s ≈ 0.25 min is the floor for plausible human
+# repeatability without dropping legitimate strict-routine cases.
+_TIME_STDDEV_MIN_MIN = 0.25
 _LOOKBACK_DAYS = 14
 # Coarse time bucket used for cross-referencing against the user's
 # existing automations. 60 minutes means an existing trigger at 07:15
@@ -235,6 +248,16 @@ class ManualHabitDetector(Detector):
             / len(minutes_past_midnight)
         )
         if stddev > _TIME_STDDEV_MAX_MIN:
+            return None
+        # v1.12.12 — robotic-precision gate. Real human routines have
+        # >=15s jitter; below that, the source is almost certainly an
+        # automation, vendor schedule, or device internal timer that
+        # the heuristic at line ~140 ("local-integration entity with no
+        # HA context = physical switch") mis-classified as manual.
+        # Especially common for Hue, ESPHome on_press, and Z-Wave
+        # central-scene where the cloud/local distinction doesn't tell
+        # you whether the EVENT was user-driven or scheduler-driven.
+        if stddev < _TIME_STDDEV_MIN_MIN:
             return None
 
         # avg minute can round to 1440 (= 24:00)

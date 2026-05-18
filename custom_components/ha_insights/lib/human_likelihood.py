@@ -132,7 +132,16 @@ class HumanLikelihoodFeatures:
         return c
 
     def payload_keys(self) -> dict[str, Any]:
-        """Return the underscore-prefixed payload entries to merge."""
+        """Return the underscore-prefixed payload entries to merge.
+
+        v1.12.12: also emit `_is_device_managed` — a canonical boolean
+        verdict mirroring the card's rendering rule across all 4
+        graders. Card + filler-filter both read this single field
+        instead of re-computing the rule (which led to the v1.12.10
+        bug where the Python filter only checked timing_class).
+        """
+        from .device_managed_signal import is_device_managed_from_assessments
+
         d = {
             "_timing_assessment": self.timing.to_dict(),
             "_cooccurrence_assessment": self.cooccurrence.to_dict(),
@@ -142,6 +151,24 @@ class HumanLikelihoodFeatures:
             d["_transition_entropy_assessment"] = (
                 self.transition_entropy.to_dict()
             )
+        d["_is_device_managed"] = is_device_managed_from_assessments(
+            timing_class=getattr(self.timing, "timing_class", None),
+            cooccurrence_class=getattr(
+                self.cooccurrence, "cooccurrence_class", None
+            ),
+            persistence_class=getattr(
+                self.persistence, "persistence_class", None
+            ),
+            transition_entropy_class=(
+                getattr(
+                    self.transition_entropy,
+                    "transition_entropy_class",
+                    None,
+                )
+                if self.transition_entropy is not None
+                else None
+            ),
+        )
         return d
 
 

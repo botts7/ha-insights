@@ -4,6 +4,92 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+## [1.12.12] — 2026-05-18
+
+### Fixed — human-vs-device fingerprint, multiple real-install bugs
+
+Real-install SQL audit (2026-05-18) on the user's HA database revealed
+three correctness bugs. All three trace to the same root: detectors and
+filters were treating "looks human" and "looks device" as binary
+verdicts when they're actually multi-signal classifications.
+
+#### 1. `_is_low_confidence_filler` (v1.12.10) only checked one of six signals
+
+The card's "🤖 device-managed" pill triggers on any of THREE strong
+signals (`timing_class=device_likely`, `cooccurrence_class=isolated`,
+`persistence_class=fixed_cycle`) OR 3+ stacked soft signals. The
+Python filter only checked `timing_class=device_likely`, so a streak
+with `persistence_class=fixed_cycle` (e.g. user's inverter switch at
+10% confidence) rendered the device-managed pill but escaped
+suppression.
+
+Fix: new canonical `lib/device_managed_signal.py` exposes the verdict
+as a pure function. `HumanLikelihoodFeatures.payload_keys()` now
+stamps `_is_device_managed: bool` on every insight payload at emit
+time — single source of truth instead of re-computing the rule in
+two languages. The filler filter reads this canonical field, with a
+recompute fallback for pre-v1.12.12 stored payloads.
+
+13 new tests in `test_lib_device_managed_signal.py` cover all 7
+classification combinations including the user's exact real-install
+payload.
+
+#### 2. `manual_habit` emitted 100%-confidence "you manually set …" on automation-driven events
+
+The user reported a 7-day `light.porch -> off at ~23:27 (±0 min)`
+insight claiming "you manually set" — but the light runs on a Hue
+schedule inside the Hue bridge, never touched by the user. The
+detector's `is_manual` classifier checked HA `context.user_id` +
+`context.parent_id`, falling back to "local-integration entity =
+physical switch" for events with no HA-side context. Hue is in the
+local allow-list, so Hue-bridge schedules slipped through.
+
+Real human jitter across multiple days is **≥15 seconds**. Zero or
+near-zero stddev is the fingerprint of an automation or vendor-side
+scheduler — even when the source event carries no HA context.
+
+Fix: added `_TIME_STDDEV_MIN_MIN = 0.25` (15s) lower-bound gate
+alongside the existing `_TIME_STDDEV_MAX_MIN = 45.0` upper bound.
+Below the lower bound, the detector returns None instead of emitting
+the misleading "you manually set" insight.
+
+#### 3. Dev audit export — for community + LLM-driven verification (preview)
+
+New `lib/dev_audit.py` produces a redacted snapshot of install
+signature + per-detector activity + config fingerprint as a single
+JSON dict. Designed for two workflows:
+
+- **Bug reports**: attach the JSON instead of describing your install
+- **LLM verification (opt-in, planned for v1.12.13)**: send the same
+  JSON to your chosen LLM agent to ask "are any of my detectors
+  silent for the wrong reason?"
+
+The WS endpoint + card button land in v1.12.13. v1.12.12 only ships
+the builder so the canonical schema can settle before exposure.
+
+### Documented — the human-vs-device fingerprint
+
+For other detectors to apply the same logic, the canonical fingerprint
+order is:
+
+1. HA `context.user_id` — definitive when set (human triggered via
+   UI / voice / mobile app)
+2. HA `context.parent_id` — definitive when set (event is a
+   downstream consequence of another HA event)
+3. Timing stddev across N days:
+   - `<15s` → device/automation (robotic precision)
+   - `15s–5min` → indeterminate (could be voice routine or strict
+     schedule)
+   - `>5min` → human
+4. Persistence (how long in new state):
+   - `CV<5%` → fixed device timer
+   - `CV>30%` → human-controlled
+5. Co-occurrence (≤±5s consistency across days) → shared source
+
+Steps 1–2 are HA-native semantics; 3–5 are the v1.5.x grader libs
+already wired through `HumanLikelihoodFeatures`. v1.12.12 makes the
+verdict canonical via `_is_device_managed`.
+
 ## [1.12.11] — 2026-05-17
 
 ### Added — 🆕 newly-added entity badge
