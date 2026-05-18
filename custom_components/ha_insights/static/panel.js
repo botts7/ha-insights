@@ -2606,8 +2606,31 @@ class HaInsightsCard extends i {
         /** v1.10.4: in-flight flag for the 🔆 Identify-this-entity button in
          *  the detail-dialog. Used to disable the button while the WS round-
          *  trip is in progress. Single boolean (not per-insight) because only
-         *  one identify can fire at a time per dialog. */
+         *  one identify can fire at a time per dialog.
+         *
+         *  v1.10.7 — superseded by the looping modal below. Kept here so any
+         *  legacy callers don't error. */
         this._identifyBusy = false;
+        /** v1.10.7: looping-identify modal state. Pre-v1.10.7 the Identify
+         *  button fired once and showed a toast — many devices flash too
+         *  quickly to find, and the toast disappeared while users were
+         *  still searching. v1.10.7 wraps the action in a modal that fires
+         *  the identifier every IDENTIFY_INTERVAL_MS until the user clicks
+         *  "Found it!" or "Stop". */
+        this._identifyOpen = false;
+        this._identifyEntityId = "";
+        this._identifyMethod = "";
+        this._identifyCount = 0;
+        this._identifyError = "";
+        /** v1.10.7: Set of entity_ids currently being identified. Cohort or
+         *  multi-entity insights (lagged_correlation pairs,
+         *  physical_device_link pairs, cohort_members lists) surface every
+         *  referenced entity as a checkbox in the modal — user toggles them
+         *  off as they find each physical device. The recurring timer fires
+         *  identify on every entity still in this set. */
+        this._identifySelected = new Set();
+        this._identifyAllEntities = [];
+        this._identifyTimer = null;
         /** v1.10.6: BLE live-find state. Populated when user clicks the
          *  📡 BLE find button in the insight detail-dialog. Subscription
          *  delivers per-scanner RSSI updates; modal shows latest reading +
@@ -3287,6 +3310,58 @@ class HaInsightsCard extends i {
       flex-direction: column;
       overflow: hidden;
       box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+    }
+    /* v1.10.7: looping-identify modal */
+    .identify-dialog { max-width: 520px; }
+    .identify-status {
+      text-align: center;
+      padding: 16px 0;
+    }
+    .identify-counter {
+      font-size: 1.6em;
+      font-weight: 600;
+      color: var(--primary-text-color);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+    .identify-method {
+      font-size: 0.85em;
+      color: var(--secondary-text-color);
+      margin-top: 4px;
+    }
+    .identify-error {
+      background: rgba(239, 108, 0, 0.1);
+      color: var(--warning-color, #ef6c00);
+      padding: 8px 10px;
+      border-radius: 4px;
+      margin-top: 8px;
+      font-size: 0.85em;
+      white-space: pre-wrap;
+      text-align: left;
+    }
+    .identify-hint {
+      font-size: 0.9em;
+      color: var(--secondary-text-color);
+      margin: 8px 0 12px 0;
+    }
+    .identify-entity-list {
+      max-height: 240px;
+      overflow-y: auto;
+      border: 1px solid var(--divider-color, rgba(0, 0, 0, 0.08));
+      border-radius: 6px;
+      padding: 6px;
+    }
+    .identify-entity-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 8px;
+      cursor: pointer;
+      border-radius: 4px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.9em;
+    }
+    .identify-entity-row:hover {
+      background: var(--secondary-background-color, rgba(0, 0, 0, 0.04));
     }
     /* v1.10.6: BLE find modal — narrow + tall, centered RSSI readout */
     .ble-find-dialog { max-width: 480px; }
@@ -5177,43 +5252,139 @@ class HaInsightsCard extends i {
         }
         return null;
     }
-    /** v1.10.4: fire the entity's native identifier (light flash, speaker
-     *  chime, fan flicker, etc.) so the user can verify which physical
-     *  device corresponds to this insight's entity_id.
+    /** Collect EVERY entity_id referenced by this insight. Includes the
+     *  primary entity, any peer/leader/follower from the fingerprint, AND
+     *  cohort_members for cohort insights. De-duplicated, sorted for
+     *  stable display order. */
+    _allReferencedEntities(insight) {
+        const seen = new Set();
+        const fp = insight.fingerprint;
+        if (fp) {
+            for (const k of [
+                "entity_id",
+                "leader_entity_id",
+                "follower_entity_id",
+                "target_entity_id",
+                "peer_entity_id",
+            ]) {
+                const v = fp[k];
+                if (typeof v === "string" && v.includes("."))
+                    seen.add(v);
+            }
+        }
+        for (const m of insight.cohort_members ?? []) {
+            if (typeof m === "string" && m.includes("."))
+                seen.add(m);
+        }
+        return Array.from(seen).sort();
+    }
+    /** v1.10.7: open the looping-identify modal for an insight.
      *
-     *  Calls `home_insights/identify_entity` directly (no pre-capability
-     *  check — the backend already gates on capability and returns a
-     *  descriptive error when unsupported). Toast surfaces the result so
-     *  the user sees BOTH success ("Identifier fired — look/listen for
-     *  it") and graceful "this entity doesn't support identify" failures.
+     *  Pre-v1.10.7 we fired the identifier once and showed a toast — but
+     *  many devices flash too quickly to spot, the toast disappeared
+     *  while users were still searching, and multi-entity insights
+     *  (cohorts, lagged-correlation pairs, physical-device-link pairs)
+     *  only identified one of the entities.
      *
-     *  Pre-v1.10.4 this functionality was ONLY accessible via the bulk-
-     *  area-assign dialog, which most users never opened. Closes the
-     *  "we built it but you can't find it" UX gap flagged in the audit. */
+     *  v1.10.7 flow:
+     *    1. Open a modal listing EVERY referenced entity with a checkbox
+     *    2. Fire identify on all checked entities immediately
+     *    3. Re-fire every 5 seconds (Find My iPhone style)
+     *    4. User unchecks entities as they find each physical device
+     *    5. Click "Found it!" or "Stop" → tear down + close
+     *    6. Counter increments per cycle so user knows it's still running
+     */
     async _identifyEntity(insight) {
         if (!this.hass)
             return;
-        const entityId = this._primaryEntityId(insight);
-        if (entityId === null) {
-            this._failModal("No single entity_id on this insight — try clicking Identify on a row "
-                + "from the bulk-area-assign dialog instead.");
+        const entities = this._allReferencedEntities(insight);
+        if (entities.length === 0) {
+            this._failModal("No identifiable entities in this insight's fingerprint.");
             return;
         }
-        this._identifyBusy = true;
-        try {
-            const result = await this.hass.connection.sendMessagePromise({
-                type: "home_insights/identify_entity",
-                entity_id: entityId,
-            });
-            const method = result.method ?? "identify";
-            this._toast =
-                `🔆 ${entityId} — fired ${method}. Look / listen for the device.`;
+        this._identifyAllEntities = entities;
+        this._identifySelected = new Set(entities); // all checked by default
+        this._identifyEntityId = entities[0]; // legacy single-entity field
+        this._identifyMethod = "";
+        this._identifyCount = 0;
+        this._identifyError = "";
+        this._identifyOpen = true;
+        // Fire immediately so the user sees instant feedback, then schedule
+        // the recurring fire.
+        await this._fireIdentifyOnce();
+        if (this._identifyTimer != null)
+            clearInterval(this._identifyTimer);
+        this._identifyTimer = setInterval(() => {
+            void this._fireIdentifyOnce();
+        }, 5000);
+    }
+    /** Fire the identifier ONCE. Used by both the initial click and the
+     *  recurring timer. Increments _identifyCount on success, sets
+     *  _identifyError on failure (which stops the loop). */
+    async _fireIdentifyOnce() {
+        if (!this.hass || this._identifySelected.size === 0)
+            return;
+        // Fire identify on every CHECKED entity in parallel. Errors on
+        // individual entities accumulate into _identifyError but don't
+        // stop the loop — the other entities may still be identifying
+        // successfully.
+        const entities = Array.from(this._identifySelected);
+        const results = await Promise.allSettled(entities.map((entityId) => this.hass.connection.sendMessagePromise({
+            type: "home_insights/identify_entity",
+            entity_id: entityId,
+        })));
+        const errors = [];
+        for (let i = 0; i < results.length; i++) {
+            const r = results[i];
+            if (r.status === "fulfilled") {
+                if (r.value.method)
+                    this._identifyMethod = r.value.method;
+            }
+            else {
+                errors.push(`${entities[i]}: ${this._asMessage(r.reason)}`);
+            }
         }
-        catch (err) {
-            this._failModal(`Identify failed: ${this._asMessage(err)}`);
+        this._identifyError = errors.length ? errors.join("\n") : "";
+        this._identifyCount = this._identifyCount + 1;
+        // If EVERY entity errored, the loop is just generating noise.
+        // Stop it so the user can read the failure.
+        if (errors.length === results.length && this._identifyTimer != null) {
+            clearInterval(this._identifyTimer);
+            this._identifyTimer = null;
         }
-        finally {
-            this._identifyBusy = false;
+    }
+    /** Toggle whether a specific entity is currently being identified.
+     *  Cohort + multi-entity insights surface every referenced entity
+     *  as a checkbox in the modal — user can deselect ones they've
+     *  already found to narrow down which device is which. */
+    _toggleIdentifyEntity(entityId) {
+        const next = new Set(this._identifySelected);
+        if (next.has(entityId)) {
+            next.delete(entityId);
+        }
+        else {
+            next.add(entityId);
+        }
+        this._identifySelected = next;
+    }
+    /** Close the identify modal and clear the recurring timer. Called by
+     *  both "Found it!" and "Stop" — only difference is the toast text. */
+    _stopIdentify(found) {
+        if (this._identifyTimer != null) {
+            clearInterval(this._identifyTimer);
+            this._identifyTimer = null;
+        }
+        const entityCount = this._identifySelected.size;
+        this._identifyOpen = false;
+        this._identifyEntityId = "";
+        this._identifySelected = new Set();
+        this._identifyMethod = "";
+        this._identifyError = "";
+        this._identifyCount = 0;
+        if (found && entityCount > 0) {
+            this._toast = entityCount === 1
+                ? `✅ Found it!`
+                : `✅ Identification stopped (${entityCount} entities were active).`;
         }
     }
     /** v1.10.6: open the BLE live-find modal scoped to ONE entity.
@@ -5305,6 +5476,89 @@ class HaInsightsCard extends i {
             return { label: "cool", color: "#3b82f6" };
         return { label: "cold", color: "#6b7280" };
     }
+    /** v1.10.7: render the looping-identify modal. Pre-v1.10.7 a single
+     *  call fired with a toast outside the dialog; users couldn't catch
+     *  the flash and the toast disappeared. New flow: a focused modal
+     *  with a checkbox list of every referenced entity, a fire counter,
+     *  and "Found it!" / "Stop" buttons. The recurring timer fires every
+     *  5 seconds until the user closes or unchecks all entities. */
+    _renderIdentifyModal() {
+        if (!this._identifyOpen)
+            return A;
+        const selectedCount = this._identifySelected.size;
+        const totalCount = this._identifyAllEntities.length;
+        const singleEntity = totalCount === 1;
+        return b `
+      <div class="dialog-backdrop" @click=${() => this._stopIdentify(false)}>
+        <div
+          class="dialog identify-dialog"
+          @click=${(e) => e.stopPropagation()}
+        >
+          <div class="dialog-header">
+            <div class="dialog-title">
+              🔆 Identifying ${singleEntity ? this._identifyAllEntities[0] : `${selectedCount} of ${totalCount} entities`}
+            </div>
+            <button
+              class="dialog-close"
+              aria-label="Close"
+              @click=${() => this._stopIdentify(false)}
+            >×</button>
+          </div>
+          <div class="dialog-body">
+            <div class="identify-status">
+              <div class="identify-counter">Fired ${this._identifyCount} ${this._identifyCount === 1 ? "time" : "times"}</div>
+              ${this._identifyMethod
+            ? b `<div class="identify-method">method: ${this._identifyMethod}</div>`
+            : ""}
+              ${this._identifyError
+            ? b `<div class="identify-error">${this._identifyError}</div>`
+            : ""}
+            </div>
+            ${totalCount > 1
+            ? b `
+                  <div class="identify-hint">
+                    Uncheck entities as you find them — the remaining
+                    checked ones keep firing every 5s.
+                  </div>
+                  <div class="identify-entity-list">
+                    ${this._identifyAllEntities.map((eid) => b `
+                      <label class="identify-entity-row">
+                        <input
+                          type="checkbox"
+                          ?checked=${this._identifySelected.has(eid)}
+                          @change=${() => this._toggleIdentifyEntity(eid)}
+                        />
+                        <span>${eid}</span>
+                      </label>
+                    `)}
+                  </div>
+                `
+            : b `
+                  <div class="identify-hint">
+                    The identifier fires every 5 seconds — look or
+                    listen for the flash / chime / beep. Click
+                    "Found it!" when you've spotted the device.
+                  </div>
+                `}
+          </div>
+          <div class="dialog-footer">
+            <button
+              class="action primary"
+              @click=${() => this._stopIdentify(true)}
+            >
+              ✅ Found it!
+            </button>
+            <button
+              class="action"
+              @click=${() => this._stopIdentify(false)}
+            >
+              Stop
+            </button>
+          </div>
+        </div>
+      </div>
+    `;
+    }
     /** v1.10.6: render the BLE find modal — latest RSSI + trend arrow.
      *
      *  The strategy is the same as the bulk-area-assign BLE modal but
@@ -5348,10 +5602,16 @@ class HaInsightsCard extends i {
                   <div class="ble-rssi-label">waiting…</div>
                 </div>`}
             <p class="ble-hint">
-              Wave your phone around. The arrow tells you whether you're
-              getting closer (↑) or further (↓) from the device. This
-              works best with a Bluetooth proxy in each major area, or
-              the HA Companion app's BLE scanner running on your phone.
+              <strong>Room-level localization.</strong> Each row above
+              is one of your stationary Bluetooth proxies — higher RSSI
+              means the device is closer to that proxy. Best results
+              with one proxy per room.
+              <br /><br />
+              <em>Note:</em> the trend arrow tracks per-advertisement
+              RSSI fluctuation (noise from the device), NOT your
+              movement. True "warmer/colder" UX requires a mobile
+              scanner — pending an HA Companion app active-scan
+              feature.
             </p>
           </div>
           <div class="dialog-footer">
@@ -8288,11 +8548,10 @@ class HaInsightsCard extends i {
                     ${this._primaryEntityId(insight) !== null
                             ? b `<button
                           class="action"
-                          ?disabled=${this._identifyBusy}
-                          title="Fire the entity's native identifier (light flash, speaker chime, fan flicker, etc.) so you can confirm which physical device this insight refers to."
+                          title="Find My iPhone style: opens a modal that fires the entity's native identifier (light flash / chime / fan flicker) every 5 seconds until you click 'Found it!'. Multi-entity insights show every referenced entity as a checkbox so you can identify them one at a time."
                           @click=${() => this._identifyEntity(insight)}
                         >
-                          ${this._identifyBusy ? "identifying…" : "🔆 Identify entity"}
+                          🔆 Identify entity
                         </button>
                         <button
                           class="action"
@@ -8449,6 +8708,7 @@ class HaInsightsCard extends i {
       </ha-card>
       ${this._renderDialog()}
       ${this._renderBleFindModal()}
+      ${this._renderIdentifyModal()}
       ${this._renderRefineAutomationModal()}
       ${this._renderSuggestAddDialog()}
       <bulk-area-assign-dialog
@@ -8579,6 +8839,27 @@ __decorate([
 ], HaInsightsCard.prototype, "_identifyBusy", void 0);
 __decorate([
     r()
+], HaInsightsCard.prototype, "_identifyOpen", void 0);
+__decorate([
+    r()
+], HaInsightsCard.prototype, "_identifyEntityId", void 0);
+__decorate([
+    r()
+], HaInsightsCard.prototype, "_identifyMethod", void 0);
+__decorate([
+    r()
+], HaInsightsCard.prototype, "_identifyCount", void 0);
+__decorate([
+    r()
+], HaInsightsCard.prototype, "_identifyError", void 0);
+__decorate([
+    r()
+], HaInsightsCard.prototype, "_identifySelected", void 0);
+__decorate([
+    r()
+], HaInsightsCard.prototype, "_identifyAllEntities", void 0);
+__decorate([
+    r()
 ], HaInsightsCard.prototype, "_bleFindOpen", void 0);
 __decorate([
     r()
@@ -8703,6 +8984,20 @@ class HaInsightsPanel extends i {
         // _diagnosticsBusy gates the button while the WS call is in flight.
         this._diagnosticsJson = null;
         this._diagnosticsBusy = false;
+        // v1.10.8 — Find My HA Device feature. Top-level entity picker +
+        // looping identifier. Users open from the panel header to locate
+        // ANY entity (not just ones surfaced in insights). Same backend as
+        // the per-insight 🔆 Identify (home_insights/identify_entity);
+        // different entry point. Search box filters live by entity_id /
+        // friendly_name; selected entities are added to a "currently
+        // identifying" set; loop fires identify on every selected entity
+        // every 5s until user clicks "Found them all" / "Stop".
+        this._findDeviceOpen = false;
+        this._findDeviceSearch = "";
+        this._findDeviceSelected = new Set();
+        this._findDeviceCount = 0;
+        this._findDeviceErrors = {};
+        this._findDeviceTimer = null;
         // Snapshot of distinct values present in the loaded insight set.
         // Drives the chip dropdown options. Refreshed on every list reload.
         this._availableDomains = [];
@@ -8973,6 +9268,72 @@ class HaInsightsPanel extends i {
       padding: 12px 18px;
       border-top: 1px solid var(--divider-color, rgba(0, 0, 0, 0.08));
       justify-content: flex-end;
+    }
+    /* v1.10.8: Find My HA Device modal */
+    .find-device-dialog { width: min(720px, 100%); }
+    .find-device-search {
+      width: 100%;
+      box-sizing: border-box;
+      padding: 8px 10px;
+      border: 1px solid var(--divider-color, rgba(0, 0, 0, 0.12));
+      border-radius: 6px;
+      font-size: 0.95em;
+      margin-bottom: 8px;
+    }
+    .find-device-status {
+      font-size: 0.85em;
+      color: var(--secondary-text-color);
+      margin-bottom: 8px;
+    }
+    .find-device-list {
+      max-height: 360px;
+      overflow-y: auto;
+      border: 1px solid var(--divider-color, rgba(0, 0, 0, 0.08));
+      border-radius: 6px;
+    }
+    .find-device-empty {
+      padding: 18px;
+      text-align: center;
+      color: var(--secondary-text-color);
+      font-size: 0.9em;
+    }
+    .find-device-row {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      padding: 6px 10px;
+      cursor: pointer;
+      border-bottom: 1px solid var(--divider-color, rgba(0, 0, 0, 0.04));
+    }
+    .find-device-row:hover {
+      background: var(--secondary-background-color, rgba(0, 0, 0, 0.04));
+    }
+    .find-device-row:last-child { border-bottom: none; }
+    .find-device-row-text {
+      display: flex;
+      flex-direction: column;
+      flex: 1 1 auto;
+      min-width: 0;
+    }
+    .find-device-eid {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.88em;
+      color: var(--primary-text-color);
+    }
+    .find-device-name {
+      font-size: 0.85em;
+      color: var(--secondary-text-color);
+    }
+    .find-device-err {
+      font-size: 0.8em;
+      color: var(--warning-color, #ef6c00);
+      margin-top: 2px;
+    }
+    .find-device-truncated {
+      padding: 8px;
+      font-size: 0.82em;
+      color: var(--secondary-text-color);
+      text-align: center;
     }
     .filters {
       display: flex;
@@ -9738,6 +10099,99 @@ class HaInsightsPanel extends i {
     _closeDiagnostics() {
         this._diagnosticsJson = null;
     }
+    // ===== v1.10.8 — Find My HA Device =====
+    /** Open the Find Device modal. Resets selection + counter so each
+     *  session starts clean. */
+    _openFindDevice() {
+        this._findDeviceOpen = true;
+        this._findDeviceSearch = "";
+        this._findDeviceSelected = new Set();
+        this._findDeviceCount = 0;
+        this._findDeviceErrors = {};
+    }
+    /** Close the modal and clear the recurring identify timer. */
+    _closeFindDevice() {
+        if (this._findDeviceTimer != null) {
+            clearInterval(this._findDeviceTimer);
+            this._findDeviceTimer = null;
+        }
+        const stoppedWithSelection = this._findDeviceSelected.size > 0;
+        this._findDeviceOpen = false;
+        this._findDeviceSelected = new Set();
+        this._findDeviceErrors = {};
+        this._findDeviceCount = 0;
+        if (stoppedWithSelection) {
+            this._showToast("🔍 Identification stopped.");
+        }
+    }
+    _toggleFindDeviceEntity(entityId) {
+        const next = new Set(this._findDeviceSelected);
+        if (next.has(entityId)) {
+            next.delete(entityId);
+            const errs = { ...this._findDeviceErrors };
+            delete errs[entityId];
+            this._findDeviceErrors = errs;
+        }
+        else {
+            next.add(entityId);
+        }
+        this._findDeviceSelected = next;
+        // Restart the timer if user added the FIRST entity. If they
+        // unchecked the last one, stop the timer (no point firing on
+        // an empty set).
+        if (next.size > 0 && this._findDeviceTimer == null) {
+            void this._fireFindDeviceOnce();
+            this._findDeviceTimer = setInterval(() => void this._fireFindDeviceOnce(), 5000);
+        }
+        else if (next.size === 0 && this._findDeviceTimer != null) {
+            clearInterval(this._findDeviceTimer);
+            this._findDeviceTimer = null;
+        }
+    }
+    async _fireFindDeviceOnce() {
+        if (!this.hass || this._findDeviceSelected.size === 0)
+            return;
+        const entities = Array.from(this._findDeviceSelected);
+        const results = await Promise.allSettled(entities.map((entityId) => this.hass.connection.sendMessagePromise({
+            type: "home_insights/identify_entity",
+            entity_id: entityId,
+        })));
+        const nextErrors = {};
+        for (let i = 0; i < results.length; i++) {
+            const r = results[i];
+            if (r.status === "rejected") {
+                const err = r.reason;
+                nextErrors[entities[i]] = err.message ?? String(err);
+            }
+        }
+        this._findDeviceErrors = nextErrors;
+        this._findDeviceCount = this._findDeviceCount + 1;
+    }
+    /** Filter the entity list to entries matching the user's search
+     *  string. Case-insensitive substring match on entity_id +
+     *  friendly_name + domain. Capped at 100 results so the DOM stays
+     *  responsive on installs with thousands of entities. */
+    _findDeviceMatches() {
+        if (!this.hass?.states)
+            return [];
+        const needle = this._findDeviceSearch.trim().toLowerCase();
+        const out = [];
+        for (const [entity_id, state] of Object.entries(this.hass.states)) {
+            const friendly = state.attributes?.friendly_name ?? entity_id;
+            if (!needle) {
+                out.push({ entity_id, friendly_name: friendly });
+            }
+            else {
+                const hay = `${entity_id} ${friendly}`.toLowerCase();
+                if (hay.includes(needle)) {
+                    out.push({ entity_id, friendly_name: friendly });
+                }
+            }
+            if (out.length >= 100)
+                break;
+        }
+        return out.sort((a, b) => a.entity_id.localeCompare(b.entity_id));
+    }
     /** Bulk-apply all currently-visible insights (after the panel's filters
      *  have been applied). Confirms first because each apply writes a real
      *  automation. Best for power users triaging a backlog after a long
@@ -9978,6 +10432,14 @@ class HaInsightsPanel extends i {
           </button>
           <button
             class="action"
+            aria-label="Find a device in your home"
+            title="Pick any entity in your install and the integration fires its native identifier (light flash, speaker chime, fan flicker, etc.) every 5 seconds until you click 'Found it!'. Useful for locating an unfamiliar entity like 'light.0x0015...' or 'switch.unnamed_3'."
+            @click=${this._openFindDevice}
+          >
+            <ha-icon icon="mdi:map-search"></ha-icon> 🔍 Find device
+          </button>
+          <button
+            class="action"
             ?disabled=${this._bulkBusy}
             aria-label="Apply every visible automation insight"
             title="Apply every visible automation insight (respects search + confidence filters)"
@@ -10076,7 +10538,97 @@ class HaInsightsPanel extends i {
       </div>
       ${this._renderAuditLog()}
       ${this._renderDiagnosticsModal()}
+      ${this._renderFindDeviceModal()}
       ${this._toast ? b `<div class="toast">${this._toast}</div>` : ""}
+    `;
+    }
+    /** v1.10.8: Find My HA Device modal. Top-level entity picker that
+     *  lets users locate ANY entity, not just ones surfaced in insights.
+     *
+     *  UI:
+     *   - Search input (live-filters entities by entity_id / friendly_name)
+     *   - Scrollable list capped at 100 results (DOM perf on big installs)
+     *   - Each row: checkbox + entity_id (mono) + friendly_name
+     *   - Footer: "{N} selected, fired {C} times" + Found / Stop buttons
+     *   - Per-entity error pills surface alongside the checkbox row when
+     *     a fire fails (entity doesn't support identify, etc.)
+     *
+     *  Behaviour: checking an entity adds it to the looping fire set;
+     *  unchecking removes it. Loop is started/stopped automatically by
+     *  _toggleFindDeviceEntity based on set size. No per-entity action
+     *  needed — just check, listen, uncheck when found. */
+    _renderFindDeviceModal() {
+        if (!this._findDeviceOpen)
+            return "";
+        const matches = this._findDeviceMatches();
+        const selectedCount = this._findDeviceSelected.size;
+        return b `
+      <div class="diagnostics-backdrop" @click=${this._closeFindDevice}>
+        <div
+          class="diagnostics-dialog find-device-dialog"
+          @click=${(e) => e.stopPropagation()}
+        >
+          <div class="diagnostics-header">
+            <strong>🔍 Find a device</strong>
+            <button
+              class="diagnostics-close"
+              aria-label="Close"
+              @click=${this._closeFindDevice}
+            >×</button>
+          </div>
+          <div class="diagnostics-body">
+            <p class="diagnostics-hint">
+              Pick any entity below — the integration fires its native
+              identifier (light flash, speaker chime, fan flicker)
+              every 5 seconds until you uncheck it. Check several to
+              identify them all at once. Loop starts the moment you
+              check the first one.
+            </p>
+            <input
+              type="search"
+              class="find-device-search"
+              placeholder="Search entity_id or friendly_name…"
+              .value=${this._findDeviceSearch}
+              @input=${(e) => (this._findDeviceSearch = e.target.value)}
+            />
+            <div class="find-device-status">
+              ${selectedCount} selected · fired ${this._findDeviceCount}
+              ${this._findDeviceCount === 1 ? "time" : "times"}
+            </div>
+            <div class="find-device-list">
+              ${matches.length === 0
+            ? b `<div class="find-device-empty">No matching entities.</div>`
+            : matches.map((m) => {
+                const err = this._findDeviceErrors[m.entity_id];
+                return b `
+                      <label class="find-device-row">
+                        <input
+                          type="checkbox"
+                          ?checked=${this._findDeviceSelected.has(m.entity_id)}
+                          @change=${() => this._toggleFindDeviceEntity(m.entity_id)}
+                        />
+                        <div class="find-device-row-text">
+                          <span class="find-device-eid">${m.entity_id}</span>
+                          <span class="find-device-name">${m.friendly_name}</span>
+                          ${err ? b `<span class="find-device-err">${err}</span>` : ""}
+                        </div>
+                      </label>
+                    `;
+            })}
+            </div>
+            ${matches.length >= 100
+            ? b `<div class="find-device-truncated">
+                  Showing first 100 — refine your search to narrow.
+                </div>`
+            : ""}
+          </div>
+          <div class="diagnostics-actions">
+            <button class="action primary" @click=${this._closeFindDevice}>
+              ✅ Found them all — close
+            </button>
+          </div>
+        </div>
+      </div>
     `;
     }
     /** v1.10.4: diagnostics modal — shows the redacted dev-audit JSON
@@ -10413,6 +10965,21 @@ __decorate([
 __decorate([
     r()
 ], HaInsightsPanel.prototype, "_diagnosticsBusy", void 0);
+__decorate([
+    r()
+], HaInsightsPanel.prototype, "_findDeviceOpen", void 0);
+__decorate([
+    r()
+], HaInsightsPanel.prototype, "_findDeviceSearch", void 0);
+__decorate([
+    r()
+], HaInsightsPanel.prototype, "_findDeviceSelected", void 0);
+__decorate([
+    r()
+], HaInsightsPanel.prototype, "_findDeviceCount", void 0);
+__decorate([
+    r()
+], HaInsightsPanel.prototype, "_findDeviceErrors", void 0);
 __decorate([
     r()
 ], HaInsightsPanel.prototype, "_availableDomains", void 0);
