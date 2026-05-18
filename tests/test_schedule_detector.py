@@ -52,7 +52,12 @@ def _seed_weekday_routine(
     # 6:47:30 across days; perfectly identical timestamps are the
     # fingerprint of automation/device schedules and would be (correctly)
     # suppressed by the detector under v1.12.12.
-    second_jitter = [22, -18, 5, -25, 15, -8, 28, -12, 0, 19, -22, 9, -15, 25]
+    #
+    # Pattern sums to 0 over each 5-day window so the AVERAGE second
+    # is exactly 0 — preserves existing "06:47" substring assertions
+    # regardless of which weekdays are sampled. Stddev across the
+    # pattern is ~21s, comfortably above the 15s gate.
+    second_jitter = [30, -30, 15, -15, 0]
     added = 0
     for offset in range(days):
         sec = second_jitter[offset % len(second_jitter)]

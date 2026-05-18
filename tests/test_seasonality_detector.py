@@ -64,7 +64,10 @@ def _to_utc(dt: datetime) -> datetime:
 # v1.12.12: deterministic per-event second-jitter. SeasonalityDetector
 # now suppresses patterns with stddev <15s (the fingerprint of a Tuya
 # weekly schedule), so test fixtures need natural human variance.
-_JITTER_SECONDS = [22, -18, 5, -25, 15, -8, 28, -12, 0, 19, -22, 9, -15, 25]
+# Pattern sums to 0 over each 5-element window so the AVERAGE second
+# is 0 — preserves existing "19:30"/"Friday" substring assertions
+# regardless of fixture length.
+_JITTER_SECONDS = [30, -30, 15, -15, 0]
 
 
 def _jitter(dt: datetime, i: int) -> datetime:
