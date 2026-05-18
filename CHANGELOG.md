@@ -4,6 +4,43 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+## [1.13.2] — 2026-05-19
+
+### Added — Blank-canvas automation chat WS endpoint (backend MVP)
+
+Third competitive-gap closure. Closes the AI Agent HA flagship demo
+("type a sentence, get an automation") using the existing Refine
+plumbing.
+
+New WS endpoint `home_insights/chat_create_automation` takes a
+free-form user prompt + optional `related_insight_ids` for context.
+Wraps the prompt in a virtual `Insight` skeleton, runs it through
+the same `refine_insight` pipeline as `ws_refine` and
+`ws_refine_automation` — same redactor, same Conversation-agent
+failover chain, same audit log.
+
+**Differentiator vs AI Agent HA**: callers can pass
+`related_insight_ids` so the LLM is grounded in the user's actual
+observed habits. Card UX will surface "I noticed you do X every
+evening — make an automation for that?" inline (card UI lands in
+v1.13.3 — backend MVP only this release).
+
+**Privacy parity**: full audit row per LLM attempt via
+`_audit_attempts`. Failover round-trips appear in the privacy log
+identically to ws_refine.
+
+**Validation**: prompt length capped at 2000 chars (Voluptuous
+schema). Bad related_insight_ids tolerated silently — dropped from
+context rather than failing the call.
+
+Response payload mirrors ws_refine_automation: `refined_payload`
+(automation YAML), `rationale`, `diff_summary`, `bytes_sent`,
+`bytes_received`, `conversation_id` for multi-turn refinement,
+plus `related_insights_used` so the card can show which
+observations were factored in.
+
+Card UI ships in v1.13.3.
+
 ## [1.13.1] — 2026-05-19
 
 ### Added — Dual-emit high-confidence proposals into HA Repairs
