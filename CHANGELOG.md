@@ -4,6 +4,52 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+## [1.13.7] — 2026-05-19
+
+### Internal — ws_api/_refine_helpers.py extraction (v1.13 step 5)
+
+First sub-step of the REFINE handler-family extraction. Six pure
+helpers moved out of `ws_api/__init__.py` into their own module:
+
+  - `_resolve_audit_depth` — pick LLM verbosity (concise/indepth)
+  - `_humanize_llm_error` — translate provider errors (Gemini
+    MAX_TOKENS, OpenAI context_length, Anthropic max_tokens,
+    rate-limit) into actionable user guidance
+  - `_attempt_to_dict` — serialize LLM AttemptAudit to JSON-safe
+    dict
+  - `_sanitize_yaml_safe` — round-trip through JSON so PyYAML's
+    safe_dump can represent HA Templates / Selectors / etc.
+  - `_find_automation_by_id` — look up an automation's raw_config
+    by id or alias (runtime state + automations.yaml + packages)
+  - `_build_chat_feedback` — compose the LLM feedback string for
+    the v1.13.2 chat handler
+
+Plus the `_CHAT_AUTOMATION_SKELETON` constant (only used by
+`_build_chat_feedback`).
+
+Re-imported back into `__init__.py` so existing handler call
+sites unchanged. AST verified: every helper relocated, none
+duplicated.
+
+`ws_api/__init__.py` shrinks from 4,369 → 4,122 lines (-247
+net). New `ws_api/_refine_helpers.py` is 321 lines.
+
+**Cumulative refactor progress** vs 5,259-line pre-refactor
+baseline: 5 modules extracted (-1,317 lines total).
+
+The prompt-building cluster (`_wrap_user_feedback` +
+`_authorized_from_user_text` + `_principles_for` +
+`_REFINE_PRINCIPLES_*` + `_OBS_KIND_HINTS`) is intentionally
+NOT extracted in this step — those form a tight prompt-template
+subsystem better moved alongside `ws_refine` itself in v1.13.8.
+
+Next: v1.13.8 will move `ws_refine` + `ws_refine_automation` +
+`ws_apply_automation_refinement` + the prompt-template cluster
+into `ws_api/refine.py`. v1.13.9 will move
+`ws_chat_create_automation` + `ws_audit_suggest` +
+`ws_hypothesize` into a `chat.py` / `audit_suggest.py` split
+(TBD based on dependency analysis).
+
 ## [1.13.6] — 2026-05-19
 
 ### Internal — ws_api/managed_devices.py extraction (v1.13 step 4)
