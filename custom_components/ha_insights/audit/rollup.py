@@ -249,6 +249,13 @@ async def _run_rollup_batch_locked(
     # findings + the materialized cache stay in sync.
     window_days = _resolve_window_days(hass)
 
+    # v1.12.14: probe the recorder's oldest data once per batch. This
+    # caps the per-entity initial cursor so we don't walk through
+    # pre-retention empty chunks (the SQL-audit-observed warmup bug).
+    # ~14 cheap probes total, well below the per-batch budget; reuse
+    # across all entities below.
+    recorder_oldest_ts = await _probe_recorder_oldest_ts(hass)
+
     started = datetime.now(tz=UTC)
     processed = 0
     errors = 0
@@ -296,6 +303,7 @@ async def _run_rollup_batch_locked(
                         eid,
                         window_days=window_days,
                         now=now,
+                        recorder_oldest_ts=recorder_oldest_ts,
                     ),
                     timeout=_PER_ENTITY_TIMEOUT_SEC,
                 )
@@ -372,6 +380,88 @@ def _start_of_day_utc(t: datetime) -> datetime:
     local = dt_util.as_local(t)
     midnight_local = local.replace(hour=0, minute=0, second=0, microsecond=0)
     return midnight_local.astimezone(UTC)
+
+
+# v1.12.14: probe the recorder's oldest data depth once per batch.
+# Mirrors the strategy in `ws_api.ws_recorder_status` but lives here
+# so the batch loop can pass the result through to per-entity rollup
+# without re-probing per entity. Used to clamp the initial cursor —
+# eliminates the "100+ entities sitting at the same cursor with 0
+# rollups written" warmup bug observed in real-install SQL audit
+# 2026-05-18.
+_RECORDER_PROBE_DAYS: tuple[int, ...] = (
+    1, 3, 7, 14, 30, 60, 90, 120, 150, 180, 210, 270, 365,
+)
+
+
+async def _probe_recorder_oldest_ts(
+    hass: HomeAssistant,
+) -> float | None:
+    """Return the UNIX timestamp (seconds) of the recorder's deepest
+    retained data, or None if the probe fails.
+
+    Walks `_RECORDER_PROBE_DAYS` from shallow to deep until a probe
+    returns empty — the depth before that is the retention ceiling.
+    Each probe is a 1-hour slice with no entity filter, so the
+    recorder reads one tiny page per depth.
+
+    Routes through the recorder's own executor so we serialise
+    against in-flight writes instead of fighting the default pool.
+    """
+    try:
+        from homeassistant.components.recorder import get_instance
+        from homeassistant.components.recorder.history import (
+            get_significant_states,
+        )
+    except ImportError:
+        return None
+
+    try:
+        rec = get_instance(hass)
+    except Exception:
+        return None
+
+    def _probe_sync() -> float | None:
+        now_dt = datetime.now(tz=UTC)
+        deepest_with_data_days: int | None = None
+        for days in _RECORDER_PROBE_DAYS:
+            start = now_dt - timedelta(days=days)
+            end = start + timedelta(hours=1)
+            try:
+                result = get_significant_states(
+                    hass,
+                    start,
+                    end,
+                    None,
+                    significant_changes_only=True,
+                    minimal_response=True,
+                    no_attributes=True,
+                )
+            except Exception as err:
+                _LOGGER.debug(
+                    "rollup recorder probe at %dd failed: %s",
+                    days,
+                    err,
+                )
+                break
+            if result:
+                deepest_with_data_days = days
+                continue
+            break
+        if deepest_with_data_days is None:
+            return None
+        # Convert to UNIX timestamp (start of the deepest probe slice).
+        # Floored to start-of-day UTC for consistency with cursor logic.
+        oldest_dt = _start_of_day_utc(
+            datetime.now(tz=UTC) - timedelta(days=deepest_with_data_days)
+        )
+        return oldest_dt.timestamp()
+
+    try:
+        return await rec.async_add_executor_job(_probe_sync)
+    except Exception as err:
+        _LOGGER.debug("rollup recorder probe failed: %s", err)
+        return None
 
 
 async def _query_states_chunk(
@@ -477,6 +567,7 @@ async def _compute_rollups_for_entity_incremental(
     *,
     window_days: int = ROLLUP_WINDOW_DAYS,
     now: datetime,
+    recorder_oldest_ts: float | None = None,
 ) -> dict[str, Any]:
     """Advance one entity's rollup by at most _MAX_CHUNKS_PER_ENTITY
     weeks of recorder history. Merges chunks additively into
@@ -488,7 +579,7 @@ async def _compute_rollups_for_entity_incremental(
 
     Strategy:
       1. Read the entity's cursor + window. If absent or window
-         changed, start at `max(now - window_days, recorder_oldest)`.
+         changed, start at `max(now - window_days, recorder_oldest_ts)`.
       2. Compute end = midnight at start of today (don't double-
          count partial days; today is still being written).
       3. Walk forward in 7-day chunks, additively merging each
@@ -497,19 +588,33 @@ async def _compute_rollups_for_entity_incremental(
          A failed chunk leaves the cursor untouched so the next
          batch picks the same week up.
       5. Stop when window is full, or _MAX_CHUNKS_PER_ENTITY hit.
+
+    `recorder_oldest_ts` is the UNIX timestamp (seconds) of the
+    oldest recorder data observed at batch start, probed once via
+    `_probe_recorder_oldest_ts`. When set, the initial cursor is
+    clamped to `max(now - window_days, recorder_oldest_ts)` so the
+    rollup doesn't waste batches walking through pre-retention
+    empty chunks. v1.12.14 fix for the SQL-audit-observed "100+
+    entities sitting at the same cursor with 0 rollups written"
+    bug — the cursor was advancing through 56 days of pre-retention
+    history per batch before reaching any real data.
     """
     end_ts = _start_of_day_utc(now).timestamp()
 
     progress = await store.get_rollup_progress(entity_id)
     if progress is None or progress[1] != window_days:
-        # First time, or window changed → fresh start. We won't
-        # query beyond what the recorder has — the WS endpoint
-        # tracks oldest age, but querying that here per-entity is
-        # expensive. Trust get_significant_states to return [] for
-        # pre-retention days; the query stays cheap.
+        # First time, or window changed → fresh start. v1.12.14:
+        # clamp the initial cursor to the deeper of (now - window)
+        # and the recorder's oldest data. Before the clamp, on installs
+        # where recorder retention < configured window (e.g., default
+        # 10-day keep with 180-day audit window), the cursor walked
+        # through 170 days of empty chunks before producing any data —
+        # creating the impression that the integration was broken.
         cursor_ts = _start_of_day_utc(
             now - timedelta(days=window_days)
         ).timestamp()
+        if recorder_oldest_ts is not None and recorder_oldest_ts > cursor_ts:
+            cursor_ts = recorder_oldest_ts
         # Wipe any v1.1-era buckets for this entity so the
         # incremental merge starts from a clean slate. Otherwise old
         # full-window totals + new chunk deltas = inflated counts.
