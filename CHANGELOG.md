@@ -4,6 +4,24 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+## [1.12.25] — 2026-05-19
+
+### Internal — ws_api/_helpers.py extraction (v1.13 step 1)
+
+Step 1 of the v1.13 ws_api refactor. Five universal helpers
+(`_get_store`, `_get_buffer`, `_audit_attempts`,
+`_resolve_blocked_entities`, `_resolve_preferred_agent_id`,
+`_require_admin`) moved from `ws_api/__init__.py` into
+`ws_api/_helpers.py`. Re-exported from `__init__` via `__all__`
+for backward compat — handler call sites unchanged.
+
+This unblocks the per-feature handler-file moves (refine / audit /
+find_my_device / managed_devices / identify, etc.) that have been
+parked on a 5,400-line monolith. Each future move can now pull in
+the helpers it needs without dragging definitions around.
+
+No behaviour change. Internal-only.
+
 ## [1.12.24] — 2026-05-19
 
 ### Added — Live power-consumption critical-load gate
