@@ -17,16 +17,16 @@ import voluptuous as vol
 from homeassistant.components import websocket_api
 from homeassistant.core import HomeAssistant, callback
 
-from .const import DOMAIN
-from .lib.title_cleanup import (
+from ..const import DOMAIN
+from ..lib.title_cleanup import (
     strip_already_automated_cta as _strip_already_automated_cta,
 )
 
 _LOGGER = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
-    from .insight import Insight
-    from .store import InsightStore
+    from ..insight import Insight
+    from ..store import InsightStore
 
 
 WS_PROTOCOL_VERSION = 1
@@ -239,7 +239,7 @@ async def _audit_attempts(
 
     Empty `attempts` is tolerated for backwards compat / defensive paths.
     """
-    from .llm import derive_agent_locality, record_call
+    from ..llm import derive_agent_locality, record_call
 
     for attempt in attempts:
         await record_call(
@@ -277,7 +277,7 @@ def _resolve_preferred_agent_id(hass: HomeAssistant) -> str | None:
     installs pick the first one set — preferences are install-wide
     intent, not per-entry, so first-set wins.
     """
-    from .config_flow import get_preferred_agent_id
+    from ..config_flow import get_preferred_agent_id
 
     for entry in hass.config_entries.async_entries(DOMAIN):
         preferred = get_preferred_agent_id(entry)
@@ -308,7 +308,7 @@ async def ws_hello(
     a string that drifts from manifest.json. The resolver caches
     after the first call.
     """
-    from .config_flow import get_active_mode
+    from ..config_flow import get_active_mode
 
     privacy_mode = "off"
     for entry in hass.config_entries.async_entries(DOMAIN):
@@ -368,7 +368,7 @@ async def ws_list(
     # cache cleared by integration reload).
     hierarchy = None
     try:
-        from .detectors.hierarchy import build_hierarchy
+        from ..detectors.hierarchy import build_hierarchy
 
         for entry_data_val in hass.data.get(DOMAIN, {}).values():
             if isinstance(entry_data_val, dict) and "hierarchy" in entry_data_val:
@@ -424,8 +424,8 @@ async def ws_list(
     # shows up on the LEAVES, not just the parent.
     entity_to_automations: dict[str, list[str]] = {}
     try:
-        from .apply.conflict_scanner import _as_list, _extract_target_entities
-        from .detectors import _load_existing_automations
+        from ..apply.conflict_scanner import _as_list, _extract_target_entities
+        from ..detectors import _load_existing_automations
 
         # v1.2: pull container + script-target relationships straight from
         # the cached hierarchy instead of re-walking the state machine.
@@ -499,7 +499,7 @@ async def ws_list(
         # Also walk action.target.entity_id in payload (long_tail, schedule, etc.)
         if isinstance(ins.payload, dict):
             try:
-                from .apply.conflict_scanner import _extract_target_entities
+                from ..apply.conflict_scanner import _extract_target_entities
 
                 out |= _extract_target_entities(ins.payload.get("action"))
             except Exception:
@@ -514,7 +514,7 @@ async def ws_list(
     alias_to_id: dict[str, str] = {}
     id_to_alias: dict[str, str] = {}
     try:
-        from .detectors import _load_existing_automations as _lea
+        from ..detectors import _load_existing_automations as _lea
 
         autos_for_ids = await _lea(hass)
         for auto in autos_for_ids:
@@ -615,7 +615,7 @@ async def ws_list(
     # beta / experimental). Card uses this to render BETA /
     # EXPERIMENTAL badges, so we surface it on every insight.
     try:
-        from .detectors import DETECTORS
+        from ..detectors import DETECTORS
 
         detector_maturity_by_name: dict[str, str] = {}
         for det_name, det_cls in DETECTORS.items():
@@ -667,7 +667,7 @@ async def ws_list(
         # new entities at face value. Absent field → no badge.
         if isinstance(eid, str) and entity_registry_snapshot is not None:
             try:
-                from .lib.entity_age import (
+                from ..lib.entity_age import (
                     days_since_added,
                     is_newly_added,
                 )
@@ -904,7 +904,7 @@ async def ws_list(
 def _normalize_title_for_dedup(title: str, eids: list[str]) -> str:
     """Backwards-compat shim — kept for any inline callers. New code
     should use lib.dedup.normalize_title_for_dedup directly."""
-    from .lib.dedup import normalize_title_for_dedup as _impl
+    from ..lib.dedup import normalize_title_for_dedup as _impl
 
     return _impl(title, eids)
 
@@ -916,7 +916,7 @@ def _display_time_dedup(
     pure dedup helper in lib/dedup.py. All real logic lives there
     so it can be unit-tested without the HA stack.
     """
-    from .lib.dedup import display_time_dedup
+    from ..lib.dedup import display_time_dedup
 
     # Build device_id lookup for cross-entity device-shared dedup.
     device_id_by_entity: dict[str, str | None] = {}
@@ -947,8 +947,8 @@ async def ws_explain(
     msg: dict[str, Any],
 ) -> None:
     """User-initiated LLM explanation. Redactor + agent + dereference + audit."""
-    from .config_flow import get_blocked_entities
-    from .llm import RedactionMode, Redactor, explain_insight
+    from ..config_flow import get_blocked_entities
+    from ..llm import RedactionMode, Redactor, explain_insight
 
     store = _get_store(hass)
     if store is None:
@@ -1032,9 +1032,9 @@ async def ws_hypothesize(
     the response text directly — not persisted on the insight, since
     hypotheses are throwaway suggestions the user can re-roll on demand.
     """
-    from .config_flow import get_blocked_entities
-    from .insight import InsightKind
-    from .llm import RedactionMode, Redactor, explain_insight
+    from ..config_flow import get_blocked_entities
+    from ..insight import InsightKind
+    from ..llm import RedactionMode, Redactor, explain_insight
 
     store = _get_store(hass)
     if store is None:
@@ -1118,7 +1118,7 @@ async def ws_purge_all(
     # insights are gone, so the Repairs surface shouldn't keep
     # showing stale findings.
     try:
-        from .audit.repairs import clear_all_audit_issues
+        from ..audit.repairs import clear_all_audit_issues
 
         cleared_repairs = clear_all_audit_issues(hass)
     except Exception:
@@ -1191,7 +1191,7 @@ async def ws_dismiss(
     # Mirror the dismiss into HA's Repairs registry if this insight
     # had a Repairs entry. Idempotent — no-op when no entry exists.
     try:
-        from .audit.repairs import clear_issue_for_insight
+        from ..audit.repairs import clear_issue_for_insight
 
         clear_issue_for_insight(hass, msg["insight_id"])
     except Exception:
@@ -1243,13 +1243,13 @@ async def ws_apply(
     doesn't exist" (typo'd refinement) before it lands in
     automations.yaml as a broken automation.
     """
-    from .apply import (
+    from ..apply import (
         AutomationWriter,
         hash_config,
         validate_automation,
         validate_automation_online,
     )
-    from .lib.automation_yaml import append_entities_to_action_block
+    from ..lib.automation_yaml import append_entities_to_action_block
 
     store = _get_store(hass)
     if store is None:
@@ -1407,11 +1407,11 @@ async def ws_suggest_additions(
     `reasons`, `category` fields so the card doesn't need to know the
     library's grouping structure.
     """
-    from .config_flow import get_blocked_entities
-    from .detectors.hierarchy import build_hierarchy
-    from .lib.coactivation import compute_coactivation_days
-    from .llm.candidate_entities import build_candidate_entities
-    from .llm.refiner import _collect_entity_ids
+    from ..config_flow import get_blocked_entities
+    from ..detectors.hierarchy import build_hierarchy
+    from ..lib.coactivation import compute_coactivation_days
+    from ..llm.candidate_entities import build_candidate_entities
+    from ..llm.refiner import _collect_entity_ids
 
     store = _get_store(hass)
     if store is None:
@@ -1536,7 +1536,7 @@ async def ws_refine(
     insight — the refined payload is returned for the card to preview, then
     applied via `home_insights/apply` with `payload_override` if accepted.
     """
-    from .llm import RedactionMode, Redactor, refine_insight
+    from ..llm import RedactionMode, Redactor, refine_insight
 
     store = _get_store(hass)
     if store is None:
@@ -1557,7 +1557,7 @@ async def ws_refine(
         )
         return
 
-    from .config_flow import get_blocked_entities
+    from ..config_flow import get_blocked_entities
 
     blocked = _resolve_blocked_entities(hass, get_blocked_entities)
     preferred = _resolve_preferred_agent_id(hass)
@@ -1741,7 +1741,7 @@ async def ws_undo(
     `code: "drift"` plus a side-by-side hint so the card can prompt
     "you've edited this — undo anyway?".
     """
-    from .apply import AutomationWriter, detect_drift
+    from ..apply import AutomationWriter, detect_drift
 
     store = _get_store(hass)
     if store is None:
@@ -1922,12 +1922,12 @@ async def ws_scan_now(
     """
     import asyncio as _asyncio
 
-    from .config_flow import (
+    from ..config_flow import (
         get_blocked_entities,
         get_enabled_detectors,
         get_scan_areas,
     )
-    from .detectors import DETECTORS, DetectorContext, run_all_detectors
+    from ..detectors import DETECTORS, DetectorContext, run_all_detectors
 
     store = _get_store(hass)
     buffer_ = _get_buffer(hass)
@@ -2087,10 +2087,10 @@ async def ws_refine_cost_estimate(
     it's the cheapest way to prevent expensive misclicks on Opus-tier
     models without round-tripping a real call.
     """
-    from .config_flow import get_blocked_entities
-    from .llm import RedactionMode, Redactor, build_refine_prompt
-    from .llm.agent_client import _list_agent_candidates
-    from .llm.cost import estimate_cost
+    from ..config_flow import get_blocked_entities
+    from ..llm import RedactionMode, Redactor, build_refine_prompt
+    from ..llm.agent_client import _list_agent_candidates
+    from ..llm.cost import estimate_cost
 
     store = _get_store(hass)
     if store is None:
@@ -2178,7 +2178,7 @@ def _resolve_refine_cost_threshold(hass: HomeAssistant) -> float:
     Lowest wins so a "be cautious" entry isn't bypassed by a more
     permissive one in a multi-entry future.
     """
-    from .config_flow import (
+    from ..config_flow import (
         DEFAULT_REFINE_COST_THRESHOLD_USD,
         get_refine_cost_threshold,
     )
@@ -2234,8 +2234,8 @@ async def ws_redaction_preview(
       - attributes_stripped: attribute names dropped (gps, mac, secrets)
       - privacy_mode: which mode this preview reflects
     """
-    from .config_flow import get_blocked_entities
-    from .llm import RedactionMode, Redactor
+    from ..config_flow import get_blocked_entities
+    from ..llm import RedactionMode, Redactor
 
     store = _get_store(hass)
     if store is None:
@@ -2321,8 +2321,8 @@ async def ws_recorder_status(
     oldest_age_days: int | None = None
     configured_audit_window_days: int | None = None
     try:
-        from .config_flow import get_audit_rollup_window_days
-        from .const import DOMAIN
+        from ..config_flow import get_audit_rollup_window_days
+        from ..const import DOMAIN
 
         # Single-entry default, but if multi-entry the max wins (the
         # rollup runs once against the largest window any entry wants).
@@ -2461,7 +2461,7 @@ def ws_rollup_progress(
     dict copy off module-level state with no I/O. Card polls this
     while a batch is in flight to render its progress bar.
     """
-    from .audit.rollup import get_rollup_progress
+    from ..audit.rollup import get_rollup_progress
 
     connection.send_result(msg["id"], get_rollup_progress())
 
@@ -2518,7 +2518,7 @@ def ws_dev_inject_event(
     testing without needing access to HA's recorder. Not part of the stable
     public API; the underscore prefix marks it as dev-only.
     """
-    from .observers.state_event_buffer import StateEvent
+    from ..observers.state_event_buffer import StateEvent
 
     buffer_ = _get_buffer(hass)
     if buffer_ is None:
@@ -2665,7 +2665,7 @@ def _resolve_audit_depth(
     if override in ("concise", "indepth"):
         return override
     try:
-        from .config_flow import get_audit_analysis_depth
+        from ..config_flow import get_audit_analysis_depth
 
         for entry in hass.config_entries.async_entries(DOMAIN):
             return get_audit_analysis_depth(entry)
@@ -3187,9 +3187,9 @@ async def ws_refine_automation(
     """Run an existing automation through the LLM refine pipeline."""
     from datetime import UTC, datetime
 
-    from .config_flow import get_blocked_entities
-    from .insight import Insight, InsightKind
-    from .llm import RedactionMode, Redactor, refine_insight
+    from ..config_flow import get_blocked_entities
+    from ..insight import Insight, InsightKind
+    from ..llm import RedactionMode, Redactor, refine_insight
 
     automation_id = msg["automation_id"]
     raw = await hass.async_add_executor_job(
@@ -3331,7 +3331,7 @@ async def ws_apply_automation_refinement(
     msg: dict[str, Any],
 ) -> None:
     """Write the refined automation YAML back to disk + reload."""
-    from .apply.automation_writer import AutomationWriter
+    from ..apply.automation_writer import AutomationWriter
 
     automation_id = msg["automation_id"]
     refined = msg["refined_config"]
@@ -3408,19 +3408,19 @@ async def ws_audit_suggest(
     from datetime import UTC
     from datetime import datetime as _dt
 
-    from .audit.cache import (
+    from ..audit.cache import (
         CachedSuggestion,
         compute_cache_key,
     )
-    from .audit.cache import (
+    from ..audit.cache import (
         get as cache_get,
     )
-    from .audit.cache import (
+    from ..audit.cache import (
         put as cache_put,
     )
-    from .config_flow import get_blocked_entities
-    from .insight import Insight, InsightKind
-    from .llm import RedactionMode, Redactor, refine_insight
+    from ..config_flow import get_blocked_entities
+    from ..insight import Insight, InsightKind
+    from ..llm import RedactionMode, Redactor, refine_insight
 
     insight_id = msg["insight_id"]
     store = _get_store(hass)
@@ -3755,7 +3755,7 @@ def ws_detector_directory(
     tier hints (USELESS / LIMITED / GOOD / GREAT) — see
     SetupQualityDetector for the longer-form periodic surface.
     """
-    from .detectors import DETECTORS
+    from ..detectors import DETECTORS
 
     out: list[dict[str, Any]] = []
     for name in sorted(DETECTORS):
@@ -3839,7 +3839,7 @@ async def ws_inject_examples(
     if store is None:
         connection.send_error(msg["id"], "not_set_up", "Store not initialized")
         return
-    from .examples import build_example_insights
+    from ..examples import build_example_insights
 
     added = 0
     try:
@@ -3872,7 +3872,7 @@ async def ws_clear_examples(
     if store is None:
         connection.send_error(msg["id"], "not_set_up", "Store not initialized")
         return
-    from .examples import EXAMPLE_PAYLOAD_KEY
+    from ..examples import EXAMPLE_PAYLOAD_KEY
 
     removed = 0
     try:
@@ -3927,7 +3927,7 @@ async def ws_analytics_preview(
         )
         return
     try:
-        from .analytics import (
+        from ..analytics import (
             DEFAULT_ANALYTICS_ENDPOINT,
             build_report_payload,
         )
@@ -4029,7 +4029,7 @@ async def ws_get_user_overrides(
     if not entries:
         connection.send_error(msg["id"], "no_entry", "No HA Insights entry")
         return
-    from .config_flow import (
+    from ..config_flow import (
         get_mobile_notify_policy,
         get_notify_user_overrides,
     )
@@ -4087,7 +4087,7 @@ async def ws_set_user_override(
         "preset",
     }
 
-    from .config_flow import (
+    from ..config_flow import (
         CONF_NOTIFY_USER_OVERRIDES,
         get_notify_user_overrides,
     )
@@ -4116,7 +4116,7 @@ async def ws_set_user_override(
 
 def _managed_devices_set(entry) -> set[str]:
     """Read the user's current managed-externally device set."""
-    from .config_flow import CONF_MANAGED_EXTERNALLY_DEVICES
+    from ..config_flow import CONF_MANAGED_EXTERNALLY_DEVICES
 
     raw = entry.options.get(CONF_MANAGED_EXTERNALLY_DEVICES, [])
     if not isinstance(raw, (list, tuple, set)):
@@ -4220,7 +4220,7 @@ async def ws_set_device_managed(
         flagged.add(device_id)
     else:
         flagged.discard(device_id)
-    from .config_flow import CONF_MANAGED_EXTERNALLY_DEVICES
+    from ..config_flow import CONF_MANAGED_EXTERNALLY_DEVICES
 
     merged_options = dict(entry.options)
     merged_options[CONF_MANAGED_EXTERNALLY_DEVICES] = sorted(flagged)
@@ -4285,14 +4285,14 @@ async def ws_identify_capability(
     from homeassistant.helpers import device_registry as dr
     from homeassistant.helpers import entity_registry as er
 
-    from .lib.dedup_signals import (
+    from ..lib.dedup_signals import (
         DeviceRecord,
         EntityRecord,
         find_dedup_candidates,
     )
-    from .lib.identify_capability import identify_capability_for
-    from .lib.name_quality import score_name_quality
-    from .lib.perturbation_capability import (
+    from ..lib.identify_capability import identify_capability_for
+    from ..lib.name_quality import score_name_quality
+    from ..lib.perturbation_capability import (
         is_perturbation_unsupported,
         perturbation_guide_for,
     )
@@ -4498,7 +4498,7 @@ async def ws_identify_entity(
 
     from asyncio import sleep as _async_sleep
 
-    from .lib.identify_capability import (
+    from ..lib.identify_capability import (
         IdentifyMethod,
         identify_capability_for,
     )
@@ -4602,7 +4602,7 @@ async def ws_perturbation_guide(
     On unsupported / unknown device_class: `{"supported": false,
     "reason": "<why>"}`.
     """
-    from .lib.perturbation_capability import (
+    from ..lib.perturbation_capability import (
         is_perturbation_unsupported,
         perturbation_guide_for,
     )
@@ -4680,7 +4680,7 @@ async def ws_perturbation_test(
     from homeassistant.core import Event
     from homeassistant.helpers.event import async_track_state_change_event
 
-    from .lib.perturbation_detection import analyze_perturbation
+    from ..lib.perturbation_detection import analyze_perturbation
 
     device_class = msg["device_class"]
     candidate_ids: list[str] = msg["candidate_entity_ids"]
@@ -4851,7 +4851,7 @@ async def ws_ble_capability(
     from homeassistant.helpers import device_registry as dr
     from homeassistant.helpers import entity_registry as er
 
-    from .lib.ble_capability import ble_capability_for
+    from ..lib.ble_capability import ble_capability_for
 
     e_reg = er.async_get(hass)
     d_reg = dr.async_get(hass)
