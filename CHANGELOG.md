@@ -4,6 +4,35 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+## [1.13.4] — 2026-05-19
+
+### Internal — ws_api/identify.py extraction (v1.13 step 2)
+
+Step 2 of the v1.13 ws_api refactor (step 1 in v1.12.25 moved
+universal helpers to `_helpers.py`). Find My Device handlers
+extracted into their own file:
+
+  - `ws_identify_capability`
+  - `ws_identify_entity`
+  - `ws_perturbation_guide`
+  - `ws_perturbation_test`
+  - `_collect_ip_attrs_for_candidates` (helper used only by
+    `ws_identify_capability`)
+
+All four handlers re-imported into `ws_api/__init__.py` and added
+to `__all__` so external consumers + the `async_register` call
+keep working unchanged. No behaviour change.
+
+`ws_api/__init__.py` shrinks from 5,259 lines → 4,692 lines
+(-567 lines moved out; the rest is the new import block + helper
+imports). New `ws_api/identify.py` is 866 lines (handler bodies
++ docstrings + module-level comment).
+
+Per the dependency-map memory: BLE / IDENTIFY / MANAGED_DEVICES
+were flagged as the most-isolated handler groups (no
+cross-handler coupling beyond the universal helpers). Identify
+is moved first; BLE + Managed Devices come in subsequent steps.
+
 ## [1.13.3] — 2026-05-19
 
 ### Bundled card v1.10.13 — 💬 Ask AI to write an automation
