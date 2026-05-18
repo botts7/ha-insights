@@ -4,6 +4,43 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+## [1.13.8] — 2026-05-19
+
+### Internal — ws_api/refine.py extraction (v1.13 step 6)
+
+Second sub-step of the REFINE handler-family extraction. The four
+REFINE handlers and their tightly-coupled prompt-template cluster
+moved out of `ws_api/__init__.py` into `ws_api/refine.py` (~662
+lines):
+
+Handlers extracted:
+
+  - `ws_refine` — the original refine WS endpoint
+  - `ws_refine_cost_estimate` — pre-call token/cost preview
+  - `ws_refine_automation` — full-automation refinement with
+    side-by-side YAML diff
+  - `ws_apply_automation_refinement` — write the refined YAML back
+    to `automations.yaml`
+
+Prompt-template cluster (kept together because they only make
+sense as a group):
+
+  - `_REFINE_PRINCIPLES_CONCISE` / `_REFINE_PRINCIPLES_INDEPTH`
+    — depth-aware system-prompt rules
+  - `_principles_for(depth)` — picker
+  - `_OBS_KIND_HINTS` — per-observation-kind LLM hint table
+  - `_authorized_from_user_text` — gate the model from rewriting
+    automation IDs / aliases unless the user explicitly asked
+  - `_wrap_user_feedback` — compose the final LLM prompt string
+  - `_resolve_refine_cost_threshold` — read the per-entry cost cap
+
+Plus the BLE handlers' previously-extracted re-exports continue
+to work; `ws_chat_create_automation` and `ws_audit_suggest`
+remain in `__init__.py` for now (they import the extracted
+helpers via the package). No behavior change. Monolith now
+~3,553 lines, down from ~5,259 at the start of the v1.13
+refactor.
+
 ## [1.13.7] — 2026-05-19
 
 ### Internal — ws_api/_refine_helpers.py extraction (v1.13 step 5)
