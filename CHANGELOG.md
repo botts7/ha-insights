@@ -4,6 +4,31 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+## [1.13.5] — 2026-05-19
+
+### Internal — ws_api/ble_find.py extraction (v1.13 step 3)
+
+Step 3 of the v1.13 ws_api refactor. Two BLE live-find handlers
++ two helpers extracted from `ws_api/__init__.py` into their own
+file:
+
+  - `ws_ble_capability` (batch trackability lookup)
+  - `ws_ble_live_find` (streaming RSSI subscription)
+  - `_ble_proxy_label` (helper)
+  - `_seen_proxies_for` (helper)
+
+Re-imported back into `ws_api/__init__.py` and added to `__all__`
+for backward compat. No behaviour change.
+
+`ws_api/__init__.py` shrinks from 4,692 → 4,474 lines (-218
+net). New `ws_api/ble_find.py` is 280 lines.
+
+Cumulative progress against the 5,259-line baseline (pre-refactor):
+v1.12.25 _helpers (180 lines) + v1.13.4 identify (866 lines) +
+v1.13.5 ble_find (280 lines) = 1,326 lines moved out, with the
+monolith down to 4,474 lines. Next: ManagedDevices (similar
+isolated profile), then the larger Refine handler family.
+
 ## [1.13.4] — 2026-05-19
 
 ### Internal — ws_api/identify.py extraction (v1.13 step 2)
