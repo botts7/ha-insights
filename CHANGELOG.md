@@ -4,6 +4,39 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+## [1.12.23] — 2026-05-18
+
+### Added — Vendor-native identify primitives
+
+New `lib/vendor_identify_strategy.py` maps an entity's integration
+platform (from the entity registry) onto the canonical vendor
+identify primitive. WS handler now consults it first, falling
+back to the generic capability pipeline only when no vendor
+mapping exists.
+
+| Integration | Service                                            | Method                         |
+|-------------|----------------------------------------------------|--------------------------------|
+| ZHA         | `zha.issue_zigbee_cluster_command` cluster=0x0003 cmd=0x00 | Zigbee Identify (3 s breathe)  |
+| Zigbee2MQTT | `light.turn_on effect: blink`                      | Z2M Identify effect            |
+| Z-Wave JS   | `zwave_js.invoke_cc_api` cc=Indicator (0x87)       | Z-Wave Identify indicator LED  |
+| LIFX        | `lifx.effect_pulse mode: blink power_on: false`    | LIFX native HSBK pulse         |
+| Yeelight    | `yeelight.start_flow action: recover`              | Yeelight native flow           |
+
+ZHA requires the device's IEEE address; the handler resolves it
+from the device registry's `identifiers` field.
+
+Response includes `vendor_native: true` and the method label;
+card v1.10.12 surfaces it inline as "⚡ Vendor primitive:
+{description}".
+
+Real-install impact: Zigbee bulbs no longer brightness-wiggle —
+they trigger the canonical Identify cluster which is what every
+Zigbee certification test exercises. Z-Wave devices flash an
+indicator LED without cycling the load. LIFX uses its native
+pulse instead of brightness changes.
+
+Bundles card v1.10.12.
+
 ## [1.12.22] — 2026-05-18
 
 ### Added — Device-graph alternative identifier (use LED, not relay)
