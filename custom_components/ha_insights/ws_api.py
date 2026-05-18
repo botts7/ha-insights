@@ -627,6 +627,18 @@ async def ws_list(
     except Exception:
         detector_maturity_by_name = {}
 
+    # v1.12.11: snapshot the entity registry once so the enrichment loop
+    # can look up per-entity `created_at` for the newly-added badge.
+    # Falls back to None (no badges) on older HA versions where
+    # RegistryEntry doesn't carry created_at.
+    entity_registry_snapshot = None
+    try:
+        from homeassistant.helpers import entity_registry as _er
+
+        entity_registry_snapshot = _er.async_get(hass)
+    except Exception:
+        entity_registry_snapshot = None
+
     enriched: list[dict[str, Any]] = []
     for ins in insights:
         d = ins.to_dict()
@@ -648,6 +660,32 @@ async def ws_list(
         else:
             d["domain"] = None
             d["device_class"] = None
+        # v1.12.11: surface entity_age_days when the primary entity was
+        # added within the last NEWLY_ADDED_THRESHOLD_DAYS days. The card
+        # renders a "🆕 added N days ago" badge so users see the dataset-
+        # window limit and don't take low-confidence insights on brand-
+        # new entities at face value. Absent field → no badge.
+        if isinstance(eid, str) and entity_registry_snapshot is not None:
+            try:
+                from .lib.entity_age import (
+                    days_since_added,
+                    is_newly_added,
+                )
+
+                registry_entry = entity_registry_snapshot.async_get(eid)
+                created_at = (
+                    getattr(registry_entry, "created_at", None)
+                    if registry_entry is not None
+                    else None
+                )
+                if is_newly_added(created_at):
+                    age = days_since_added(created_at)
+                    if age is not None:
+                        d["entity_age_days"] = age
+            except Exception:
+                # Best-effort enrichment — never fail ws_list if the
+                # registry lookup or import raises.
+                pass
         # v1.2 Phase 5: surface the three new filter axes — area, floor,
         # integration. IDs power filter equality; names power the chip
         # labels + group_by section headers. All five may be None when

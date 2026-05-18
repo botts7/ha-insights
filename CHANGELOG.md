@@ -4,6 +4,36 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+## [1.12.11] — 2026-05-17
+
+### Added — 🆕 newly-added entity badge
+
+Pairs with card v1.10.3. When an insight's primary entity was added
+to Home Assistant within the last 14 days, `ws_list` now stamps
+`entity_age_days` on the payload; the card surfaces it as a sky-blue
+`🆕 added N days ago` badge next to the title and in the detail
+dialog.
+
+The badge surfaces the dataset-window limit visually. v1.12.9's
+state_shift fix gates the detector internally on
+`pre_shift_event_count`, but other detectors still surface findings
+on brand-new entities — the badge gives users the context to spot
+"this is hedged because the entity is 4 days old," instead of
+treating every emitted insight as equally trustworthy.
+
+`entity_age_days` is set ONLY when the entity is within
+`NEWLY_ADDED_THRESHOLD_DAYS` (14). Absent field → no badge. Older
+Home Assistant builds (pre-2024.10) without
+`RegistryEntry.created_at` simply never get the field — graceful
+degradation.
+
+Pure helpers live in `lib/entity_age.py` (`days_since_added`,
+`is_newly_added`); 11 unit tests cover boundary, defensive, and
+clock-skew edges.
+
+Bundled panel.js refreshed from card v1.10.3 so the sidebar panel
+shows the badge too.
+
 ## [1.12.10] — 2026-05-17
 
 ### Fixed — setup_quality "Manage" links + low-confidence filler
