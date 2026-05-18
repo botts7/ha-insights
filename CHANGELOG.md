@@ -4,6 +4,42 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+## [1.13.9] — 2026-05-19
+
+### Internal — ws_api LLM-handler family extraction (v1.13 step 7)
+
+Final big extraction. The three LLM-driven handlers that still
+lived in the monolith each move to their own file:
+
+  - `ws_api/audit_suggest.py` (~508 lines) — `ws_audit_suggest`
+    plus its two prompt-building helpers
+    (`_build_audit_feedback` + `_authorized_edits_from_observations`)
+  - `ws_api/chat.py` (~196 lines) — `ws_chat_create_automation`
+    (the blank-canvas chat handler)
+  - `ws_api/hypothesize.py` (~112 lines) — `ws_hypothesize`
+    (LLM anomaly hypothesis generator)
+
+Re-imported back into `__init__.py` for backward-compat. No
+behavior change. Ruff clean.
+
+Also drops the now-dead `_REFINE_PRINCIPLES` backwards-compat
+alias from `__init__.py` (no callers left after step 6).
+
+### Monolith trajectory
+
+`ws_api/__init__.py` now **2,837 lines**, down from **5,259** at
+the start of the v1.13 refactor — a **46% reduction** across
+seven incremental, reviewable steps:
+
+  - step 0: rename `ws_api.py` → `ws_api/__init__.py`
+  - step 1: `_helpers.py` (universal helpers)
+  - step 2: `identify.py` (Find My Device handlers)
+  - step 3: `ble_find.py` (BLE live-find handlers)
+  - step 4: `managed_devices.py` (ManagedDevices handlers)
+  - step 5: `_refine_helpers.py` (pure REFINE helpers)
+  - step 6: `refine.py` (REFINE handlers + prompt cluster)
+  - step 7: `audit_suggest.py` + `chat.py` + `hypothesize.py`
+
 ## [1.13.8] — 2026-05-19
 
 ### Internal — ws_api/refine.py extraction (v1.13 step 6)
