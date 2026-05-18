@@ -4,6 +4,23 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+## [1.12.15] — 2026-05-18
+
+### Added — `home_insights/export_dev_audit` WS endpoint
+
+Exposes the `lib/dev_audit.build_dev_audit_bundle` builder (shipped
+in v1.12.12 Phase A) via a WS call. Admin-gated. Returns the full
+redacted snapshot — install signature, per-detector activity counts,
+event buffer signature, config fingerprint — as JSON.
+
+Two intended uses: (1) attach to bug reports, (2) paste into an AI
+chat for "are any of my detectors silent for the wrong reason?"
+verification. The future v1.13 release will add an opt-in
+in-integration "Run dev audit" button on the card.
+
+Invoke from HA Developer Tools → WebSocket:
+`{"type": "home_insights/export_dev_audit"}`.
+
 ## [1.12.14] — 2026-05-18
 
 ### Fixed — audit_rollups slow-warmup on installs with short recorder retention
