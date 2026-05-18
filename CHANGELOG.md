@@ -4,6 +4,44 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+## [1.12.22] — 2026-05-18
+
+### Added — Device-graph alternative identifier (use LED, not relay)
+
+New `lib/device_alternative_identifier.py` pure-function lib:
+takes a list of sibling entities on the same device and picks the
+safest identify target.
+
+Priority order:
+1. Sibling with `entity_category: diagnostic` AND domain in
+   {light, switch} — intentional indicator entities exposed by
+   the integration.
+2. Sibling with domain `light` — brightness-wiggle is safer than
+   switch toggle.
+3. Sibling whose entity_id / name contains `led`, `status`,
+   `indicator`, `led_ring`, `signal_light`, `mode_light`,
+   `activity_led`, etc.
+
+WS handler `home_insights/identify_entity` now performs a
+device-registry lookup before firing on switch / siren targets,
+substitutes when a safer sibling exists, and surfaces the
+substitution in the response (`substitution: {from, to, reason, rule}`).
+The card renders the hint inline.
+
+Real-install benefits:
+- **Tesla Wall Connector**: pulses the status LED instead of
+  cycling the contactor (won't interrupt an active charge session).
+- **Shelly Plus 1**: blinks `light.shelly_plus_1_led` instead of
+  toggling `switch.shelly_plus_1` (won't cut power to downstream
+  load).
+- **Sonoff with custom config**: prefers `light.foo_led` over the
+  main relay.
+
+Lights and media players pass through unchanged. Critical-load
+gate re-runs on the substitute as a defensive check.
+
+Bundles card v1.10.11 with the inline-hint UI.
+
 ## [1.12.21] — 2026-05-18
 
 ### Bundled card v1.10.10 — Find Device touch-test + watch mode for sensors

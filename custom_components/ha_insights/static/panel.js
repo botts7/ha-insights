@@ -9323,6 +9323,11 @@ class HaInsightsPanel extends i {
         // card sends confirm_power_cycle=true. Once the user confirms once,
         // we remember it for the duration of the modal session.
         this._findDevicePowerCycleConfirmed = new Set();
+        // v1.10.11 — backend may substitute a safer same-device sibling
+        // (status LED) for the relay/contactor the user picked. We surface
+        // that substitution inline so the user knows "Identifying via
+        // light.shelly_plus_1_led instead of switch.shelly_plus_1".
+        this._findDeviceSubstitutions = {};
         // Snapshot of distinct values present in the loaded insight set.
         // Drives the chip dropdown options. Refreshed on every list reload.
         this._availableDomains = [];
@@ -9674,6 +9679,15 @@ class HaInsightsPanel extends i {
       font-size: 0.78em;
       color: var(--secondary-text-color);
       margin-top: 2px;
+    }
+    .find-device-substitution {
+      font-size: 0.8em;
+      color: var(--primary-text-color);
+      margin-top: 4px;
+      padding: 4px 8px;
+      border-left: 2px solid var(--success-color, #4caf50);
+      background: rgba(76, 175, 80, 0.06);
+      border-radius: 2px;
     }
     .find-device-watch-hint {
       font-size: 0.8em;
@@ -10501,6 +10515,7 @@ class HaInsightsPanel extends i {
         this._findDeviceSessionStartedAt = 0;
         this._findDeviceSessionElapsedMs = 0;
         this._findDevicePowerCycleConfirmed = new Set();
+        this._findDeviceSubstitutions = {};
         this._findDeviceWatchBaselines = {};
         this._findDeviceWatchCurrent = {};
         this._findDeviceWatchDetected = new Set();
@@ -10745,6 +10760,19 @@ class HaInsightsPanel extends i {
             else {
                 nextCounts[entityId] = (nextCounts[entityId] ?? 0) + 1;
                 delete nextErrors[entityId];
+                // Cache substitution hint (or clear it) for inline display.
+                const sub = r.value.substitution;
+                if (sub) {
+                    this._findDeviceSubstitutions = {
+                        ...this._findDeviceSubstitutions,
+                        [entityId]: { to: sub.to, reason: sub.reason },
+                    };
+                }
+                else if (this._findDeviceSubstitutions[entityId]) {
+                    const next = { ...this._findDeviceSubstitutions };
+                    delete next[entityId];
+                    this._findDeviceSubstitutions = next;
+                }
             }
         }
         this._findDeviceErrors = nextErrors;
@@ -11282,6 +11310,13 @@ class HaInsightsPanel extends i {
                                 >fired ${fires}/${FIND_DEVICE_MAX_FIRES_PER_ENTITY}</span
                               >`
                     : ""}
+                          ${m.mode === "fire" &&
+                    checked &&
+                    this._findDeviceSubstitutions[m.entity_id]
+                    ? b `<span class="find-device-substitution">
+                                💡 ${this._findDeviceSubstitutions[m.entity_id].reason}
+                              </span>`
+                    : ""}
                           ${m.mode === "perturb" && checked
                     ? b `<span class="find-device-watch-hint">
                                 ${detected
@@ -11681,6 +11716,9 @@ __decorate([
 __decorate([
     r()
 ], HaInsightsPanel.prototype, "_findDeviceSessionElapsedMs", void 0);
+__decorate([
+    r()
+], HaInsightsPanel.prototype, "_findDeviceSubstitutions", void 0);
 __decorate([
     r()
 ], HaInsightsPanel.prototype, "_availableDomains", void 0);
