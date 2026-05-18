@@ -97,6 +97,23 @@ class CooccurrenceDetector(Detector):
         # manufactures "B follows A within 1s" pairs across every
         # sibling. The long-silence filter catches this without the
         # entity having to literally report `unavailable`.
+        #
+        # v1.12.13: ALSO drop events with context.parent_id set —
+        # those are downstream cascades from another HA event
+        # (automation action, script execution, scene activation).
+        # The v1.5.20 structural filter (_pair_is_related) catches
+        # scene/script/group members; v1.5.16 context.id batch
+        # correlator catches multi-target fan-outs. But a USER-created
+        # automation like "when front_door opens, turn on lounge_light"
+        # has no structural relationship — the follower light's
+        # state_changed has parent_id set, the leader's doesn't, and
+        # without this filter we'd surface a self-reinforcing
+        # "automate this!" proposal for a pattern the user already
+        # automated. parent_id=None preserves: user-driven manual
+        # actions (user_id set, parent_id None), sensor-originated
+        # device events (both None), and root-cause leaders. parent_id
+        # set means "this is a CONSEQUENCE of another HA event" —
+        # never a candidate for "user habit to automate."
         if events:
             filtered: list[StateEvent] = []
             last_seen_at: dict[str, datetime] = {}
@@ -107,6 +124,8 @@ class CooccurrenceDetector(Detector):
                     ev.domain != "event"
                     and is_after_long_silence(ev.timestamp, prior_ts)
                 ):
+                    continue
+                if ev.context_parent_id is not None:
                     continue
                 filtered.append(ev)
             events = filtered
