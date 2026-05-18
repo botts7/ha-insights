@@ -179,7 +179,13 @@ def test_composite_matches_when_iot_class_is_none() -> None:
 def test_payload_keys_match_hand_built_dict() -> None:
     """The payload entries the composite emits must be IDENTICAL to
     what the detectors used to build by hand. If a key name or value
-    shape changes, the card / LLM / future consumers silently break."""
+    shape changes, the card / LLM / future consumers silently break.
+
+    v1.12.12: composite now also emits `_is_device_managed` (canonical
+    bool verdict) — verified separately in
+    test_payload_keys_includes_canonical_device_managed_field. The
+    three legacy assessment blocks must still match exactly.
+    """
     timestamps, nearby, durations = _make_inputs()
 
     # Hand-built
@@ -201,16 +207,31 @@ def test_payload_keys_match_hand_built_dict() -> None:
     )
     actual_keys = features.payload_keys()
 
-    # Exact equality — keys AND values
-    assert set(actual_keys) == set(expected_keys), (
-        f"key drift: extra={set(actual_keys) - set(expected_keys)}, "
-        f"missing={set(expected_keys) - set(actual_keys)}"
-    )
-    for k in expected_keys:
-        assert actual_keys[k] == expected_keys[k], (
-            f"value drift for {k}: expected={expected_keys[k]}, "
-            f"got={actual_keys[k]}"
+    # All hand-built keys must be present with identical values.
+    # Composite is allowed to add ADDITIONAL keys (v1.12.12 added
+    # `_is_device_managed`); they're covered by separate tests so
+    # this assertion can stay focused on the legacy contract.
+    for k, v in expected_keys.items():
+        assert k in actual_keys, f"missing key in composite: {k}"
+        assert actual_keys[k] == v, (
+            f"value drift for {k}: expected={v}, got={actual_keys[k]}"
         )
+
+
+def test_payload_keys_includes_canonical_device_managed_field() -> None:
+    """v1.12.12: composite must emit `_is_device_managed: bool` so the
+    card and Python filler-filter read one canonical verdict instead of
+    re-implementing the 6-signal rule in two languages."""
+    timestamps, nearby, durations = _make_inputs()
+    features = assess_human_likelihood(
+        timestamps=timestamps,
+        nearby_counts=nearby,
+        durations_seconds=durations,
+        iot_class="local_push",
+    )
+    keys = features.payload_keys()
+    assert "_is_device_managed" in keys
+    assert isinstance(keys["_is_device_managed"], bool)
 
 
 # ----- Shape contract -----
