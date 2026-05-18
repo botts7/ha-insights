@@ -674,8 +674,17 @@ async def run_all_detectors(
     # in Settings → Repairs alongside HA's standard issue notifications.
     # Idempotent — no-op when nothing changed. Errors are swallowed
     # inside sync_audit_issues so a Repairs failure can't break a scan.
+    #
+    # v1.13.1 also dual-emits high-confidence proposal-style insights
+    # (schedule / cooccurrence / stale_automation / etc.) gated by the
+    # OptionsFlow toggle CONF_EMIT_PROPOSALS_TO_REPAIRS (OFF by default).
     try:
-        from ..audit.repairs import sync_audit_issues
+        from ..audit.repairs import sync_audit_issues, sync_proposal_issues
+        from ..config_flow import (
+            CONF_EMIT_PROPOSALS_TO_REPAIRS,
+            DEFAULT_EMIT_PROPOSALS_TO_REPAIRS,
+        )
+        from ..const import DOMAIN
 
         current_insights = await store.list_insights(
             include_dismissed=False,
@@ -686,6 +695,25 @@ async def run_all_detectors(
             hass,
             [i for i in current_insights if i.detector == "automation_audit"],
         )
+        # Proposal-stream dual-emit. Opt-in per config entry — read
+        # the first entry's preference since the flag is install-wide.
+        emit_proposals = DEFAULT_EMIT_PROPOSALS_TO_REPAIRS
+        for entry in hass.config_entries.async_entries(DOMAIN):
+            emit_proposals = entry.options.get(
+                CONF_EMIT_PROPOSALS_TO_REPAIRS,
+                entry.data.get(
+                    CONF_EMIT_PROPOSALS_TO_REPAIRS,
+                    DEFAULT_EMIT_PROPOSALS_TO_REPAIRS,
+                ),
+            )
+            break
+        if emit_proposals:
+            sync_proposal_issues(hass, current_insights)
+        else:
+            # User flipped OFF — sweep any previously-emitted proposal
+            # rows so they don't linger in Settings → Repairs. Cheap
+            # idempotent call; no-op when nothing's there.
+            sync_proposal_issues(hass, [])
     except Exception as err:
         _LOGGER.debug("audit Repairs sync skipped: %s", err)
 

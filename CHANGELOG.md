@@ -4,6 +4,41 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+## [1.13.1] — 2026-05-19
+
+### Added — Dual-emit high-confidence proposals into HA Repairs
+
+Second competitive-gap closure. Extends the existing setup_quality →
+HA Repairs bridge (v1.2) to also surface high-confidence proposal-
+style insights — schedule, cooccurrence, streak, long_tail,
+state_shift, stale_automation, etc. — in **Settings → Repairs**.
+
+Closes the discoverability gap vs Spook: users who don't open the
+HA Insights panel still see the insights as standard HA issue
+notifications.
+
+**Opt-in via OptionsFlow** (default OFF — `CONF_EMIT_PROPOSALS_TO_REPAIRS`).
+Busy installs can produce dozens of high-confidence proposals per
+scan; defaulting OFF preserves Repairs as a high-signal surface
+until the user explicitly opts in.
+
+**Strict confidence floor: 0.85.** Audit findings keep their existing
+0.7 floor (deterministic) but proposals need a higher bar because
+they're inferential — a 0.7 schedule could still be coincidence from
+a short observation window.
+
+**Lifecycle:**
+- Per-scan reconciliation: create new, refresh existing, delete
+  obsolete. Idempotent — no-op when nothing changed.
+- Flipping the OptionsFlow toggle OFF triggers a sweep on the next
+  scan; previously-emitted proposal rows clear out.
+- Dismissing / applying an insight in our panel ALSO clears the
+  matching Repairs row (existing `clear_issue_for_insight` extended
+  to try both prefixes).
+
+Separate issue-id prefixes (`audit:` and `proposal:`) so the two
+streams don't collide and either can be swept independently.
+
 ## [1.13.0] — 2026-05-19
 
 ### Added — StaleAutomationDetector
