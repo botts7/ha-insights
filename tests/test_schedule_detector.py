@@ -26,6 +26,16 @@ def _ctx_with_buffer(buf: StateEventBuffer) -> DetectorContext:
     return DetectorContext(hass=MagicMock(), event_buffer=buf)
 
 
+# v1.14.12: anchor every fixture to a fixed Monday so the 14-day
+# window deterministically covers the same 10 weekdays at the same
+# jitter offsets. Without this, the schedule detector's mean
+# time-of-day rounds to 06:46 vs 06:47 depending on which weekdays
+# fall in [now-14d, now], and the test's "06:47" assertion fails
+# every few days. CI on main was red at 07:04 UTC for exactly this
+# flake when v1.14.11 happened to land on a friendly day-of-week.
+_FIXED_NOW = datetime(2026, 3, 9, 10, 0, 0, tzinfo=UTC)
+
+
 def _seed_weekday_routine(
     buf: StateEventBuffer,
     *,
@@ -97,7 +107,7 @@ async def test_empty_buffer_returns_empty() -> None:
 async def test_below_min_occurrences_returns_empty() -> None:
     """Fewer than 10 weekday hits should not produce an insight."""
     buf = StateEventBuffer()
-    _seed_weekday_routine(buf, days=7)  # only ~5 weekdays
+    _seed_weekday_routine(buf, days=7, end_now=_FIXED_NOW)  # only ~5 weekdays
     detector = ScheduleDetector()
     insights = await detector.scan(_ctx_with_buffer(buf))
     assert insights == []
@@ -106,7 +116,7 @@ async def test_below_min_occurrences_returns_empty() -> None:
 @pytest.mark.asyncio
 async def test_consistent_weekday_routine_produces_insight() -> None:
     buf = StateEventBuffer()
-    seeded = _seed_weekday_routine(buf, days=14)
+    seeded = _seed_weekday_routine(buf, days=14, end_now=_FIXED_NOW)
     assert seeded >= 10  # sanity: 14 days normally has >=10 weekdays
     detector = ScheduleDetector()
     insights = await detector.scan(_ctx_with_buffer(buf))
@@ -130,7 +140,7 @@ async def test_consistent_weekday_routine_produces_insight() -> None:
 @pytest.mark.asyncio
 async def test_insight_payload_is_valid_automation_shape() -> None:
     buf = StateEventBuffer()
-    _seed_weekday_routine(buf, days=14)
+    _seed_weekday_routine(buf, days=14, end_now=_FIXED_NOW)
     detector = ScheduleDetector()
     [insight] = await detector.scan(_ctx_with_buffer(buf))
 
@@ -251,7 +261,7 @@ async def test_non_enum_state_skipped() -> None:
 async def test_fingerprint_stable_across_scans() -> None:
     """The same routine seen twice produces the same insight id (dedup-friendly)."""
     buf = StateEventBuffer()
-    _seed_weekday_routine(buf, days=14)
+    _seed_weekday_routine(buf, days=14, end_now=_FIXED_NOW)
     detector = ScheduleDetector()
     [first] = await detector.scan(_ctx_with_buffer(buf))
     [second] = await detector.scan(_ctx_with_buffer(buf))

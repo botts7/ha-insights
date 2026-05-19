@@ -6,6 +6,23 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [1.14.12] — 2026-05-19
 
+### Fixed — schedule_detector test flake (day-of-week sensitive)
+
+`test_consistent_weekday_routine_produces_insight` and
+`test_insight_payload_is_valid_automation_shape` hard-coded
+`"06:47"` in their assertions, but the seed jitter pattern
+(`[30, -30, 15, -15, 0]` seconds) means the actual mean
+time-of-day depends on which weekdays fall in the 14-day window
+when CI runs. On unfriendly days the mean lands on 06:46:58 →
+rounds to "06:46" → test fails. CI on `main` was red at 07:04 UTC
+for exactly this flake the same day v1.14.11 happened to land on
+a friendly day-of-week.
+
+Fix: anchor all four `_seed_weekday_routine` call sites to a
+fixed Monday (`_FIXED_NOW = 2026-03-09 10:00 UTC`) via the
+helper's existing `end_now` parameter. Test now deterministic
+regardless of CI run time. No production code touched.
+
 ### Fixed — dev_audit event-buffer counter always reported 0
 
 Hardware validation showed `events_24h: 0`, `events_7d: 0`,
