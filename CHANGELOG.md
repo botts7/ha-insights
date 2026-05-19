@@ -4,6 +4,57 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+## [1.14.10] — 2026-05-19
+
+### Fixed — UnavailableDeviceFixIt recorder query cross-loop bug
+
+**Hardware-validation finding from v1.14.9 logs.** With visible
+logging in place, the actual error finally surfaced:
+
+```
+RuntimeError: Task got Future attached to a different loop
+```
+
+Detectors run inside `asyncio.run()` on a worker thread (per
+`detectors/__init__.py:_run_detector_in_thread`), which gives each
+detector its own event loop. But
+`recorder.async_add_executor_job(...)` schedules onto the
+recorder's executor and returns a `Future` bound to HA's **main**
+loop. Awaiting that Future from the worker's loop raises
+RuntimeError.
+
+This is the same architectural pattern as the v1.5.22
+`_load_iot_classes` deadlock fix.
+
+### The fix
+
+Standard HA cross-loop bridge:
+
+```python
+async def _on_main_loop():
+    return await recorder.async_add_executor_job(_query)
+
+cf_future = asyncio.run_coroutine_threadsafe(
+    _on_main_loop(), hass.loop
+)
+result = await asyncio.wrap_future(cf_future)
+```
+
+- Detects we're on a worker loop (via `asyncio.get_running_loop()`
+  vs `hass.loop`).
+- If we are: schedule the coroutine onto the main loop, await
+  via `asyncio.wrap_future` to convert the
+  `concurrent.futures.Future` back to an awaitable on our worker
+  loop.
+- If we're already on the main loop (tests, direct invocation):
+  just `await` directly.
+
+### Diagnostic logging stays
+
+The v1.14.9 INFO/WARNING lines remain — if anything still fails
+after the bridge, the user can see the new failure mode in HA
+logs without flipping debug flags.
+
 ## [1.14.9] — 2026-05-19
 
 ### Fixed — UnavailableDeviceFixIt recorder fallback was silently failing
