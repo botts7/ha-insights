@@ -4,6 +4,54 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+## [1.14.12] — 2026-05-19
+
+### Fixed — schedule_detector test flake (day-of-week sensitive)
+
+`test_consistent_weekday_routine_produces_insight` and
+`test_insight_payload_is_valid_automation_shape` hard-coded
+`"06:47"` in their assertions, but the seed jitter pattern
+(`[30, -30, 15, -15, 0]` seconds) means the actual mean
+time-of-day depends on which weekdays fall in the 14-day window
+when CI runs. On unfriendly days the mean lands on 06:46:58 →
+rounds to "06:46" → test fails. CI on `main` was red at 07:04 UTC
+for exactly this flake the same day v1.14.11 happened to land on
+a friendly day-of-week.
+
+Fix: anchor all four `_seed_weekday_routine` call sites to a
+fixed Monday (`_FIXED_NOW = 2026-03-09 10:00 UTC`) via the
+helper's existing `end_now` parameter. Test now deterministic
+regardless of CI run time. No production code touched.
+
+### Fixed — dev_audit event-buffer counter always reported 0
+
+Hardware validation showed `events_24h: 0`, `events_7d: 0`,
+`unique_entities: 0` across multiple dev_audits on a 3,378-entity
+install (with 78 integrations producing thousands of events/hour).
+The buffer wasn't empty — the *counter* was broken.
+
+`_build_event_buffer_signature` called `buffer.iter_events()`,
+which doesn't exist on `StateEventBuffer`. The resulting
+`AttributeError` was caught at DEBUG level and the counts silently
+stayed at zero.
+
+### The fix
+
+Use `buffer.snapshot()` (the canonical "give me every event" method
+that's been there since v0.1) and bump the exception logging from
+DEBUG to WARNING so future bugs are visible in HA's standard log
+view.
+
+### Impact
+
+This bug suppressed visibility into how busy the buffer actually is.
+With the counter fixed, the dev_audit will finally show real numbers
+and we can answer "is this detector silent because of no signal, or
+because of a bug?" accurately for buffer-dependent detectors
+(cooccurrence, schedule, frequency_anomaly, streak, seasonality,
+manual_habit, lagged_correlation, button_press_habit, long_tail,
+routine, presence_inference, ...).
+
 ## [1.14.11] — 2026-05-19
 
 ### Fixed — three dormant detector bugs surfaced by hardware validation

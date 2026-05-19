@@ -26,6 +26,22 @@ def _ctx_with_buffer(buf: StateEventBuffer) -> DetectorContext:
     return DetectorContext(hass=MagicMock(), event_buffer=buf)
 
 
+# v1.14.13: anchor every fixture to the MOST RECENT Monday so the
+# 14-day window deterministically covers the same 10 weekdays at the
+# same jitter offsets. v1.14.12 used a hard-coded date (2026-03-09)
+# but the detector's LOOKBACK_DAYS=14 cutoff filtered all events out
+# once that date drifted outside the window — every CI run after a
+# couple of weeks. A dynamic Monday is fresh AND day-of-week-stable.
+def _most_recent_monday_utc() -> datetime:
+    today = datetime.now(tz=UTC).replace(
+        hour=10, minute=0, second=0, microsecond=0,
+    )
+    return today - timedelta(days=today.weekday())
+
+
+_FIXED_NOW = _most_recent_monday_utc()
+
+
 def _seed_weekday_routine(
     buf: StateEventBuffer,
     *,
@@ -45,18 +61,30 @@ def _seed_weekday_routine(
     `.astimezone(UTC)` for buffer storage to mirror the production
     state_changed listener.
     """
-    end = end_now or dt_util.now()
+    # v1.14.13: localise `end` into HA's configured timezone BEFORE
+    # walking back the day offsets. The detector calls
+    # `dt_util.as_local(ev.timestamp).weekday()`, and the pytest-
+    # homeassistant-custom-component plugin sets
+    # `dt_util.DEFAULT_TIME_ZONE` to US/Pacific in CI. A fixture that
+    # builds `local_when` in UTC produces events whose local time is
+    # 22:47/23:47 the previous day — flipping weekday<->weekend, and
+    # putting the mean minute_of_day at 22:47 not 06:47. Both v1.14.12
+    # and v1.15.0 CI runs were red on this for exactly this reason.
+    end_raw = end_now or dt_util.now()
+    if end_raw.tzinfo is None:
+        end_raw = end_raw.replace(tzinfo=UTC)
+    tz = dt_util.DEFAULT_TIME_ZONE or UTC
+    end = end_raw.astimezone(tz)
     # v1.12.12: inject deterministic ±30-second jitter per day so the
-    # fixture stddev clears the new TIME_STDDEV_MIN_MIN (15s) gate.
-    # Real users firing a routine "at ~6:47" land between 6:46:30 and
-    # 6:47:30 across days; perfectly identical timestamps are the
-    # fingerprint of automation/device schedules and would be (correctly)
-    # suppressed by the detector under v1.12.12.
+    # fixture stddev clears the TIME_STDDEV_MIN_MIN (0.25 min ≈ 15s)
+    # gate. Real users firing a routine "at ~6:47" land between 6:46:30
+    # and 6:47:30 across days; perfectly identical timestamps are the
+    # fingerprint of automation/device schedules and would be
+    # (correctly) suppressed.
     #
-    # Pattern sums to 0 over each 5-day window so the AVERAGE second
-    # is exactly 0 — preserves existing "06:47" substring assertions
-    # regardless of which weekdays are sampled. Stddev across the
-    # pattern is ~21s, comfortably above the 15s gate.
+    # Pattern sums to 0 over each 5-day window so the AVERAGE second is
+    # exactly 0 — preserves existing "06:47" substring assertions
+    # regardless of which weekdays are sampled. Stddev ~21s clears 15s.
     second_jitter = [30, -30, 15, -15, 0]
     added = 0
     for offset in range(days):
@@ -97,7 +125,7 @@ async def test_empty_buffer_returns_empty() -> None:
 async def test_below_min_occurrences_returns_empty() -> None:
     """Fewer than 10 weekday hits should not produce an insight."""
     buf = StateEventBuffer()
-    _seed_weekday_routine(buf, days=7)  # only ~5 weekdays
+    _seed_weekday_routine(buf, days=7, end_now=_FIXED_NOW)  # only ~5 weekdays
     detector = ScheduleDetector()
     insights = await detector.scan(_ctx_with_buffer(buf))
     assert insights == []
@@ -106,7 +134,7 @@ async def test_below_min_occurrences_returns_empty() -> None:
 @pytest.mark.asyncio
 async def test_consistent_weekday_routine_produces_insight() -> None:
     buf = StateEventBuffer()
-    seeded = _seed_weekday_routine(buf, days=14)
+    seeded = _seed_weekday_routine(buf, days=14, end_now=_FIXED_NOW)
     assert seeded >= 10  # sanity: 14 days normally has >=10 weekdays
     detector = ScheduleDetector()
     insights = await detector.scan(_ctx_with_buffer(buf))
@@ -130,7 +158,7 @@ async def test_consistent_weekday_routine_produces_insight() -> None:
 @pytest.mark.asyncio
 async def test_insight_payload_is_valid_automation_shape() -> None:
     buf = StateEventBuffer()
-    _seed_weekday_routine(buf, days=14)
+    _seed_weekday_routine(buf, days=14, end_now=_FIXED_NOW)
     detector = ScheduleDetector()
     [insight] = await detector.scan(_ctx_with_buffer(buf))
 
@@ -251,7 +279,7 @@ async def test_non_enum_state_skipped() -> None:
 async def test_fingerprint_stable_across_scans() -> None:
     """The same routine seen twice produces the same insight id (dedup-friendly)."""
     buf = StateEventBuffer()
-    _seed_weekday_routine(buf, days=14)
+    _seed_weekday_routine(buf, days=14, end_now=_FIXED_NOW)
     detector = ScheduleDetector()
     [first] = await detector.scan(_ctx_with_buffer(buf))
     [second] = await detector.scan(_ctx_with_buffer(buf))
