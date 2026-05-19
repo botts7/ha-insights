@@ -4,6 +4,37 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+## [1.14.12] — 2026-05-19
+
+### Fixed — dev_audit event-buffer counter always reported 0
+
+Hardware validation showed `events_24h: 0`, `events_7d: 0`,
+`unique_entities: 0` across multiple dev_audits on a 3,378-entity
+install (with 78 integrations producing thousands of events/hour).
+The buffer wasn't empty — the *counter* was broken.
+
+`_build_event_buffer_signature` called `buffer.iter_events()`,
+which doesn't exist on `StateEventBuffer`. The resulting
+`AttributeError` was caught at DEBUG level and the counts silently
+stayed at zero.
+
+### The fix
+
+Use `buffer.snapshot()` (the canonical "give me every event" method
+that's been there since v0.1) and bump the exception logging from
+DEBUG to WARNING so future bugs are visible in HA's standard log
+view.
+
+### Impact
+
+This bug suppressed visibility into how busy the buffer actually is.
+With the counter fixed, the dev_audit will finally show real numbers
+and we can answer "is this detector silent because of no signal, or
+because of a bug?" accurately for buffer-dependent detectors
+(cooccurrence, schedule, frequency_anomaly, streak, seasonality,
+manual_habit, lagged_correlation, button_press_habit, long_tail,
+routine, presence_inference, ...).
+
 ## [1.14.11] — 2026-05-19
 
 ### Fixed — three dormant detector bugs surfaced by hardware validation

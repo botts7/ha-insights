@@ -223,8 +223,16 @@ def _build_event_buffer_signature(
     events_24h = 0
     events_7d = 0
     seen_entities: set[str] = set()
+    # v1.14.12: this previously called `buffer.iter_events()` which
+    # never existed on `StateEventBuffer`. The AttributeError was
+    # silently caught and the counts stayed at 0 forever — a 3,378-
+    # entity install with thousands of events/hour reported
+    # events_24h=0 across multiple dev_audits before we noticed.
+    # `snapshot()` returns the canonical tuple of all events;
+    # include_bootstrap=True equivalent by default (snapshot is
+    # unfiltered).
     try:
-        for ev in buffer.iter_events():
+        for ev in buffer.snapshot():
             seen_entities.add(ev.entity_id)
             ts = getattr(ev, "ts_utc", None) or getattr(ev, "timestamp", None)
             if ts is None:
@@ -234,7 +242,11 @@ def _build_event_buffer_signature(
             if ts >= cutoff_7d:
                 events_7d += 1
     except Exception as exc:
-        _LOGGER.debug("dev_audit: buffer iteration failed: %s", exc)
+        _LOGGER.warning(
+            "dev_audit: buffer iteration failed: %s. Counts will be "
+            "reported as zero but the buffer may have data.",
+            exc,
+        )
     return {
         "buffer_attached": True,
         "events_24h": events_24h,
