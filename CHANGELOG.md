@@ -4,6 +4,57 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+## [1.15.1] — 2026-05-19
+
+### Fixed — streak + weather_correlation 30 s timeouts on large installs
+
+User report on a 3,378-entity install:
+`HA Insights detector 'streak' exceeded 30s budget; skipping` +
+same for `weather_correlation`. Three occurrences across two
+detector cycles.
+
+Root cause: both detectors called
+`ctx.event_buffer.query(entity_id=X)` inside a per-group /
+per-entity loop. `StateEventBuffer.query` is a linear walk over the
+entire event deque, so the asymptotic cost was `O(groups × buffer)`
+or `O(habits × buffer)`. On a 3,378-entity install the buffer holds
+tens of thousands of events; multiply by hundreds of pattern groups
+or habit entities and the detector trips its 30-second budget.
+
+### The fix
+
+Pre-index the buffer **once** per detector run, then do dict
+lookups per group/entity instead of full re-scans.
+
+- `streak`: `scan()` now builds `events_by_entity` (per-entity
+  timelines) AND `all_events_sorted` / `all_ts_sorted` (time-sorted
+  index for the nearby-window co-occurrence calc) during the same
+  pass that discovers pattern groups. `_evaluate_group` accepts
+  these as kwargs and does `O(log N)` `bisect` lookups instead of
+  full buffer scans for the nearby-window and per-entity duration
+  passes. Falls back to the old `buffer.query` path when the indices
+  aren't passed in (preserves existing test interfaces).
+- `weather_correlation`: same pattern. `scan()` builds
+  `events_by_entity` once; `_build_daily_weather_context` and
+  `_evaluate_entity` take the prebuilt index instead of issuing
+  fresh `buffer.query(entity_id=...)` calls per call.
+
+Net effect on real installs: both detectors' inner loops drop from
+O(N × B) to O(N) where B = full buffer size. The user's reported
+30 s+ timeouts should disappear; on smaller installs the change is
+invisible.
+
+No behaviour change — same insights produced, same fingerprints,
+same payload shapes. The fallback path in `streak._evaluate_group`
+ensures existing unit tests that construct a detector + buffer
+directly (rather than going through `scan()`) keep working.
+
+### Files
+
+- `custom_components/ha_insights/detectors/streak.py`
+- `custom_components/ha_insights/detectors/weather_correlation.py`
+- `custom_components/ha_insights/manifest.json` (1.15.0 → 1.15.1)
+
 ### Deferred — work parked at 2026-05-19 session end
 
 These tasks are scoped but not yet started. Pick up in this order:

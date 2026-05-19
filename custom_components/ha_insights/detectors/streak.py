@@ -59,6 +59,18 @@ class StreakDetector(Detector):
 
         cutoff = datetime.now(tz=UTC) - timedelta(days=_LOOKBACK_DAYS)
         groups: dict[tuple[str, str], list[StateEvent]] = defaultdict(list)
+        # v1.15.1: build single-pass indices over the buffer during the
+        # group-discovery walk. The previous implementation called
+        # `ctx.event_buffer.query(entity_id=X, since=Y)` inside
+        # `_evaluate_group` for EVERY group, and StateEventBuffer.query
+        # is a linear scan over `self._events`. On a 3,378-entity
+        # install with thousands of pattern groups, that's millions of
+        # redundant iterations and trips the 30-second detector budget.
+        # Now we pay one walk over the buffer for both the group build
+        # AND the per-entity / time-sorted indices, then `_evaluate_group`
+        # does O(1) dict lookups + bisect.
+        events_by_entity: dict[str, list[StateEvent]] = defaultdict(list)
+        all_events_sorted: list[StateEvent] = []
         # v1.5.25: track the previous event timestamp per entity so we
         # can drop "post-long-silence" events — implicit poll wake-ups
         # that look like real transitions but are just the integration
@@ -66,6 +78,14 @@ class StreakDetector(Detector):
         # sleepy BLE devices, cloud-polled APIs.
         last_seen_at: dict[str, datetime] = {}
         for ev in ctx.event_buffer.query(since=cutoff):
+            # Index every (non-bootstrap) event in-window — used by
+            # `_evaluate_group` for the per-entity duration + the
+            # nearby-window scans. Includes events that fail the
+            # candidate check below, since duration/nearby calcs care
+            # about the raw stream not the filtered groups.
+            if not ev.from_bootstrap:
+                events_by_entity[ev.entity_id].append(ev)
+                all_events_sorted.append(ev)
             prior_ts = last_seen_at.get(ev.entity_id)
             last_seen_at[ev.entity_id] = ev.timestamp
             if (
@@ -88,11 +108,22 @@ class StreakDetector(Detector):
                 continue
             groups[(ev.entity_id, value)].append(ev)
 
+        # Buffer is already roughly chronological; sort defensively in
+        # case of out-of-order arrivals.
+        all_events_sorted.sort(key=lambda ev: ev.timestamp)
+        # Parallel timestamp list for bisect-based window queries.
+        all_ts_sorted = [ev.timestamp for ev in all_events_sorted]
+
         insights: list[Insight] = []
         for (entity_id, new_state), events in groups.items():
             # v1.5.26: pass ctx through so the per-group evaluator can
             # query HA's astral data for sun-relative trigger detection.
-            insight = self._evaluate_group(entity_id, new_state, events, ctx)
+            insight = self._evaluate_group(
+                entity_id, new_state, events, ctx,
+                events_by_entity=events_by_entity,
+                all_events_sorted=all_events_sorted,
+                all_ts_sorted=all_ts_sorted,
+            )
             if insight is not None:
                 insights.append(insight)
         return insights
@@ -135,6 +166,10 @@ class StreakDetector(Detector):
         new_state: str,
         events: list[StateEvent],
         ctx: DetectorContext,
+        *,
+        events_by_entity: dict[str, list[StateEvent]] | None = None,
+        all_events_sorted: list[StateEvent] | None = None,
+        all_ts_sorted: list[datetime] | None = None,
     ) -> Insight | None:
         # All time-of-day arithmetic happens in HA-LOCAL time. Buffer
         # timestamps are UTC; using .date()/.hour/.minute on them
@@ -235,25 +270,47 @@ class StreakDetector(Detector):
             from bisect import bisect_right as _br
 
             window = timedelta(seconds=COOCC_WINDOW)
+            # v1.15.1: use the time-sorted index built by scan() once
+            # instead of re-scanning the buffer per streak day. Bisect
+            # gives O(log N) bounds for the window, the inner loop
+            # walks only the matched slice. Fall back to per-call
+            # buffer.query when the index wasn't passed in (legacy /
+            # direct unit-test call paths).
             for ts_local in streak_times_local:
                 hits = 0
                 distinct: set[str] = set()
-                for other in ctx.event_buffer.query(
-                    since=ts_local - window,
-                    until=ts_local + window,
-                ):
-                    if other.entity_id != entity_id:
-                        hits += 1
-                        distinct.add(other.entity_id)
+                if all_events_sorted is not None and all_ts_sorted is not None:
+                    lo = _bl(all_ts_sorted, ts_local - window)
+                    hi = _br(all_ts_sorted, ts_local + window)
+                    for other in all_events_sorted[lo:hi]:
+                        if other.entity_id != entity_id:
+                            hits += 1
+                            distinct.add(other.entity_id)
+                else:
+                    for other in ctx.event_buffer.query(
+                        since=ts_local - window,
+                        until=ts_local + window,
+                    ):
+                        if other.entity_id != entity_id:
+                            hits += 1
+                            distinct.add(other.entity_id)
                 nearby_counts.append(hits)
                 distinct_entity_counts.append(len(distinct))
-            all_for_entity = sorted(
-                (
-                    ev for ev in ctx.event_buffer.query(entity_id=entity_id)
-                    if not ev.from_bootstrap
-                ),
-                key=lambda ev: ev.timestamp,
-            )
+            # v1.15.1: per-entity timeline from the prebuilt index when
+            # available — saves a full O(buffer_size) re-scan that used
+            # to fire per group. List is already chronological from
+            # the scan() walk; copy + sort defensively only for the
+            # fallback path.
+            if events_by_entity is not None:
+                all_for_entity = events_by_entity.get(entity_id, [])
+            else:
+                all_for_entity = sorted(
+                    (
+                        ev for ev in ctx.event_buffer.query(entity_id=entity_id)
+                        if not ev.from_bootstrap
+                    ),
+                    key=lambda ev: ev.timestamp,
+                )
             ts_list = [ev.timestamp for ev in all_for_entity]
             # v1.5.39: both directions — see schedule.py for rationale.
             for d in longest_run:
