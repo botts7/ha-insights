@@ -4,6 +4,77 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+## [1.14.3] — 2026-05-19
+
+### Added — `lib/user_verdict_history.py` (Step A of v1.14.3)
+
+New pure-function lib providing the **timeline** abstraction over
+user verdicts (apply / dismiss / retire / snooze / undo). Today's
+`InsightStore` tracks only the *current* verdict state — each
+verdict overwrites its predecessor. This lib defines the data model
++ comparison primitives for a verdict timeline plus an
+**environmental fingerprint** captured at the moment of each verdict.
+
+#### Why
+
+Foundation for:
+
+  - **v1.14.4 AdaptiveFeedbackDetector** — re-suggest patterns the
+    user previously dismissed when the environmental context changes
+    (deleted automation, new sensor, new integration).
+  - **v2.0 per-person presence** — needs verdict history per pattern
+    so each resident's apply-rate can tracked.
+
+#### What's in it
+
+  - `VerdictKind` enum — `APPLY` / `DISMISS` / `RETIRE` / `UNRETIRE` /
+    `SNOOZE` / `UNDO` / `CLEAR_APPLIED`. Matches the existing
+    `InsightStore` event names so callers pass them through.
+  - `EnvironmentalFingerprint` — frozen dataclass with
+    `automation_ids` / `sensors_per_area` / `active_integrations`.
+    Hashable (custom `__hash__` because dict fields make it
+    non-hashable by default). ~200 bytes after JSON serialization.
+  - `Verdict` / `VerdictHistory` — frozen dataclasses representing
+    one verdict and a per-insight timeline of verdicts respectively.
+    `VerdictHistory.__post_init__` enforces ascending-timestamp
+    invariant.
+  - `diff_fingerprints(old, new)` — pure `(old → new)` delta
+    computation. Returns `FingerprintDelta` with `automations_added` /
+    `automations_removed` / `sensors_added_per_area` /
+    `sensors_removed_per_area` / `integrations_added` /
+    `integrations_removed`.
+  - `FingerprintDelta.is_substantial` — heuristic: any automation
+    change, any new sensor, or any new integration. Removed sensors
+    and removed integrations alone don't qualify.
+  - `should_re_suggest(history, current, *, now)` — the
+    AdaptiveFeedback decision. Rules:
+      1. There must be a negative verdict (DISMISS or RETIRE).
+      2. The MOST RECENT verdict must still be negative.
+      3. Fingerprint delta must be substantial.
+      4. 30-day cooldown since the last verdict.
+      5. RETIRE has a higher bar: only `automation_removed` can
+         override (user explicitly took action suggesting their
+         original reasoning changed).
+  - `apply_rate` / `dismiss_rate` — for detector-quality penalty
+    system. `dismiss_rate` excludes retires from the denominator
+    (retire = permanent no, distinct signal from "not now").
+
+#### Architecture
+
+  - Pure stdlib + dataclasses; **no HA imports, no DB imports**.
+  - Same pattern as `lib/changepoint_detection.py`,
+    `lib/transfer_entropy.py`, `lib/coupling_strength.py`.
+  - 31 unit tests covering edge cases (timestamp ordering, cooldown,
+    retire-vs-dismiss bar, mixed verdict timelines).
+
+#### Roadmap
+
+Step B (v1.14.4) wires it up: SQLite migration for a `verdict_history`
+table, hook into the existing `ws_dismiss` / `ws_retire` / `ws_apply`
+handlers to capture the fingerprint, build the
+`AdaptiveFeedbackDetector` that reads histories and decides which
+dismissed patterns are worth re-surfacing.
+
 ## [1.14.2] — 2026-05-19
 
 ### Added — HardwareSuggestionDetector
