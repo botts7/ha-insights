@@ -4,6 +4,49 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+## [1.21.0] — 2026-05-19
+
+### Added — `home_insights/wifi_find_self` WS handler (Wi-Fi walking find)
+
+The backend half of inverse-multilateration walking-find for
+Wi-Fi devices. Pairs with find-my-ha v0.6.x for the PWA-side UX.
+
+**The flip.** `lib/ble_capability.py` correctly notes Wi-Fi RSSI
+is device→AP, not phone→device — browsers can't read the target
+device's signal directly. So we flip the problem: the **APs**
+measure the **phone** as it walks, and v1.18's `device→AP`
+inference tells us which AP the target device lives near. The
+phone's RSSI to THAT AP is the warmer/colder signal.
+
+**Handler:** `home_insights/wifi_find_self`
+- Admin-gated (phone-location data is sensitive).
+- Args: `entity_id` (phone tracker), optional `target_ap_device_id`
+  (from v1.18 WifiFindDetector inference).
+- Subscribes to state changes for the phone entity. Each change
+  carries new AP attribute + RSSI value. Forwards as `event` msgs
+  with raw + EMA-smoothed RSSI, AP device_id, friendly name, plus
+  an `ap_matches_target` flag the PWA uses for warmer/colder copy.
+- Reuses `apply_rssi_ema` from `ws_api/ble_find.py` so card-side
+  smoothing is consistent across BLE and Wi-Fi find paths.
+- Sends an initial result with the phone's CURRENT readings so the
+  PWA has data immediately (UniFi's ~30 s poll cadence would
+  otherwise leave the UI blank on first subscribe).
+
+**Cadence trade-off.** UniFi controllers poll per-client signal
+every ~30 s by default (configurable to ~10 s on UDM); Asuswrt
+fires state-changed events from the router. That's slower than
+BLE's ~1 Hz advertisement rate, so the warmer/colder arrow
+updates every 10-30 s rather than continuously. EMA smoothing
+hides the worst of the noise; the PWA renders a freshness pill
+("last update 12 s ago") so users don't think it's broken.
+
+**Coverage.** Same as v1.18.0 capability lib — UniFi, Asuswrt,
+Omada, generic 802.11, ESPHome Wi-Fi quality.
+
+Tests: 6 cases covering subscribe-with-trackable / not-trackable /
+missing / malformed entity_ids, state-change event forwarding,
+target-AP match flag.
+
 ## [1.18.0] — 2026-05-19
 
 ### Added — WifiFindDetector (passive location inference)

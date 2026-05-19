@@ -64,6 +64,7 @@ from .refine import (
     ws_refine_automation,
     ws_refine_cost_estimate,
 )
+from .wifi_find_self import ws_wifi_find_self
 
 # Re-export for any external consumer that's reaching into ws_api
 # for these helpers. New code should import from `._helpers` directly.
@@ -92,6 +93,7 @@ __all__ = [
     "ws_refine_automation",
     "ws_refine_cost_estimate",
     "ws_set_device_managed",
+    "ws_wifi_find_self",
 ]
 
 _LOGGER = logging.getLogger(__name__)
@@ -320,6 +322,10 @@ def async_register(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_companion_scan_subscribe)
     websocket_api.async_register_command(hass, ws_companion_scan_sample)
     websocket_api.async_register_command(hass, ws_companion_scan_unsubscribe)
+    # v1.21.0 Wi-Fi inverse-multilateration walking-find. Streams the
+    # phone's per-AP RSSI as state changes; PWA renders warmer/colder
+    # for non-BLE Wi-Fi-trackable devices. Admin-gated.
+    websocket_api.async_register_command(hass, ws_wifi_find_self)
 
 
 # Helpers _get_store / _get_buffer / _audit_attempts /
