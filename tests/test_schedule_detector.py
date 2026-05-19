@@ -26,14 +26,20 @@ def _ctx_with_buffer(buf: StateEventBuffer) -> DetectorContext:
     return DetectorContext(hass=MagicMock(), event_buffer=buf)
 
 
-# v1.14.12: anchor every fixture to a fixed Monday so the 14-day
-# window deterministically covers the same 10 weekdays at the same
-# jitter offsets. Without this, the schedule detector's mean
-# time-of-day rounds to 06:46 vs 06:47 depending on which weekdays
-# fall in [now-14d, now], and the test's "06:47" assertion fails
-# every few days. CI on main was red at 07:04 UTC for exactly this
-# flake when v1.14.11 happened to land on a friendly day-of-week.
-_FIXED_NOW = datetime(2026, 3, 9, 10, 0, 0, tzinfo=UTC)
+# v1.14.13: anchor every fixture to the MOST RECENT Monday so the
+# 14-day window deterministically covers the same 10 weekdays at the
+# same jitter offsets. v1.14.12 used a hard-coded date (2026-03-09)
+# but the detector's LOOKBACK_DAYS=14 cutoff filtered all events out
+# once that date drifted outside the window — every CI run after a
+# couple of weeks. A dynamic Monday is fresh AND day-of-week-stable.
+def _most_recent_monday_utc() -> datetime:
+    today = datetime.now(tz=UTC).replace(
+        hour=10, minute=0, second=0, microsecond=0,
+    )
+    return today - timedelta(days=today.weekday())
+
+
+_FIXED_NOW = _most_recent_monday_utc()
 
 
 def _seed_weekday_routine(
