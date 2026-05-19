@@ -197,7 +197,14 @@ def _device_class_areas(
     e_reg = er.async_get(ctx.hass)
     a_reg = ar.async_get(ctx.hass)
     areas_with = set()
-    all_areas = {a.area_id for a in a_reg.async_list_areas()}
+    # v1.14.11: HA renamed `AreaEntry.area_id` → `AreaEntry.id`.
+    # Tolerate both via getattr so we don't break on either side
+    # of the rename.
+    all_areas = {
+        getattr(a, "id", None) or getattr(a, "area_id", None)
+        for a in a_reg.async_list_areas()
+    }
+    all_areas.discard(None)
     for ent in e_reg.entities.values():
         if ent.disabled_by or ent.hidden_by:
             continue
