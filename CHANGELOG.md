@@ -4,6 +4,53 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+## [1.18.0] — 2026-05-19
+
+### Added — WifiFindDetector (passive location inference)
+
+The v1.18 entry in the "find my device" series. Sibling to v1.11.5
+LocationProposalDetector (spatial-correlation area inference) and
+v1.12.0 BLE live-find (walking warmer/colder).
+
+**What it does.** For each `device_tracker.*` entity with a
+recognised Wi-Fi signal-strength attribute (`rx_rssi`,
+`signal_strength`, `signal`, …) and an AP-identifier attribute
+(`ap_mac`, `bssid`, `host`, …), the detector cross-references the
+AP it's currently associated with against that AP's `area_id` in
+the device registry. When the device's current area doesn't match
+the AP's area (or the device has no area assigned), the detector
+emits a PATTERN_OBSERVATION proposing the AP's area as a likely
+location.
+
+**What it does NOT do.** Wi-Fi RSSI is device→AP, so this isn't
+walking-around find — that lives in BLE land. Think of it as
+"where was this last seen" / "where does it usually live" rather
+than the metal-detector UX.
+
+**Confidence curve** (single-snapshot, capped at 0.80):
+- ≥ -50 dBm → 0.80 (very close — same room)
+- ≥ -65 dBm → 0.60 (probably same area)
+- ≥ -75 dBm → 0.45 (could be adjacent area)
+- < -75 dBm → skip (too weak to act on)
+
+**Safety guards:**
+- Single-AP installs skipped (would propose same area for everything).
+- Already-correctly-assigned entities silent (no "confirmed" noise).
+- Hard cap: 10 insights per scan.
+- Never auto-applies — advisory only, opens bulk-area-assign on tap.
+
+**Integration coverage.** UniFi (`rx_rssi` + `ap_mac`), Asuswrt
+(`signal` + `host`), generic 802.11 (`rssi` + `bssid`), TP-Link
+Omada, ESPHome Wi-Fi quality.
+
+**Maturity: BETA.** Real-install calibration needed for the
+signal→confidence curve; recorder-based "consistent for ≥ 24 h"
+upgrade slated for v1.18.x.
+
+Companion lib `lib/wifi_find_capability.py` provides the pure
+capability function the WS layer will consume in v1.18.x for the
+card-side "Find via Wi-Fi" button.
+
 ## [1.15.2] — 2026-05-19
 
 ### Changed — bundle card v1.10.15 panel.js (a11y polish)
