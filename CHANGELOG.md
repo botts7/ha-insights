@@ -4,6 +4,52 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+## [1.14.1] — 2026-05-19
+
+### Added — RebootLoopDetector
+
+New EXPERIMENTAL detector pairs with v1.14.0 `UnavailableDeviceFixIt`
+on the connectivity-health side. Flags entities whose `→ unavailable`
+transitions over the last 7 days form a **regular** cadence —
+small coefficient of variation in inter-arrival times — which
+signals a **config-driven reboot loop** (power-cycle schedule,
+watchdog timer, weak-mesh re-routing) rather than random outages.
+
+### The statistical test
+
+Coefficient of variation (CV = stddev / mean) of gaps between
+consecutive `→ unavailable` transitions:
+
+  - CV ≥ 0.30: too random → skip
+  - CV 0.20–0.30: moderately regular → 0.65
+  - CV 0.10–0.20: clearly regular → 0.80
+  - CV  < 0.10: tightly regular → 0.92
+
+Two sanity gates:
+  - **≥5 transitions** in the 7-day window (CV unreliable below this)
+  - **Median gap <48 h** (>48 h is intentional weekly maintenance, not a loop)
+
+### Suggested actions
+
+Loop-specific (distinct from v1.14.0's stuck-device guidance):
+power-cycle schedule check, watchdog/keepalive inspection,
+Zigbee/Z-Wave mesh signal-strength check, integration-log grep,
+ESPHome/Shelly/Tasmota firmware update.
+
+### Forward-look
+
+v1.15+ can run [[lib/changepoint_detection]] on the rolling CV to
+detect *when* a reboot loop began (config-change attribution, not
+just current-state).
+
+### Notes
+
+Defensive `isinstance(..., str)` guards on `entity_entry.disabled_by` /
+`hidden_by` to reject MagicMock proxies in tests while still
+correctly skipping real user-disabled entities (HA's
+`RegistryEntryDisabler` is a StrEnum). Same defensive pattern as
+`physical_device_link.py`.
+
 ## [1.14.0] — 2026-05-19
 
 ### Added — UnavailableDeviceFixItDetector
