@@ -6,7 +6,7 @@ Never edit a previously-shipped migration.
 """
 from __future__ import annotations
 
-CURRENT_VERSION = 5
+CURRENT_VERSION = 6
 
 MIGRATIONS: dict[int, str] = {
     1: """
@@ -161,5 +161,40 @@ MIGRATIONS: dict[int, str] = {
     ALTER TABLE insights ADD COLUMN retired_at REAL;
 
     INSERT OR REPLACE INTO schema_version (version) VALUES (5);
+    """,
+    # v1.14.3/v1.14.4 — Verdict history. Today's verdict fields on
+    # `insights` (`dismissed_at`, `retired_at`, `applied_at`,
+    # `snoozed_until`) track only the CURRENT state. Each verdict
+    # overwrites its predecessor, so we can't ask "was this dismissed
+    # 3 months ago, re-suggested when context changed, then applied
+    # last week?" This table is the timeline.
+    #
+    # Each row is one verdict event with the EnvironmentalFingerprint
+    # captured at verdict time (automation_ids + sensors_per_area +
+    # active_integrations, serialized as JSON). v1.14.4
+    # AdaptiveFeedbackDetector reads these to decide which previously-
+    # dismissed insights to re-surface when the environment changes.
+    # v2.0 per-person presence will read per-user apply-rates from
+    # the same table.
+    #
+    # FK CASCADE: deleting an insight wipes its verdict history.
+    # No reason to retain orphan histories — the only consumer is
+    # AdaptiveFeedback which keys on insight_id.
+    6: """
+    CREATE TABLE IF NOT EXISTS verdict_history (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        insight_id TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        timestamp REAL NOT NULL,
+        fingerprint_json TEXT NOT NULL,
+        user_id_hash TEXT,
+        FOREIGN KEY (insight_id) REFERENCES insights(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS ix_verdict_history_insight
+        ON verdict_history(insight_id);
+    CREATE INDEX IF NOT EXISTS ix_verdict_history_ts
+        ON verdict_history(timestamp);
+
+    INSERT OR REPLACE INTO schema_version (version) VALUES (6);
     """,
 }

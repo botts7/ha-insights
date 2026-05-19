@@ -4,6 +4,81 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+## [1.14.4] — 2026-05-19
+
+### Added — verdict-history persistence (Step B of v1.14.3)
+
+Persistence layer for the v1.14.3 verdict timeline. Adds the
+SQLite `verdict_history` table + three new `InsightStore` methods:
+
+  - `record_verdict(insight_id, kind, fingerprint, *, when, user_id_hash)`
+    — append one verdict event. `kind` is a `VerdictKind` value;
+    `fingerprint` is the JSON-serializable dict form of an
+    `EnvironmentalFingerprint` (the store stays JSON-free of the
+    lib so the lib stays import-free of the store).
+  - `get_verdict_history(insight_id)` — read a single insight's
+    timeline, ascending by timestamp. Returns plain dicts so the
+    store keeps no dependency on the lib types; consumers hydrate
+    into `Verdict` / `VerdictHistory` as needed.
+  - `get_all_verdict_histories()` — bulk read for the detector
+    pass, keyed by insight_id.
+
+### Schema migration 6
+
+```sql
+CREATE TABLE verdict_history (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  insight_id TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  timestamp REAL NOT NULL,
+  fingerprint_json TEXT NOT NULL,
+  user_id_hash TEXT,
+  FOREIGN KEY (insight_id) REFERENCES insights(id) ON DELETE CASCADE
+);
+CREATE INDEX ix_verdict_history_insight ON verdict_history(insight_id);
+CREATE INDEX ix_verdict_history_ts ON verdict_history(timestamp);
+```
+
+`fingerprint_json` is written with `sort_keys=True` so two
+semantically-equal fingerprints serialize identically (useful for
+diff-by-text in dumps).
+
+FK CASCADE is declared but not enforced — the existing store
+doesn't enable `PRAGMA foreign_keys=ON`. v1.14.4c can revisit if
+orphan rows become a concern; for now the test documents the
+behaviour.
+
+### Why a separate table
+
+The existing verdict columns on `insights` (`dismissed_at`,
+`retired_at`, `applied_at`, `snoozed_until`) track only the
+*current* state. They get overwritten on each verdict transition.
+The append-only `verdict_history` table is the timeline — required
+for the [[ha_insights_v2_presence_and_adaptive]] AdaptiveFeedback
+re-suggest logic and v2.0 per-person apply-rate stats.
+
+### Tests
+
+11 unit tests covering migration application, schema version,
+record + read round-trip, ordering, user_id_hash, nested-dict
+fingerprint serialization, bulk read grouping, append-only
+semantics, idempotent re-open, deterministic JSON serialization.
+
+Smoke-tested locally against a real SQLite file: schema version
+6 applied cleanly, 3 verdicts out-of-order insertion → read back
+in ascending order, bulk-read groups correctly, idempotent
+re-open preserves data.
+
+### Up next
+
+**Step C (v1.14.5):** the consumers.
+  - Hook `ws_dismiss` / `ws_retire` / `ws_apply` / `ws_undo` to
+    capture an `EnvironmentalFingerprint` and call `record_verdict`.
+  - Build `detectors/adaptive_feedback.py` consuming
+    `get_all_verdict_histories` + the lib's `should_re_suggest`.
+  - Wire `apply_rate` penalty into detector-quality scoring so
+    detectors with chronically-rejected suggestions get demoted.
+
 ## [1.14.3] — 2026-05-19
 
 ### Added — `lib/user_verdict_history.py` (Step A of v1.14.3)
