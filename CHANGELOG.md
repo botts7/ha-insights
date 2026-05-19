@@ -4,6 +4,49 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+### Deferred — work parked at 2026-05-19 session end
+
+These tasks are scoped but not yet started. Pick up in this order:
+
+1. **v1.15.1 — streak + weather_correlation 30s timeout fix.** User
+   reported on real install (3,378-entity, 78 integrations):
+   `HA Insights detector 'streak' exceeded 30s budget; skipping` +
+   same for `weather_correlation`. Same class as the v1.14.8/v1.14.10
+   `unavailable_device_fixit` recorder fix — unbounded loop or query
+   too big for the 30s detector budget. Fix pattern: chunk the
+   recorder query, add the worker-loop → main-loop bridge via
+   `asyncio.run_coroutine_threadsafe` + `asyncio.wrap_future`. Read
+   `detectors/streak.py` + `detectors/weather_correlation.py`; reference
+   commit `af62aaf` (v1.14.10) for the bridge pattern.
+2. **v1.18 — WifiFindDetector.** Server-side Wi-Fi RSSI find via
+   UniFi `device.rx_rssi` / Asuswrt / OPNsense / OpenWrt integration
+   data. Multilateral against known AP positions to infer device
+   area. No PWA changes — phones can't read client Wi-Fi RSSI.
+3. **v1.19 — ZigbeeFindDetector.** Server-side Zigbee LQI find from
+   Z2M MQTT `lqi` attr or ZHA `last_seen_lqi`. Router with highest
+   LQI = closest scanner. Infer device area from that router's area.
+4. **v1.20 — ZWaveFindDetector.** Z-Wave JS exposes `rssi` for
+   last-talked-to controller. Same shape as Wi-Fi/Zigbee variants.
+
+Roadmap context in memory:
+`ha_insights_multi_radio_find_roadmap.md` — why these are all
+server-side (phone radios can't reach Wi-Fi/Zigbee/Z-Wave). Each
+defers until BLE find (v1.10–v1.15) proves valuable on real installs.
+
+### Cross-cutting — find-my-ha PWA integration
+
+v1.15.0's `companion_scan_stream` WS handler is shipped. Future PWA
+work that will need server-side awareness:
+
+- **PWA v0.6 capability-based filter + identify endpoint reuse**:
+  PWA will call `home_insights/identify` (v1.10.12 vendor-aware)
+  when present, fall back to `light.toggle` otherwise. No HA-side
+  changes needed — endpoint already exists. PWA work tracked in
+  `find-my-ha` repo, not here.
+- **PWA v0.6 Touch-test for sensors**: PWA subscribes to entity
+  state changes for sensors via `subscribe_trigger`. HA core
+  feature; no integration-side changes needed.
+
 ## [1.15.0] — 2026-05-19
 
 ### Added — `companion_scan_stream` WS handler family (experimental)
