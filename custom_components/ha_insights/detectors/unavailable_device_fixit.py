@@ -51,6 +51,7 @@ companion app stopped reporting, which IS actionable.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
@@ -515,8 +516,37 @@ async def _recorder_unavailable_since(
                 )
                 return None
 
+        # v1.14.10: detectors run inside `asyncio.run()` on a worker
+        # thread (per detectors/__init__.py:_run_detector_in_thread).
+        # That worker has its OWN event loop. `recorder.async_add_
+        # executor_job(...)` schedules onto the recorder's executor and
+        # returns a Future bound to HA's MAIN loop — awaiting that
+        # Future from the worker's loop raises `RuntimeError: got
+        # Future attached to a different loop`. v1.14.9 deployed and
+        # hit this on a real install (5/5 batches failed to schedule).
+        #
+        # Fix: schedule the coroutine on HA's main loop via
+        # `run_coroutine_threadsafe`, then `asyncio.wrap_future` to
+        # convert the resulting concurrent.futures.Future into one
+        # awaitable on the WORKER loop. Standard HA cross-loop bridge.
         try:
-            result = await recorder.async_add_executor_job(_query)
+            current_loop = asyncio.get_running_loop()
+            main_loop = hass.loop  # the recorder's loop
+            if current_loop is main_loop:
+                # Already on the main loop (e.g. unit tests, direct
+                # invocation) — no bridge needed.
+                result = await recorder.async_add_executor_job(_query)
+            else:
+                # We're on a worker loop. Bridge: schedule the
+                # executor call ON the main loop, return a Future
+                # we can await here.
+                async def _on_main_loop() -> dict[str, list] | None:
+                    return await recorder.async_add_executor_job(_query)
+
+                cf_future = asyncio.run_coroutine_threadsafe(
+                    _on_main_loop(), main_loop
+                )
+                result = await asyncio.wrap_future(cf_future)
         except Exception:
             _LOGGER.warning(
                 "unavailable_device_fixit: failed to schedule recorder "
