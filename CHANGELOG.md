@@ -4,6 +4,69 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+## [1.14.9] — 2026-05-19
+
+### Fixed — UnavailableDeviceFixIt recorder fallback was silently failing
+
+**Hardware-validation follow-up.** v1.14.8 added a recorder fallback,
+but on the 3,378-entity install with 1,603 unavailable entities the
+detector still emitted **zero** insights. The single bulk
+`get_significant_states` call was failing silently (caught
+exception at DEBUG level → invisible).
+
+### Two-part fix
+
+**1. Chunked recorder query.** Suspect entity_ids are split into
+batches of **200** per `get_significant_states` call rather than
+one giant call. Each batch stays under ~1-2 seconds on a typical
+install; up to ~15 batches fit in the 30-second per-detector budget.
+Avoids both SQLite parameter-limit risk and recorder-query-timeout
+on big installs.
+
+**2. Verbose, visible logging.** The recorder helper now logs at
+**INFO/WARNING** rather than DEBUG, so future failures are
+diagnosable from HA's standard log view without flipping per-
+component debug flags:
+
+  - `INFO` — "querying recorder for N suspect entities in M batch(es)"
+  - `INFO` — "query complete — A/B batches successful, R rows
+    scanned, E entities resolved (F will fall back to live)"
+  - `WARNING` — per-batch query failures with batch index +
+    entity count + error message
+  - `WARNING` — "X/N recorder batches FAILED" summary
+  - `INFO` — "recorder component unavailable; skipping recorder
+    fallback" (when integration loaded without recorder)
+  - `WARNING` — "could not acquire recorder instance"
+
+### Defensive
+
+  - Ruff B023 fix: inner `_query` closure binds `batch_eids` and
+    `idx_label` as default args rather than capturing the loop
+    variable.
+  - Failed batches don't abort the scan; the helper still returns
+    whatever successful batches produced.
+  - Partial success: 9 of 10 batches working still yields the
+    resolved 9 batches' worth of insights.
+
+### How to read the new logs (for hardware re-validation)
+
+After v1.14.9 + restart + one scan, search HA logs for
+`unavailable_device_fixit`. Expected pattern:
+
+```
+INFO  unavailable_device_fixit: querying recorder for 1603 suspect
+      entities in 9 batch(es), window=14d
+INFO  unavailable_device_fixit: recorder query complete — 9/9 batches
+      successful, 12000 total rows scanned, 1200 entities resolved
+      (403 will fall back to live last_changed)
+INFO  UnavailableDeviceFixItDetector emitted 1200 insights
+      (1603 suspect entities resolved via recorder)
+```
+
+If you see `WARNING ... query failed for batch N/M: <error>`, that's
+the next diagnostic — paste the error and we'll fix the underlying
+recorder issue.
+
 ## [1.14.8] — 2026-05-19
 
 ### Fixed — UnavailableDeviceFixIt missed post-restart entities
