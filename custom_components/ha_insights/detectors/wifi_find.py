@@ -283,7 +283,11 @@ class WifiFindDetector(Detector):
         try:
             from homeassistant.helpers import (
                 area_registry as ar,
+            )
+            from homeassistant.helpers import (
                 device_registry as dr,
+            )
+            from homeassistant.helpers import (
                 entity_registry as er,
             )
         except ImportError:

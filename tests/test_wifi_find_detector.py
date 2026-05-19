@@ -12,7 +12,6 @@ import pytest
 from custom_components.ha_insights.detectors.wifi_find import (
     WifiFindDetector,
     WifiFindEntityFacts,
-    WifiFindInference,
     _infer_locations,
     _resolve_ap,
 )
