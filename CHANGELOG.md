@@ -4,6 +4,37 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+## [1.14.11] — 2026-05-19
+
+### Fixed — three dormant detector bugs surfaced by hardware validation
+
+The verbose logging from v1.14.9 exposed multiple silently-failing
+detectors on a 3,378-entity install. Three are HA-API drift bugs;
+all three result in zero output from the affected detector
+(swallowed by `run_all_detectors`'s per-detector exception handler).
+
+  - **`setup_quality`**: `AreaEntry.area_id` → `AreaEntry.id` (HA
+    renamed). Now uses `getattr(a, "id", None) or getattr(a,
+    "area_id", None)` so installs on either side of the rename
+    keep working.
+  - **`physical_device_link`**: `device.identifiers` /
+    `device.connections` tuples are no longer guaranteed to be
+    2-element. Some integrations now emit 3+ element tuples with
+    extra metadata. Replaced `for ct, cv in (...)` with explicit
+    `len(conn) < 2` skip + index access — tolerant of any length
+    ≥ 2.
+  - **`habitual_override`**: detector called `.snapshot()` on
+    `ctx.event_buffer`, but `_FrozenBufferView` (the production
+    wrapper used in worker threads) only exposes `.query()`.
+    Replaced with `tuple(ctx.event_buffer.query())`.
+
+### Known issue (not fixed in this release)
+
+`streak` detector exceeded the 30s per-detector budget on the same
+install. Needs profiling data before optimization; the per-detector
+timeout already prevents it from blocking the scan. Tracked for
+v1.14.12.
+
 ## [1.14.10] — 2026-05-19
 
 ### Fixed — UnavailableDeviceFixIt recorder query cross-loop bug
