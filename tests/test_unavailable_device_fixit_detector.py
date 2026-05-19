@@ -236,3 +236,148 @@ def test_suggested_actions_no_integration_falls_back_to_generic() -> None:
 def test_suggested_actions_always_includes_powered_check() -> None:
     actions = _suggested_actions(domain="sensor", integration="zha", iot_class="local_push")
     assert any("powered" in a.lower() for a in actions)
+
+
+# ---------- v1.14.8 recorder-fallback path --------------------------
+
+
+@pytest.mark.asyncio
+async def test_recorder_fallback_rescues_post_restart_entity(
+    monkeypatch,
+) -> None:
+    """Live last_changed is fresh (post-restart), but recorder shows
+    the entity was non-unavailable >48h ago and unavailable ever since.
+    Detector should USE the recorder timestamp and emit."""
+    from custom_components.ha_insights.detectors import (
+        unavailable_device_fixit as mod,
+    )
+
+    fresh_live_ts = datetime.now(tz=UTC) - timedelta(minutes=30)
+    states = [
+        _FakeState(
+            entity_id="sensor.dead_for_weeks",
+            state="unavailable",
+            last_changed=fresh_live_ts,
+            attributes={"friendly_name": "Dead For Weeks"},
+        ),
+    ]
+
+    true_unavail_since = datetime.now(tz=UTC) - timedelta(days=10)
+
+    async def _fake_recorder(_hass, eids, *, lookback_days, now):
+        # Verify the helper got called with the right entity
+        assert "sensor.dead_for_weeks" in eids
+        return {"sensor.dead_for_weeks": true_unavail_since}
+
+    monkeypatch.setattr(mod, "_recorder_unavailable_since", _fake_recorder)
+    insights = await UnavailableDeviceFixItDetector().scan(_ctx(states))
+
+    assert len(insights) == 1
+    # 10 days * 24 hours = 240 hours → 720+ bucket would be 30 days,
+    # so 168-720h bucket → 0.88 confidence.
+    assert insights[0].confidence == pytest.approx(0.88)
+    # 240 hours since recorder said it was last alive
+    assert insights[0].payload["hours_unavailable"] == pytest.approx(240, abs=2)
+
+
+@pytest.mark.asyncio
+async def test_recorder_fallback_only_runs_for_suspect_entities(
+    monkeypatch,
+) -> None:
+    """Entities whose live last_changed is already >48h ago do NOT
+    need a recorder query; the helper is called only with the suspect
+    set."""
+    from custom_components.ha_insights.detectors import (
+        unavailable_device_fixit as mod,
+    )
+
+    states = [
+        _state("sensor.really_old", "unavailable", hours_ago=100),  # not suspect
+        _state("sensor.fresh", "unavailable", hours_ago=10),  # suspect
+    ]
+
+    called_with: dict = {}
+
+    async def _fake_recorder(_hass, eids, *, lookback_days, now):
+        called_with["eids"] = list(eids)
+        return {}
+
+    monkeypatch.setattr(mod, "_recorder_unavailable_since", _fake_recorder)
+    await UnavailableDeviceFixItDetector().scan(_ctx(states))
+    assert called_with["eids"] == ["sensor.fresh"]
+
+
+@pytest.mark.asyncio
+async def test_recorder_returns_nothing_falls_back_to_live(
+    monkeypatch,
+) -> None:
+    """If the recorder helper returns an empty dict (no data, query
+    failed, etc.), the detector uses the live last_changed value
+    unchanged — old behaviour preserved."""
+    from custom_components.ha_insights.detectors import (
+        unavailable_device_fixit as mod,
+    )
+
+    states = [_state("sensor.fresh", "unavailable", hours_ago=10)]
+
+    async def _fake_recorder(_hass, eids, *, lookback_days, now):
+        return {}
+
+    monkeypatch.setattr(mod, "_recorder_unavailable_since", _fake_recorder)
+    insights = await UnavailableDeviceFixItDetector().scan(_ctx(states))
+    # 10h < 48h cutoff, no recorder rescue → no emission
+    assert insights == []
+
+
+@pytest.mark.asyncio
+async def test_recorder_says_recently_alive_does_not_emit(
+    monkeypatch,
+) -> None:
+    """Live last_changed says fresh, recorder confirms the entity
+    was alive ~12 hours ago (so it really only just went unavailable).
+    Detector should NOT emit — entity isn't stuck yet."""
+    from custom_components.ha_insights.detectors import (
+        unavailable_device_fixit as mod,
+    )
+
+    states = [_state("sensor.recent_drop", "unavailable", hours_ago=2)]
+    recent_good = datetime.now(tz=UTC) - timedelta(hours=12)
+
+    async def _fake_recorder(_hass, eids, *, lookback_days, now):
+        return {"sensor.recent_drop": recent_good}
+
+    monkeypatch.setattr(mod, "_recorder_unavailable_since", _fake_recorder)
+    insights = await UnavailableDeviceFixItDetector().scan(_ctx(states))
+    assert insights == []
+
+
+@pytest.mark.asyncio
+async def test_uses_min_of_live_and_recorder_timestamps(
+    monkeypatch,
+) -> None:
+    """When both timestamps disagree, prefer the older one (entity was
+    unavailable for at least as long as the earliest evidence)."""
+    from custom_components.ha_insights.detectors import (
+        unavailable_device_fixit as mod,
+    )
+
+    # Live says 20h ago, recorder says 100h ago → use 100h
+    live_ts = datetime.now(tz=UTC) - timedelta(hours=20)
+    recorder_ts = datetime.now(tz=UTC) - timedelta(hours=100)
+    states = [
+        _FakeState(
+            entity_id="sensor.x",
+            state="unavailable",
+            last_changed=live_ts,
+        ),
+    ]
+
+    async def _fake_recorder(_hass, eids, *, lookback_days, now):
+        return {"sensor.x": recorder_ts}
+
+    monkeypatch.setattr(mod, "_recorder_unavailable_since", _fake_recorder)
+    insights = await UnavailableDeviceFixItDetector().scan(_ctx(states))
+    assert len(insights) == 1
+    # 100h falls in 72-168 bucket → 0.78
+    assert insights[0].confidence == pytest.approx(0.78)
+    assert insights[0].payload["hours_unavailable"] == pytest.approx(100, abs=1)

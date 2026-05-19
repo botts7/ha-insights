@@ -4,6 +4,55 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+## [1.14.8] — 2026-05-19
+
+### Fixed — UnavailableDeviceFixIt missed post-restart entities
+
+**Hardware-validation finding.** A 3,378-entity install reported
+**1,603 unavailable entities, all with `last_changed < 1 hour`** —
+detector emitted zero. Root cause: HA restart resets `last_changed`
+for many integrations (cloud APIs, Tuya, polling-only platforms),
+making genuinely-dead-for-weeks entities look fresh to the live
+state machine.
+
+### The fix
+
+Recorder fallback. For each currently-unavailable entity whose live
+`last_changed` is suspiciously recent (within the 48h cutoff), bulk-
+query the recorder for the **most recent non-unavailable state** in
+the last 14 days. That timestamp is the true "unavailable since" —
+entity has been continuously unavailable ever since.
+
+  - One recorder query per scan (bulk across all suspect entities),
+    routed through `recorder.get_instance(hass).async_add_executor_job`
+    per HA core review guidelines.
+  - `min(live_last_changed, recorder_ts)` — prefer the older timestamp
+    so we don't pretend an entity is fresher than evidence allows.
+  - If recorder has rows but ALL are unavailable in the window →
+    use start-of-window as a conservative lower bound (still trips
+    the 48-hour gate correctly).
+  - If recorder has no rows / fails / unavailable → silently fall
+    back to live `last_changed` (no regression from v1.14.0 behavior).
+
+### Defensive notes
+
+  - `requires_recorder` stays `False`. Installs without recorder
+    keep the old behavior; the fallback is opportunistic.
+  - Recorder failures are caught per-entity; one bad entity doesn't
+    poison the whole scan.
+  - Handles both modern `State` objects and `minimal_response=True`
+    dict format (same tolerance pattern as `audit/rollup.py`).
+
+### Tests
+
+5 new unit tests covering: recorder rescue of post-restart entity,
+recorder called only with suspect entities, recorder-empty falls
+back to live, recorder-says-recently-alive doesn't emit, min(live,
+recorder) when both disagree. Existing 17 tests stay green.
+
+Smoke-verified locally: live `last_changed` 30 min ago + recorder
+says 10 days ago → emits correctly with 240 h / 0.88 confidence.
+
 ## [1.14.7] — 2026-05-19
 
 ### Added — apply-rate detector-quality penalty (closes v1.14 batch)
