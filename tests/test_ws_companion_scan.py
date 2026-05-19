@@ -363,4 +363,6 @@ async def test_subscribe_admin_gated(
     )
     resp = await client.receive_json()
     assert resp["success"] is False
-    assert resp["error"]["code"] == "unauthorized"
+    # _require_admin returns "admin_required" — matches every other
+    # admin-gated handler in ws_api (ble_find, refine, identify, etc.).
+    assert resp["error"]["code"] == "admin_required"
