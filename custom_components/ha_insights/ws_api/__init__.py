@@ -258,6 +258,10 @@ SUPPORTED_METHODS = (
     "companion_scan_subscribe",
     "companion_scan_sample",
     "companion_scan_unsubscribe",
+    # v1.21 — Wi-Fi inverse-multilateration walking-find. Streams the
+    # phone's per-AP RSSI as state changes; pairs with find-my-ha
+    # v0.6.x for warmer/colder UX on non-BLE devices. Admin-gated.
+    "wifi_find_self",
 )
 
 
