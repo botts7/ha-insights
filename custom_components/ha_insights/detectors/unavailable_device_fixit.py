@@ -76,6 +76,14 @@ _HOURS_THRESHOLD = 48
 # still trips the 48-hour gate correctly.
 _RECORDER_LOOKBACK_DAYS = 14
 
+# How many entity_ids to feed `get_significant_states` per call.
+# v1.14.9: on a 1,603-entity install, the single bulk call returned
+# silently-empty results — likely a recorder query timing out or
+# hitting an internal limit. Batches of 200 keep each call under
+# ~1-2 seconds while staying well under any SQLite parameter limit.
+# The total scan budget is 30s; up to ~15 batches fit.
+_RECORDER_BATCH_SIZE = 200
+
 # Confidence tiers by hours-stuck bucket.
 _CONFIDENCE_48_72 = 0.65
 _CONFIDENCE_72_168 = 0.78
@@ -419,6 +427,13 @@ async def _recorder_unavailable_since(
     that entity being absent from the returned dict; the caller
     then falls back to the live ``last_changed`` for those.
 
+    v1.14.9: chunks entity_ids into batches of ``_RECORDER_BATCH_SIZE``
+    to avoid SQLite parameter limits + recorder query timeouts on
+    large installs. The previous single-call approach silently
+    returned empty results on a 1,603-entity install — failure was
+    invisible because we logged at DEBUG. Logging bumped to INFO+
+    so future bugs are diagnosable from HA's standard log view.
+
     Runs on the recorder's executor (per HA core review guidelines)
     so the query cooperates with concurrent writes.
     """
@@ -431,61 +446,135 @@ async def _recorder_unavailable_since(
             get_significant_states,
         )
     except ImportError:
+        _LOGGER.info(
+            "unavailable_device_fixit: recorder component unavailable; "
+            "skipping recorder fallback (live last_changed only)"
+        )
         return {}
 
     start = now - timedelta(days=lookback_days)
+    out: dict[str, datetime] = {}
 
-    def _query() -> dict[str, list]:
-        try:
-            return get_significant_states(
-                hass,
-                start,
-                now,
-                entity_ids,
-                significant_changes_only=False,
-                minimal_response=True,
-                no_attributes=True,
-            )
-        except Exception as err:
-            _LOGGER.debug(
-                "Recorder query for unavailable_device_fixit failed: %s", err
-            )
-            return {}
+    # Chunk to avoid recorder-query stress on large installs.
+    # SQLAlchemy / SQLite handle large IN-clauses fine up to ~32k
+    # params, but the QUERY ITSELF (joining states_meta × states for
+    # 1,000+ entities over 14 days) can be slow enough to trip the
+    # 30s per-detector budget. Batches of 200 keep each query under
+    # ~1-2 seconds on a typical install.
+    batches = [
+        entity_ids[i : i + _RECORDER_BATCH_SIZE]
+        for i in range(0, len(entity_ids), _RECORDER_BATCH_SIZE)
+    ]
+    _LOGGER.info(
+        "unavailable_device_fixit: querying recorder for %d suspect "
+        "entities in %d batch(es), window=%dd",
+        len(entity_ids),
+        len(batches),
+        lookback_days,
+    )
+
+    successful_batches = 0
+    total_rows = 0
+    failed_batches = 0
 
     try:
         recorder = get_instance(hass)
-        result = await recorder.async_add_executor_job(_query)
     except Exception:
-        _LOGGER.debug(
-            "Failed to schedule recorder query for unavailable_device_fixit",
+        _LOGGER.warning(
+            "unavailable_device_fixit: could not acquire recorder instance",
             exc_info=True,
         )
         return {}
 
-    out: dict[str, datetime] = {}
-    if not isinstance(result, dict):
-        return out
-    for eid in entity_ids:
-        rows = result.get(eid) or []
-        most_recent_non_unavail: datetime | None = None
-        for row in rows:
-            row_state = _row_state_value(row)
-            if row_state is None or row_state in _DIAGNOSTIC_STATES:
-                continue
-            ts = _row_state_timestamp(row)
-            if ts is None:
-                continue
-            if most_recent_non_unavail is None or ts > most_recent_non_unavail:
-                most_recent_non_unavail = ts
-        if most_recent_non_unavail is not None:
-            out[eid] = most_recent_non_unavail
-        elif rows:
-            # Recorder has rows but ALL were unavailable/unknown —
-            # entity has been continuously dead through the window.
-            # Use start as a conservative lower bound.
-            out[eid] = start
-        # else: no recorder history at all → leave eid absent so the
-        # caller falls back to live last_changed.
+    n_batches = len(batches)
+    for batch_idx, batch in enumerate(batches):
+        # `batch_eids` + `idx_label` are explicit parameters so the
+        # inner closure doesn't capture the loop variable (ruff B023).
+        def _query(
+            batch_eids: list[str] = batch,
+            idx_label: int = batch_idx + 1,
+        ) -> dict[str, list] | None:
+            try:
+                return get_significant_states(
+                    hass,
+                    start,
+                    now,
+                    batch_eids,
+                    significant_changes_only=False,
+                    minimal_response=True,
+                    no_attributes=True,
+                )
+            except Exception as err:
+                _LOGGER.warning(
+                    "unavailable_device_fixit: recorder query failed "
+                    "for batch %d/%d (%d entities): %s",
+                    idx_label,
+                    n_batches,
+                    len(batch_eids),
+                    err,
+                )
+                return None
+
+        try:
+            result = await recorder.async_add_executor_job(_query)
+        except Exception:
+            _LOGGER.warning(
+                "unavailable_device_fixit: failed to schedule recorder "
+                "query for batch %d/%d",
+                batch_idx + 1,
+                n_batches,
+                exc_info=True,
+            )
+            failed_batches += 1
+            continue
+
+        if not isinstance(result, dict):
+            failed_batches += 1
+            continue
+        successful_batches += 1
+
+        for eid in batch:
+            rows = result.get(eid) or []
+            total_rows += len(rows)
+            most_recent_non_unavail: datetime | None = None
+            for row in rows:
+                row_state = _row_state_value(row)
+                if row_state is None or row_state in _DIAGNOSTIC_STATES:
+                    continue
+                ts = _row_state_timestamp(row)
+                if ts is None:
+                    continue
+                if (
+                    most_recent_non_unavail is None
+                    or ts > most_recent_non_unavail
+                ):
+                    most_recent_non_unavail = ts
+            if most_recent_non_unavail is not None:
+                out[eid] = most_recent_non_unavail
+            elif rows:
+                # Recorder has rows but ALL were unavailable/unknown —
+                # entity has been continuously dead through the window.
+                # Use start as a conservative lower bound.
+                out[eid] = start
+            # else: no recorder history at all → leave eid absent so
+            # the caller falls back to live last_changed.
+
+    _LOGGER.info(
+        "unavailable_device_fixit: recorder query complete — "
+        "%d/%d batches successful, %d total rows scanned, "
+        "%d entities resolved (%d will fall back to live last_changed)",
+        successful_batches,
+        len(batches),
+        total_rows,
+        len(out),
+        len(entity_ids) - len(out),
+    )
+    if failed_batches:
+        _LOGGER.warning(
+            "unavailable_device_fixit: %d/%d recorder batches FAILED",
+            failed_batches,
+            len(batches),
+        )
     return out
 
 
