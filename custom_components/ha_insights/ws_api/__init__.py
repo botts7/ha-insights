@@ -64,7 +64,7 @@ from .refine import (
     ws_refine_automation,
     ws_refine_cost_estimate,
 )
-from .wifi_find_self import ws_wifi_find_self
+from .wifi_find_self import ws_wifi_find_capability, ws_wifi_find_self
 
 # Re-export for any external consumer that's reaching into ws_api
 # for these helpers. New code should import from `._helpers` directly.
@@ -93,6 +93,7 @@ __all__ = [
     "ws_refine_automation",
     "ws_refine_cost_estimate",
     "ws_set_device_managed",
+    "ws_wifi_find_capability",
     "ws_wifi_find_self",
 ]
 
@@ -262,6 +263,10 @@ SUPPORTED_METHODS = (
     # phone's per-AP RSSI as state changes; pairs with find-my-ha
     # v0.6.x for warmer/colder UX on non-BLE devices. Admin-gated.
     "wifi_find_self",
+    # v1.21.1 — batch Wi-Fi-trackability query. Read-only, not admin-
+    # gated. PWA pre-filters its entity picker so users don't pick a
+    # mobile_app GPS-only tracker and only find out after Start.
+    "wifi_find_capability",
 )
 
 
@@ -330,6 +335,11 @@ def async_register(hass: HomeAssistant) -> None:
     # phone's per-AP RSSI as state changes; PWA renders warmer/colder
     # for non-BLE Wi-Fi-trackable devices. Admin-gated.
     websocket_api.async_register_command(hass, ws_wifi_find_self)
+    # v1.21.1 batch capability query — read-only, not admin-gated. PWA
+    # calls it on entering Wi-Fi mode to pre-filter the entity picker
+    # to only entities with rx_rssi+ap_mac (or equivalents) actually
+    # exposed in current state attributes.
+    websocket_api.async_register_command(hass, ws_wifi_find_capability)
 
 
 # Helpers _get_store / _get_buffer / _audit_attempts /

@@ -4,6 +4,26 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+## [1.21.1] — 2026-05-20
+
+### Added — `home_insights/wifi_find_capability` batch trackability query
+
+Mirrors `ws_ble_capability`. Read-only, not admin-gated. Pairs with
+find-my-ha v0.7.2 PWA pre-filter so users don't pick a mobile_app
+GPS-only device-tracker and only find out after hitting Start.
+
+**Handler:** `home_insights/wifi_find_capability`
+- Args: `entity_ids: [str]`
+- Response: per-entity `{is_trackable, signal_attribute,
+  signal_dbm, ap_attribute, ap_identifier, reason}`
+- Missing / unknown entities still get a row with
+  `is_trackable: false` so the PWA can show "N of M trackable"
+  for the full input set.
+
+Reuses the v1.18 `lib/wifi_find_capability.py` function so the
+detector + streaming subscription + batch query all share the same
+"is this entity Wi-Fi-trackable?" semantics.
+
 ## [1.21.0] — 2026-05-19
 
 ### Added — `home_insights/wifi_find_self` WS handler (Wi-Fi walking find)
