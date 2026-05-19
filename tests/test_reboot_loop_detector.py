@@ -62,22 +62,38 @@ def _seed_regular_flips(
     entity_id: str = "sensor.flaky",
     interval: timedelta,
     count: int,
-    jitter_seconds: float = 0.0,
     end: datetime | None = None,
 ) -> list[datetime]:
-    """Add `count` flips spaced `interval` apart, with optional jitter."""
+    """Add `count` flips spaced exactly `interval` apart."""
     if end is None:
         end = datetime.now(tz=UTC).replace(microsecond=0)
     times: list[datetime] = []
     for i in range(count):
-        offset = (count - 1 - i) * interval.total_seconds()
-        # Apply jitter symmetrically.
-        if jitter_seconds and i % 2 == 0:
-            offset += jitter_seconds
-        elif jitter_seconds:
-            offset -= jitter_seconds
-        t = end - timedelta(seconds=offset)
+        t = end - (count - 1 - i) * interval
         times.append(t)
+        buf.add(_flip_into_unavailable(t, entity_id=entity_id))
+    return times
+
+
+def _seed_flips_with_gaps(
+    buf: StateEventBuffer,
+    *,
+    entity_id: str = "sensor.flaky",
+    gap_seconds: list[float],
+    end: datetime | None = None,
+) -> list[datetime]:
+    """Add flips with explicit (potentially varying) gaps between them.
+
+    Useful when a test needs the resulting CV to land in a specific
+    band. `gap_seconds[i]` is the spacing between flip i and i+1.
+    """
+    if end is None:
+        end = datetime.now(tz=UTC).replace(microsecond=0)
+    times: list[datetime] = [end]
+    for g in reversed(gap_seconds):
+        times.append(times[-1] - timedelta(seconds=g))
+    times.reverse()
+    for t in times:
         buf.add(_flip_into_unavailable(t, entity_id=entity_id))
     return times
 
@@ -122,18 +138,39 @@ async def test_tightly_regular_high_confidence() -> None:
 
 @pytest.mark.asyncio
 async def test_clearly_regular_medium_confidence() -> None:
-    """CV around 0.10-0.20 → clear bucket → 0.80."""
+    """CV in the 0.10–0.20 band → clear bucket → 0.80.
+
+    Hand-crafted gaps so the CV lands precisely in-range. Gaps of
+    [12000, 14400, 16800, 14400, 12000, 16800] s have mean 14400
+    and pstdev ≈ 1960 → CV ≈ 0.136.
+    """
     buf = StateEventBuffer(max_age=timedelta(days=14))
-    # 6 flips with ~15% jitter on a 4h interval → CV around 0.15.
-    _seed_regular_flips(
+    _seed_flips_with_gaps(
         buf,
-        interval=timedelta(hours=4),
-        count=6,
-        jitter_seconds=1700,
+        gap_seconds=[12000, 14400, 16800, 14400, 12000, 16800],
     )
     insights = await RebootLoopDetector().scan(_ctx(buf))
     assert len(insights) == 1
     assert insights[0].confidence == pytest.approx(0.80)
+
+
+@pytest.mark.asyncio
+async def test_moderately_regular_low_confidence() -> None:
+    """CV in the 0.20–0.30 band → moderate bucket → 0.65.
+
+    Larger gap dispersion: [8000, 14400, 20800, 14400, 8000, 20800] s
+    has mean 14400 and pstdev ≈ 5380 → CV ≈ 0.373 (too random).
+    Tune down to [10000, 14400, 18800, 14400, 10000, 18800] which
+    gives pstdev ≈ 3580 → CV ≈ 0.249.
+    """
+    buf = StateEventBuffer(max_age=timedelta(days=14))
+    _seed_flips_with_gaps(
+        buf,
+        gap_seconds=[10000, 14400, 18800, 14400, 10000, 18800],
+    )
+    insights = await RebootLoopDetector().scan(_ctx(buf))
+    assert len(insights) == 1
+    assert insights[0].confidence == pytest.approx(0.65)
 
 
 @pytest.mark.asyncio
