@@ -4,6 +4,52 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+## [1.14.2] — 2026-05-19
+
+### Added — HardwareSuggestionDetector
+
+New EXPERIMENTAL detector emits **per-area** sensor-gap suggestions.
+Complements `setup_quality` (which reports home-wide coverage
+percentages) by saying "*this specific* kitchen has 4 lights and no
+motion sensor — consider adding one." One PATTERN_OBSERVATION
+insight per (area, recipe) gap.
+
+### Non-commercial commitment
+
+Hard rules from [[ha_insights_hardware_gap_detector]] memory:
+
+  - **No brand names** (no Aqara / Hue / Shelly / IKEA / etc.)
+  - **No affiliate links**
+  - **No buy URLs**
+  - **No specific product recommendations**
+
+Each payload includes an explicit `non_commercial_disclaimer` string
+reiterating the policy. Tests assert the absence of common brand
+names from every emitted insight.
+
+### Recipes
+
+1. **motion_sensor_for_active_area** — area has ≥3 light/switch/
+   media_player/climate/cover entities AND no motion/occupancy/
+   presence sensor.
+2. **illuminance_sensor_for_lit_area** — area has ≥2 light entities
+   AND no illuminance sensor.
+3. **temperature_sensor_for_climate_area** — area has a climate
+   entity AND no standalone temperature sensor.
+4. **contact_sensor_for_entry_area** — area name matches an entry
+   pattern (entry/foyer/garage/front/back/mudroom/hallway/porch)
+   AND no door/window/opening contact sensor.
+
+Each insight payload surfaces the hardware category, a rationale,
+and 3+ "unlocks" — scenarios the missing sensor would enable.
+
+Confidence is a flat 0.70 — these are suggestions, not anomalies.
+
+### Forward-look
+
+v1.15+ can extend with more recipes (smart-button gap, weather
+integration gap, BLE-proxy gap for Find My Device, etc.).
+
 ## [1.14.1] — 2026-05-19
 
 ### Added — RebootLoopDetector
