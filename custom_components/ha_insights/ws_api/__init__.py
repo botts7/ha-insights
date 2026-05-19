@@ -95,6 +95,49 @@ if TYPE_CHECKING:
 WS_PROTOCOL_VERSION = 1
 
 
+async def _record_verdict_safely(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    insight_id: str,
+    kind: str,
+) -> None:
+    """Append a row to the verdict_history timeline.
+
+    Best-effort: failures don't break the user-visible action because
+    the underlying state mutation (dismiss/retire/apply/etc.) has
+    already succeeded by the time we get here. v1.14.5a — feeds
+    v1.14.5b AdaptiveFeedbackDetector.
+
+    `kind` is the VerdictKind string value ('dismissed', 'retired',
+    'applied', etc.); see lib/user_verdict_history.py.
+    """
+    try:
+        from ..lib.environmental_fingerprint import (
+            capture_environmental_fingerprint,
+            fingerprint_to_dict,
+            hash_user_id,
+        )
+
+        store = _get_store(hass)
+        if store is None:
+            return
+        fp = capture_environmental_fingerprint(hass)
+        user_id = getattr(getattr(connection, "user", None), "id", None)
+        await store.record_verdict(
+            insight_id,
+            kind=kind,
+            fingerprint=fingerprint_to_dict(fp),
+            user_id_hash=hash_user_id(user_id),
+        )
+    except Exception:
+        _LOGGER.debug(
+            "Failed to record verdict timeline entry for %s/%s",
+            insight_id,
+            kind,
+            exc_info=True,
+        )
+
+
 async def _get_integration_version(hass: HomeAssistant) -> str:
     """Resolve the integration version dynamically from manifest.json
     via HA's loader. NO local caching here — `async_get_integration`
@@ -1082,6 +1125,7 @@ async def ws_dismiss(
             msg["id"], "not_found", f"No insight {msg['insight_id']!r}"
         )
         return
+    await _record_verdict_safely(hass, connection, msg["insight_id"], "dismissed")
     # Mirror the dismiss into HA's Repairs registry if this insight
     # had a Repairs entry. Idempotent — no-op when no entry exists.
     try:
@@ -1220,6 +1264,7 @@ async def ws_apply(
             snapshot=snapshot,
             snapshot_hash=hash_config(snapshot),
         )
+        await _record_verdict_safely(hass, connection, insight.id, "applied")
 
     # v1.5.46: Logbook entry so the apply shows up in HA's standard
     # activity timeline alongside the automation_reloaded / config-
@@ -1591,6 +1636,7 @@ async def ws_undo(
             return
 
         cleared = await store.clear_applied(insight_id)
+    await _record_verdict_safely(hass, connection, insight_id, "undone")
     connection.send_result(
         msg["id"],
         {
@@ -1633,6 +1679,7 @@ async def ws_snooze(
             msg["id"], "not_found", f"No insight {msg['insight_id']!r}"
         )
         return
+    await _record_verdict_safely(hass, connection, msg["insight_id"], "snoozed")
     connection.send_result(msg["id"])
 
 
@@ -1667,6 +1714,7 @@ async def ws_retire(
             msg["id"], "not_found", f"No insight {msg['insight_id']!r}"
         )
         return
+    await _record_verdict_safely(hass, connection, msg["insight_id"], "retired")
     connection.send_result(msg["id"])
 
 
@@ -1695,6 +1743,7 @@ async def ws_unretire(
             f"No insight {msg['insight_id']!r} or it wasn't retired",
         )
         return
+    await _record_verdict_safely(hass, connection, msg["insight_id"], "unretired")
     connection.send_result(msg["id"])
 
 

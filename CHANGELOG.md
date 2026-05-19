@@ -4,6 +4,77 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+## [1.14.5] — 2026-05-19
+
+### Added — fingerprint capture + WS hook wiring (Step C-1 of v1.14.3)
+
+Connects the v1.14.3a verdict-history lib + v1.14.4 SQLite layer
+to the real WS verdict handlers. Every dismiss / retire / unretire /
+apply / undo / snooze now appends a row to `verdict_history` with
+the `EnvironmentalFingerprint` captured at verdict time.
+
+### New module `lib/environmental_fingerprint.py`
+
+Pulled the HA-aware capture out of the pure-stdlib lib so the
+verdict-history lib stays portable.
+
+  - `capture_environmental_fingerprint(hass)` — snapshot the three
+    fields the lib defines: enabled automation entity_ids, per-area
+    device_class counts, active integration domains. Defensive
+    against broken hass/registry — always returns a valid (possibly
+    empty) `EnvironmentalFingerprint`.
+  - `fingerprint_to_dict(fp)` / `dict_to_fingerprint(d)` — JSON-safe
+    round-trip pair. Frozensets become sorted lists so the store's
+    `sort_keys=True` JSON dump stays deterministic.
+  - `hash_user_id(user_id)` — 12-byte blake2b hash so HA user_ids
+    don't appear raw in the long-lived verdict timeline.
+
+### WS handler hooks
+
+Each handler appends a row to `verdict_history` after the existing
+state mutation succeeds. Helper `_record_verdict_safely` swallows
+any exception so a failed timeline write never breaks the user-
+visible action.
+
+| Handler | Verdict kind |
+|---|---|
+| `ws_dismiss` | `dismissed` |
+| `ws_snooze` | `snoozed` |
+| `ws_retire` | `retired` |
+| `ws_unretire` | `unretired` |
+| `ws_apply` | `applied` |
+| `ws_undo` | `undone` |
+
+### Privacy notes
+
+The fingerprint deliberately excludes:
+
+  - Individual entity_ids (except for automations, which are
+    coarse-grained pattern identifiers).
+  - State values.
+  - Friendly names.
+  - Raw user_ids — those are hashed before storage.
+
+Any future expansion must preserve this contract — the verdict
+fingerprint is meant to detect environmental DELTAS, not to log
+home contents.
+
+### Tests
+
+19 unit tests for the fingerprint module (hash, round-trip,
+capture happy-path, capture edge cases — disabled / hidden /
+excluded domains / no area / missing device_class). Smoke-verified
+end-to-end locally: 3 entries → fingerprint correctly captured 1
+enabled automation, kitchen had {motion:1, temperature:1, light:1},
+{mqtt, zha} integrations, user hash deterministic + privacy-safe.
+
+### Up next
+
+**v1.14.5b:** `detectors/adaptive_feedback.py` reading
+`get_all_verdict_histories` + applying `should_re_suggest`.
+**v1.14.5c (maybe):** `apply_rate` penalty in detector-quality
+scoring.
+
 ## [1.14.4] — 2026-05-19
 
 ### Added — verdict-history persistence (Step B of v1.14.3)
