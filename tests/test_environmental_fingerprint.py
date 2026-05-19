@@ -12,6 +12,9 @@ from dataclasses import dataclass
 from typing import Any
 from unittest.mock import MagicMock
 
+import pytest
+
+from custom_components.ha_insights.lib import environmental_fingerprint as ef
 from custom_components.ha_insights.lib.environmental_fingerprint import (
     capture_environmental_fingerprint,
     dict_to_fingerprint,
@@ -130,6 +133,18 @@ class _FakeRegistryEntry:
     hidden_by: str | None = None
 
 
+@pytest.fixture(autouse=True)
+def _patch_entity_registry(monkeypatch):
+    """Replace ``_try_entity_registry`` per-test so we never touch
+    ``sys.modules``. Tests opt into a fake registry by setting
+    ``_REGISTRY_OVERRIDE`` via ``_make_hass``; the default is None
+    (capture treats as "no registry" — automations still get captured
+    via hass.states, but per-area / integrations stay empty)."""
+    monkeypatch.setattr(
+        ef, "_try_entity_registry", lambda hass: getattr(hass, "_fake_registry", None)
+    )
+
+
 def _make_hass(
     *,
     automations: dict[str, str] | None = None,  # entity_id → state
@@ -157,23 +172,12 @@ def _make_hass(
     hass.states.async_entity_ids = _async_entity_ids
     hass.states.get = _states_get
 
-    # Patch entity_registry.async_get to return a stub with `.entities`.
+    # Attach the fake registry as an attribute on hass; the
+    # autouse monkeypatch above wires _try_entity_registry to
+    # read it back.
     fake_registry = MagicMock()
     fake_registry.entities = {e.entity_id: e for e in registry_entries}
-
-    # Inject via sys.modules so the lazy import inside
-    # _try_entity_registry finds our patched module.
-    import sys
-    import types
-
-    fake_er = types.ModuleType("homeassistant.helpers.entity_registry")
-    fake_er.async_get = lambda h: fake_registry
-    sys.modules["homeassistant.helpers.entity_registry"] = fake_er
-    # Also attach to homeassistant.helpers parent so attribute-access works
-    fake_helpers = sys.modules.setdefault(
-        "homeassistant.helpers", types.ModuleType("homeassistant.helpers")
-    )
-    fake_helpers.entity_registry = fake_er  # type: ignore[attr-defined]
+    hass._fake_registry = fake_registry
 
     return hass
 
@@ -182,12 +186,8 @@ def test_capture_with_no_hass_returns_empty_fingerprint() -> None:
     """Defensive: a broken hass shouldn't crash the capture path."""
     hass = MagicMock()
     hass.states.async_entity_ids.side_effect = RuntimeError("not ready")
-
-    # Force registry lookup to fail too
-    import sys
-
-    sys.modules.pop("homeassistant.helpers.entity_registry", None)
-
+    # No _fake_registry attribute → _try_entity_registry returns None
+    # (via the autouse fixture above) → registry-derived fields stay empty.
     fp = capture_environmental_fingerprint(hass)
     assert isinstance(fp, EnvironmentalFingerprint)
     assert fp.automation_ids == frozenset()
