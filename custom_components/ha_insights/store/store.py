@@ -318,6 +318,130 @@ class InsightStore:
             return True
         return False
 
+    # --- Verdict history (v1.14.3/v1.14.4) ---
+    #
+    # Append-only timeline of apply/dismiss/retire/snooze/undo verdicts
+    # WITH the environmental fingerprint captured at verdict time. Read
+    # by AdaptiveFeedbackDetector (v1.14.4) to decide which previously-
+    # dismissed insights to re-surface when the environment changes.
+    #
+    # The classic mutators above (dismiss_insight, retire_insight, etc.)
+    # update the *current* state on the `insights` row. The recorder
+    # here writes the *event* to a separate append-only table. Both
+    # writes happen in `ws_dismiss` / `ws_retire` / `ws_apply` / `ws_undo`
+    # so callers don't have to remember.
+
+    async def record_verdict(
+        self,
+        insight_id: str,
+        *,
+        kind: str,
+        fingerprint: dict[str, object],
+        when: datetime | None = None,
+        user_id_hash: str | None = None,
+    ) -> None:
+        """Append one verdict to the timeline.
+
+        `kind` must be one of the ``VerdictKind`` string values
+        (``"applied"``, ``"dismissed"``, ``"retired"``, ``"unretired"``,
+        ``"snoozed"``, ``"undone"``, ``"clear_applied"``). The store
+        doesn't validate against the enum to avoid a lib→store
+        circular import; callers should pass ``VerdictKind.X.value``.
+
+        `fingerprint` is the JSON-serializable dict form of an
+        ``EnvironmentalFingerprint``. We serialize here so the lib
+        stays JSON-free (same architectural rule as the other
+        pure-function libs).
+        """
+        ts = (when or datetime.now(tz=UTC)).timestamp()
+        await self._c.execute(
+            """
+            INSERT INTO verdict_history (
+                insight_id, kind, timestamp, fingerprint_json, user_id_hash
+            ) VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                insight_id,
+                kind,
+                ts,
+                json.dumps(fingerprint, sort_keys=True),
+                user_id_hash,
+            ),
+        )
+        await self._c.commit()
+
+    async def get_verdict_history(
+        self, insight_id: str
+    ) -> list[dict[str, object]]:
+        """Return all verdicts for one insight, ascending by timestamp.
+
+        Each row is a plain dict so the store keeps no dependency on
+        the `lib/user_verdict_history` types. Callers (the detector,
+        the WS API) hydrate into ``Verdict`` / ``VerdictHistory`` as
+        needed.
+
+        Row schema:
+          {
+            "insight_id": str,
+            "kind": str,                 # VerdictKind value
+            "timestamp": float,          # unix seconds, UTC
+            "fingerprint": dict,         # JSON-deserialized
+            "user_id_hash": str | None,
+          }
+        """
+        async with self._c.execute(
+            """
+            SELECT insight_id, kind, timestamp, fingerprint_json, user_id_hash
+              FROM verdict_history
+             WHERE insight_id = ?
+             ORDER BY timestamp ASC
+            """,
+            (insight_id,),
+        ) as cur:
+            rows = await cur.fetchall()
+        return [
+            {
+                "insight_id": r["insight_id"],
+                "kind": r["kind"],
+                "timestamp": r["timestamp"],
+                "fingerprint": json.loads(r["fingerprint_json"]),
+                "user_id_hash": r["user_id_hash"],
+            }
+            for r in rows
+        ]
+
+    async def get_all_verdict_histories(
+        self,
+    ) -> dict[str, list[dict[str, object]]]:
+        """Bulk read for the detector pass: every history keyed by id.
+
+        Each value is the same row-dict list shape as
+        ``get_verdict_history``. Empty dict when no verdicts recorded.
+        Single query + grouping in Python — at expected scales
+        (~hundreds of verdicts for an active install) the cost is
+        dominated by JSON parsing, not query planning.
+        """
+        async with self._c.execute(
+            """
+            SELECT insight_id, kind, timestamp, fingerprint_json, user_id_hash
+              FROM verdict_history
+             ORDER BY insight_id ASC, timestamp ASC
+            """
+        ) as cur:
+            rows = await cur.fetchall()
+        out: dict[str, list[dict[str, object]]] = {}
+        for r in rows:
+            out.setdefault(r["insight_id"], []).append(
+                {
+                    "insight_id": r["insight_id"],
+                    "kind": r["kind"],
+                    "timestamp": r["timestamp"],
+                    "fingerprint": json.loads(r["fingerprint_json"]),
+                    "user_id_hash": r["user_id_hash"],
+                }
+            )
+        return out
+
     # --- Applied history ---
 
     async def record_applied(
