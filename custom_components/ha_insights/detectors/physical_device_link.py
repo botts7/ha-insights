@@ -337,11 +337,24 @@ class PhysicalDeviceLinkDetector(Detector):
             dev = d_reg.async_get(ent.device_id)
             if dev is None:
                 continue
-            for ct, cv in (dev.connections or set()):
-                if cv:
+            # v1.14.11: HA device.connections + device.identifiers
+            # used to always be 2-tuples of (domain, value). Some HA
+            # versions now emit 3+ element tuples for certain
+            # integrations (extra metadata), which broke the original
+            # `for ct, cv in ...` unpacking with ValueError. Tolerate
+            # both shapes by taking only the first two elements; skip
+            # anything malformed (None, 1-tuple, non-iterable).
+            for conn in (dev.connections or set()):
+                if not conn or len(conn) < 2:
+                    continue
+                ct, cv = conn[0], conn[1]
+                if isinstance(ct, str) and isinstance(cv, str) and cv:
                     by_signal[(ct, cv.lower())].append(ent.entity_id)
-            for ct, cv in (dev.identifiers or set()):
-                if cv:
+            for ident in (dev.identifiers or set()):
+                if not ident or len(ident) < 2:
+                    continue
+                ct, cv = ident[0], ident[1]
+                if isinstance(ct, str) and isinstance(cv, str) and cv:
                     by_signal[(f"id:{ct}", cv)].append(ent.entity_id)
         pairs: set[tuple[str, str]] = set()
         for eids in by_signal.values():

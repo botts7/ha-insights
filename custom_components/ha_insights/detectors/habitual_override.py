@@ -64,8 +64,14 @@ class HabitualOverrideDetector(Detector):
         if ctx.event_buffer is None:
             return []
 
+        # v1.14.11: ctx.event_buffer is `_FrozenBufferView` in
+        # production (per detectors/__init__.py), which exposes
+        # `.query(...)` not `.snapshot()`. Materialize via query()
+        # for cross-version compatibility — `find_habitual_overrides`
+        # needs a sequence to iterate twice (or .__len__).
+        events = tuple(ctx.event_buffer.query())
         stats = find_habitual_overrides(
-            ctx.event_buffer.snapshot(),
+            events,
             window_seconds=_WINDOW_SECONDS,
             lookback_days=_LOOKBACK_DAYS,
             min_days=_MIN_DAYS,
