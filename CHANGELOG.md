@@ -4,6 +4,110 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+## [1.14.7] — 2026-05-19
+
+### Added — apply-rate detector-quality penalty (closes v1.14 batch)
+
+Detectors whose suggestions users consistently reject now get their
+emitted insights' confidence demoted. New emissions from a
+"chronic rejection" detector show up less prominently in the panel
+and trip the existing low-confidence filler floor sooner.
+
+### The rule
+
+Per detector, computed from the v1.14.3+ verdict timeline:
+
+| Apply-rate | Penalty factor | Effect |
+|---|---|---|
+| ≥ 0.50 | 1.0× | Neutral — user finds the detector useful |
+| 0.20–0.50 | 0.85× | Light demotion |
+| < 0.20 | 0.60× | Heavy demotion (visibly less prominent) |
+
+Below `MIN_DECISIVE_VERDICTS = 5` the factor stays at **1.0** — too
+little signal to penalize. New installs see no penalty until
+enough verdict history accumulates.
+
+Snoozes / undos / clear_applied are filtered out: they don't
+reflect a user's opinion about the *value* of the suggestion. Only
+APPLY / DISMISS / RETIRE count. (Same set as the lib's
+`apply_rate` from v1.14.3a.)
+
+### Why penalty-only
+
+Confidence is a per-insight signal the detector set based on its
+own evidence. Inflating it post-hoc would lie to the rest of the
+pipeline (notification thresholds, repairs dual-emit, audit hooks
+all gate on confidence). Penalty-only stays honest.
+
+### New module — `lib/detector_quality.py`
+
+Pure stdlib, same architecture as the other v1.x libs:
+
+  - `apply_rate_from_kinds(kinds)` — `(rate, decisive_count)`.
+  - `compute_penalty_factor(rate, count)` — applies the rule above.
+  - `compute_penalties_by_detector(kinds_by_detector)` — bulk variant.
+
+### New store method
+
+`InsightStore.get_decisive_verdict_kinds_by_detector()` — SQL JOIN
+of `verdict_history` × `insights`, filtered to decisive kinds at
+the SQL level. Returns `{detector_name: [kind, ...]}`. Lighter
+than `get_all_verdict_histories` (no fingerprint deserialization)
+because we only need the kind sequence for the apply-rate math.
+
+### Wiring
+
+In `run_all_detectors`:
+
+  1. **Before** the per-detector scan loop: compute
+     `detector_quality_penalties` once via store JOIN + lib bulk
+     variant.
+  2. **Inside** the per-insight processing loop: `replace(insight,
+     confidence=insight.confidence * penalty)` if the lookup yields
+     anything ≠ 1.0. Happens BEFORE the existing low-confidence
+     filler check, so demoted insights legitimately get filtered
+     when they fall below the floor.
+
+Exception-safe: if the JOIN fails for any reason, falls back to an
+empty penalty dict (every detector defaults to 1.0).
+
+### Smoke output (local)
+
+```
+Detectors with verdicts: ['cooccurrence', 'schedule', 'state_shift']
+  cooccurrence: count=8,  apply_rate=0.00 → penalty=0.60
+  schedule:     count=10, apply_rate=0.20 → penalty=0.85
+  state_shift:  count=3,  apply_rate=0.00 → penalty=1.0  (<5 → neutral)
+
+Demotion examples (original confidence=0.85):
+  schedule (light):     0.85 * 0.85 = 0.722
+  cooccurrence (heavy): 0.85 * 0.60 = 0.510
+  state_shift (neutral): 0.85 * 1.0 = 0.850
+```
+
+### Tests
+
+  - 13 unit tests for the lib (empty, all-applies, mixed, retire-
+    counts-negative, snooze-ignored, unknown-kind-tolerated,
+    bucket boundaries, bulk variant, threshold exactness)
+  - 3 store-join tests (groups by detector, orphan verdicts
+    dropped via INNER JOIN, empty DB)
+
+### v1.14 batch complete
+
+Eight PRs, all CI-green, all tagged + released:
+
+| Version | What | PR |
+|---|---|---|
+| v1.14.0 | UnavailableDeviceFixItDetector | #75 |
+| v1.14.1 | RebootLoopDetector | #76 |
+| v1.14.2 | HardwareSuggestionDetector | #77 |
+| v1.14.3 | `lib/user_verdict_history.py` | #78 |
+| v1.14.4 | SQLite `verdict_history` + store methods | #79 |
+| v1.14.5 | `lib/environmental_fingerprint.py` + WS hooks | #80 |
+| v1.14.6 | AdaptiveFeedbackDetector | #81 |
+| **v1.14.7** | **apply-rate penalty** | this |
+
 ## [1.14.6] — 2026-05-19
 
 ### Added — AdaptiveFeedbackDetector (Step C-2 of v1.14.3)

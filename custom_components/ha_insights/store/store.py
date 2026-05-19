@@ -410,6 +410,40 @@ class InsightStore:
             for r in rows
         ]
 
+    async def get_decisive_verdict_kinds_by_detector(
+        self,
+    ) -> dict[str, list[str]]:
+        """For v1.14.7 apply-rate penalty: join verdict_history × insights
+        and return ``{detector_name: [verdict_kind, ...]}`` for the
+        APPLY / DISMISS / RETIRE rows only.
+
+        Snoozes / undos / clear_applied are filtered out at the SQL
+        level — they don't reflect a user's opinion about the
+        suggestion's *value*, and including them would dilute the
+        penalty signal. The lib's ``apply_rate_from_kinds`` filters
+        the same set client-side for defence-in-depth; the SQL
+        filter just keeps the rows small for big histories.
+
+        Output is dict-per-detector, not the full ``Verdict`` shape:
+        all we need for the apply_rate penalty is the kind sequence.
+        Lighter than ``get_all_verdict_histories`` (no fingerprint
+        deserialization).
+        """
+        async with self._c.execute(
+            """
+            SELECT i.detector, v.kind
+              FROM verdict_history v
+              JOIN insights i ON i.id = v.insight_id
+             WHERE v.kind IN ('applied', 'dismissed', 'retired')
+             ORDER BY i.detector ASC, v.timestamp ASC
+            """
+        ) as cur:
+            rows = await cur.fetchall()
+        out: dict[str, list[str]] = {}
+        for r in rows:
+            out.setdefault(r["detector"], []).append(r["kind"])
+        return out
+
     async def get_all_verdict_histories(
         self,
     ) -> dict[str, list[dict[str, object]]]:

@@ -465,6 +465,29 @@ async def run_all_detectors(
     # historical insights — we have no fresh signal that those are stale.
     completed_detectors: set[str] = set()
     emitted_ids: set[str] = set()
+
+    # v1.14.7: per-detector apply-rate penalty. Detectors whose
+    # suggestions the user consistently rejects get their emitted
+    # confidence demoted. Below MIN_DECISIVE_VERDICTS (=5) the
+    # factor stays 1.0 — too little signal to penalize. Computed
+    # once per scan (not per insight) for efficiency.
+    detector_quality_penalties: dict[str, float] = {}
+    try:
+        from ..lib.detector_quality import compute_penalties_by_detector
+
+        kinds_by_detector = (
+            await store.get_decisive_verdict_kinds_by_detector()
+        )
+        detector_quality_penalties = compute_penalties_by_detector(
+            kinds_by_detector
+        )
+    except Exception:
+        _LOGGER.debug(
+            "v1.14.7 apply-rate penalty pre-compute failed; "
+            "running scan without demotion",
+            exc_info=True,
+        )
+
     for name, detector_cls in DETECTORS.items():
         if cancel_event is not None and cancel_event.is_set():
             _LOGGER.info("HA Insights scan canceled by user before %r", name)
@@ -617,6 +640,19 @@ async def run_all_detectors(
                         conflicts_with=tuple(conflicts),
                         title=strip_already_automated_cta(insight.title),
                     )
+
+            # v1.14.7: apply the per-detector confidence penalty BEFORE
+            # the low-confidence filler check. Detectors with chronic
+            # low apply-rate get demoted, and that demotion legitimately
+            # pushes some of their insights below the filler floor —
+            # exactly the intended behaviour. Below MIN_DECISIVE_VERDICTS
+            # the factor stays 1.0 (lookup default), so new installs
+            # see no penalty until enough verdict history accumulates.
+            penalty = detector_quality_penalties.get(insight.detector, 1.0)
+            if penalty != 1.0:
+                insight = replace(
+                    insight, confidence=insight.confidence * penalty
+                )
 
             # v1.12.10 — drop low-confidence filler before persisting.
             # See `_is_low_confidence_filler` docstring for rationale.

@@ -294,6 +294,61 @@ async def test_reopen_doesnt_reapply_migration(tmp_path: Path) -> None:
 # ---------- Serialization stability ---------------------------------
 
 
+async def test_decisive_verdicts_by_detector_groups_correctly(
+    store: InsightStore,
+) -> None:
+    """v1.14.7: JOIN insights × verdict_history → per-detector kind lists."""
+    await store.add_insight(_make_insight("ins1", detector="schedule"))
+    await store.add_insight(_make_insight("ins2", detector="schedule"))
+    await store.add_insight(_make_insight("ins3", detector="cooccurrence"))
+    base = datetime(2026, 5, 1, tzinfo=UTC)
+
+    # schedule: 2 applies + 1 dismiss = 67%
+    await store.record_verdict(
+        "ins1", kind="applied", fingerprint=_fp(), when=base
+    )
+    await store.record_verdict(
+        "ins1", kind="dismissed", fingerprint=_fp(), when=base + timedelta(days=1)
+    )
+    await store.record_verdict(
+        "ins2", kind="applied", fingerprint=_fp(), when=base + timedelta(days=2)
+    )
+    # cooccurrence: 1 retire = 0%
+    await store.record_verdict(
+        "ins3", kind="retired", fingerprint=_fp(), when=base + timedelta(days=3)
+    )
+    # snooze on ins1 — should NOT appear (not decisive)
+    await store.record_verdict(
+        "ins1", kind="snoozed", fingerprint=_fp(), when=base + timedelta(days=4)
+    )
+
+    out = await store.get_decisive_verdict_kinds_by_detector()
+    assert set(out.keys()) == {"schedule", "cooccurrence"}
+    assert sorted(out["schedule"]) == ["applied", "applied", "dismissed"]
+    assert out["cooccurrence"] == ["retired"]
+
+
+async def test_decisive_verdicts_orphan_verdicts_dropped(
+    store: InsightStore,
+) -> None:
+    """A verdict whose insight is no longer in the insights table
+    silently disappears from the JOIN — that's the correct SQL
+    semantic (INNER JOIN drops orphans)."""
+    await store.add_insight(_make_insight("ins1", detector="schedule"))
+    await store.record_verdict(
+        "ins1", kind="applied", fingerprint=_fp(), when=datetime(2026, 5, 1, tzinfo=UTC)
+    )
+    # Manually delete the insight (no public delete method)
+    await store._c.execute("DELETE FROM insights WHERE id = ?", ("ins1",))
+    await store._c.commit()
+    out = await store.get_decisive_verdict_kinds_by_detector()
+    assert out == {}
+
+
+async def test_decisive_verdicts_empty_db(store: InsightStore) -> None:
+    assert await store.get_decisive_verdict_kinds_by_detector() == {}
+
+
 async def test_fingerprint_json_sorted_keys_for_diffability(
     store: InsightStore,
 ) -> None:
