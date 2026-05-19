@@ -4,6 +4,100 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+## [1.14.6] — 2026-05-19
+
+### Added — AdaptiveFeedbackDetector (Step C-2 of v1.14.3)
+
+The headline consumer of the v1.14.3 verdict-history pipeline.
+For every insight the user has previously dismissed or retired,
+this detector compares the environmental fingerprint captured at
+verdict time against the current fingerprint. If
+`should_re_suggest` returns True, the detector emits a fresh
+`PATTERN_OBSERVATION` "Revisit" insight nudging the user to take
+another look.
+
+The most common trigger:
+
+  - User dismissed "lights off when away" because they already had
+    `automation.competing` covering it.
+  - User later deleted that automation.
+  - Fingerprint diff: `automations_removed = {'automation.competing'}`.
+  - AdaptiveFeedback fires:
+    *"Revisit: `Lights off when away` — `automation.competing` was removed"*
+
+### Skip rules
+
+  - Original insight purged from store → skip
+  - Original currently applied → skip (user engaged)
+  - Active snooze → skip (let it run)
+  - 30-day cooldown after each verdict (enforced by lib)
+  - Retire bar higher than dismiss: only `automations_removed`
+    overrides a retire; new sensors alone aren't enough.
+
+### Payload structure
+
+```python
+{
+    "kind": "adaptive_feedback",
+    "original_insight_id": "abc123",
+    "original_title": "Lights off when away",
+    "original_detector": "schedule",
+    "negative_verdict_kind": "dismissed",
+    "days_since_negative_verdict": 120,
+    "what_changed": {
+        "automations_added": [...],
+        "automations_removed": ["automation.competing"],
+        "sensors_added_per_area": {...},
+        "sensors_removed_per_area": {...},
+        "integrations_added": [...],
+        "integrations_removed": [...],
+    },
+    "human_summary": "You dismissed ... because ... was removed — ...",
+    "verdict_history_summary": "1 dismissed",
+}
+```
+
+### Behaviour notes
+
+  - Never re-emits the original insight; emits a META-insight that
+    points at the original via `original_insight_id`.
+  - Original stays in its dismissed/retired state; the meta-insight
+    is a separate row the user can act on independently.
+  - Fingerprint dedupes across scans (one re-surface per original
+    insight), so re-running doesn't spam the panel.
+
+### Defensive
+
+  - Store-fetch failures are caught (detector returns `[]`).
+  - Hydration of verdict rows is per-row tolerant: malformed kind /
+    timestamp / fingerprint values skip the row without crashing.
+
+### Tests
+
+13 unit tests:
+
+  - Empty / null cases (no store, no history, store raises)
+  - Dismiss + automation_removed → emits
+  - Retire + automation_removed → emits (high bar met)
+  - Retire + sensor_added → skips (high bar not met)
+  - Applied insight → skips
+  - Active snooze → skips
+  - Missing original → skips
+  - Recent dismiss (cooldown) → skips
+  - Malformed verdict rows → skipped but real rows still processed
+  - Payload structure (all keys + human_summary content)
+  - Fingerprint stable across re-scans
+
+Smoke-verified end-to-end: 1 dismiss + competing automation removed
+→ correctly emits "Revisit: ..." with the right summary and
+auto-registers in DETECTORS.
+
+### Up next (optional)
+
+**v1.14.7:** wire `apply_rate` from the lib into detector-quality
+scoring so detectors with chronically-rejected suggestions get
+demoted in the panel.
+
 ## [1.14.5] — 2026-05-19
 
 ### Added — fingerprint capture + WS hook wiring (Step C-1 of v1.14.3)
