@@ -55,18 +55,30 @@ def _seed_weekday_routine(
     `.astimezone(UTC)` for buffer storage to mirror the production
     state_changed listener.
     """
-    end = end_now or dt_util.now()
+    # v1.14.13: localise `end` into HA's configured timezone BEFORE
+    # walking back the day offsets. The detector calls
+    # `dt_util.as_local(ev.timestamp).weekday()`, and the pytest-
+    # homeassistant-custom-component plugin sets
+    # `dt_util.DEFAULT_TIME_ZONE` to US/Pacific in CI. A fixture that
+    # builds `local_when` in UTC produces events whose local time is
+    # 22:47/23:47 the previous day — flipping weekday<->weekend, and
+    # putting the mean minute_of_day at 22:47 not 06:47. Both v1.14.12
+    # and v1.15.0 CI runs were red on this for exactly this reason.
+    end_raw = end_now or dt_util.now()
+    if end_raw.tzinfo is None:
+        end_raw = end_raw.replace(tzinfo=UTC)
+    tz = dt_util.DEFAULT_TIME_ZONE or UTC
+    end = end_raw.astimezone(tz)
     # v1.12.12: inject deterministic ±30-second jitter per day so the
-    # fixture stddev clears the new TIME_STDDEV_MIN_MIN (15s) gate.
-    # Real users firing a routine "at ~6:47" land between 6:46:30 and
-    # 6:47:30 across days; perfectly identical timestamps are the
-    # fingerprint of automation/device schedules and would be (correctly)
-    # suppressed by the detector under v1.12.12.
+    # fixture stddev clears the TIME_STDDEV_MIN_MIN (0.25 min ≈ 15s)
+    # gate. Real users firing a routine "at ~6:47" land between 6:46:30
+    # and 6:47:30 across days; perfectly identical timestamps are the
+    # fingerprint of automation/device schedules and would be
+    # (correctly) suppressed.
     #
-    # Pattern sums to 0 over each 5-day window so the AVERAGE second
-    # is exactly 0 — preserves existing "06:47" substring assertions
-    # regardless of which weekdays are sampled. Stddev across the
-    # pattern is ~21s, comfortably above the 15s gate.
+    # Pattern sums to 0 over each 5-day window so the AVERAGE second is
+    # exactly 0 — preserves existing "06:47" substring assertions
+    # regardless of which weekdays are sampled. Stddev ~21s clears 15s.
     second_jitter = [30, -30, 15, -15, 0]
     added = 0
     for offset in range(days):
