@@ -92,8 +92,20 @@ class WeatherCorrelationDetector(Detector):
         # precipitation-class correlations (rainy vs dry).
         temp_eid = self._pick_outdoor_temp_sensor(ctx)
         cutoff = datetime.now(tz=UTC) - timedelta(days=_LOOKBACK_DAYS)
+
+        # v1.15.1: pre-index the event buffer by entity once.
+        # StateEventBuffer.query(entity_id=X) is a linear scan over the
+        # whole buffer; previous implementation invoked it per habit
+        # entity AND per weather/temp pick, which on a 3,378-entity
+        # install pushed the detector past its 30 s budget.
+        # Pay one walk over the buffer here, then do O(1) dict
+        # lookups for each per-entity query downstream.
+        events_by_entity: dict[str, list] = defaultdict(list)
+        for ev in ctx.event_buffer.query(since=cutoff):
+            events_by_entity[ev.entity_id].append(ev)
+
         day_context = self._build_daily_weather_context(
-            ctx, weather_eid, temp_eid, cutoff
+            weather_eid, temp_eid, events_by_entity
         )
         if not day_context:
             return []
@@ -105,7 +117,9 @@ class WeatherCorrelationDetector(Detector):
 
         insights: list[Insight] = []
         for eid in habit_eids:
-            ins = self._evaluate_entity(ctx, eid, day_context, cutoff)
+            ins = self._evaluate_entity(
+                ctx, eid, day_context, events_by_entity.get(eid, [])
+            )
             if ins is not None:
                 insights.append(ins)
         return insights
@@ -164,10 +178,9 @@ class WeatherCorrelationDetector(Detector):
 
     def _build_daily_weather_context(
         self,
-        ctx: DetectorContext,
         weather_eid: str,
         temp_eid: str | None,
-        cutoff: datetime,
+        events_by_entity: dict[str, list],
     ) -> dict[date, dict[str, str]]:
         """For each day, return {temperature_class, precipitation_class,
         weather_state}.
@@ -184,22 +197,22 @@ class WeatherCorrelationDetector(Detector):
         carries only `(timestamp, entity_id, domain, area_id,
         old_state, new_state, context_user_id)` — historical
         attributes aren't replayed. Hence the separate temp sensor.
+
+        v1.15.1: takes the prebuilt events_by_entity index instead of
+        calling ctx.event_buffer.query(entity_id=...) twice. Saves
+        two full buffer scans per detector run.
         """
         from collections import Counter
 
         states_by_day: dict[date, list[str]] = defaultdict(list)
         temps_by_day: dict[date, list[float]] = defaultdict(list)
 
-        for ev in ctx.event_buffer.query(  # type: ignore[union-attr]
-            entity_id=weather_eid, since=cutoff
-        ):
+        for ev in events_by_entity.get(weather_eid, []):
             local = dt_util.as_local(ev.timestamp)
             states_by_day[local.date()].append((ev.new_state or "").lower())
 
         if temp_eid is not None:
-            for ev in ctx.event_buffer.query(  # type: ignore[union-attr]
-                entity_id=temp_eid, since=cutoff
-            ):
+            for ev in events_by_entity.get(temp_eid, []):
                 try:
                     val = float(ev.new_state or "")
                 except (TypeError, ValueError):
@@ -241,21 +254,22 @@ class WeatherCorrelationDetector(Detector):
         ctx: DetectorContext,
         eid: str,
         day_context: dict[date, dict[str, str]],
-        cutoff: datetime,
+        entity_events: list,
     ) -> Insight | None:
         """Look for systematic time-of-day shifts conditional on weather
         class. Returns at most one insight per habit entity, choosing
         the strongest correlation found.
+
+        v1.15.1: receives the prebuilt entity_events list (already
+        filtered to `since=cutoff` during scan's single buffer walk)
+        instead of issuing a fresh buffer.query per habit entity.
         """
         # Take only "active" transitions: off → on, idle → playing,
         # cover transitions to open. Filtering noise out of the
         # event stream is what gives the per-day anchor a chance
         # to be stable.
-        events = ctx.event_buffer.query(  # type: ignore[union-attr]
-            entity_id=eid, since=cutoff
-        )
         anchor_minutes_by_day: dict[date, int] = {}
-        for ev in events:
+        for ev in entity_events:
             new = (ev.new_state or "").lower()
             old = (ev.old_state or "").lower()
             if not self._is_active_transition(eid, old, new):
