@@ -1,5 +1,12 @@
 """WS handlers for v1.21 Wi-Fi inverse-multilateration find.
 
+v1.21.1 added ``ws_wifi_find_capability`` — a batch trackability
+query mirroring ``ws_ble_capability``. The PWA calls it on entering
+Wi-Fi mode to pre-filter the entity picker to only entities that
+actually expose Wi-Fi RSSI + an AP identifier, so users don't pick
+a useless mobile_app GPS tracker and only discover the mistake after
+hitting Start.
+
 Walking warmer/colder for Wi-Fi-trackable devices, without needing
 phone→device direct RSSI (which browsers can't read anyway).
 
@@ -279,6 +286,72 @@ async def ws_wifi_find_self(
     connection.send_result(msg["id"], initial)
 
 
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "home_insights/wifi_find_capability",
+        vol.Required("entity_ids"): [str],
+    }
+)
+@websocket_api.async_response
+async def ws_wifi_find_capability(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Batch Wi-Fi-trackability query for the PWA's mode-aware entity
+    filter.
+
+    Mirrors ``ws_ble_capability``. Read-only, not admin-gated — same
+    data the entity registry already exposes (we just enrich with the
+    Wi-Fi-attribute check).
+
+    Response per entity:
+      {
+        "is_trackable": true,
+        "signal_attribute": "rx_rssi",
+        "signal_dbm": -53,
+        "ap_attribute": "ap_mac",
+        "ap_identifier": "aa:bb:cc:dd:ee:01",
+        "reason": "...",
+      }
+
+    Non-existent / unrecognised entities still get a row with
+    ``is_trackable: false`` so the PWA can show "N of M trackable" for
+    the full input set without losing the count.
+    """
+    capabilities: dict[str, dict[str, Any]] = {}
+    for eid in msg["entity_ids"]:
+        if not isinstance(eid, str):
+            continue
+        state = hass.states.get(eid)
+        if state is None:
+            capabilities[eid] = {
+                "is_trackable": False,
+                "signal_attribute": None,
+                "signal_dbm": None,
+                "ap_attribute": None,
+                "ap_identifier": None,
+                "reason": (
+                    f"{eid} is not in the state machine. Integration "
+                    "may not be loaded, or the entity is disabled."
+                ),
+            }
+            continue
+        cap = wifi_find_capability_for(
+            eid, state_attributes=dict(state.attributes)
+        )
+        capabilities[eid] = {
+            "is_trackable": cap.is_trackable,
+            "signal_attribute": cap.signal_attribute,
+            "signal_dbm": cap.signal_dbm,
+            "ap_attribute": cap.ap_attribute,
+            "ap_identifier": cap.ap_identifier,
+            "reason": cap.reason,
+        }
+    connection.send_result(msg["id"], {"capabilities": capabilities})
+
+
 __all__ = [
+    "ws_wifi_find_capability",
     "ws_wifi_find_self",
 ]
