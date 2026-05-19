@@ -41,6 +41,11 @@ from .ble_find import (
     ws_ble_live_find,
 )
 from .chat import ws_chat_create_automation
+from .companion_scan import (
+    ws_companion_scan_sample,
+    ws_companion_scan_subscribe,
+    ws_companion_scan_unsubscribe,
+)
 from .hypothesize import ws_hypothesize
 from .identify import (
     ws_identify_capability,
@@ -74,6 +79,9 @@ __all__ = [
     "ws_ble_capability",
     "ws_ble_live_find",
     "ws_chat_create_automation",
+    "ws_companion_scan_sample",
+    "ws_companion_scan_subscribe",
+    "ws_companion_scan_unsubscribe",
     "ws_hypothesize",
     "ws_identify_capability",
     "ws_identify_entity",
@@ -239,6 +247,15 @@ SUPPORTED_METHODS = (
     # into the prompt as context. No prior insight required — works
     # on any free-form prompt.
     "chat_create_automation",
+    # v1.15.0 — PWA companion-scanner stream (experimental). The
+    # find-my-ha PWA streams BLE RSSI samples from the phone into
+    # the live-find EMA pipeline. Three messages: subscribe / sample
+    # / unsubscribe. Marked experimental — PWA is v0.2 / early-
+    # access at the v1.15.0 release point. Stable contract:
+    # find-my-ha/docs/WS_PROTOCOL.md.
+    "companion_scan_subscribe",
+    "companion_scan_sample",
+    "companion_scan_unsubscribe",
 )
 
 
@@ -296,6 +313,13 @@ def async_register(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_ble_live_find)
     # v1.13.2 Blank-canvas automation chat
     websocket_api.async_register_command(hass, ws_chat_create_automation)
+    # v1.15.0 PWA companion-scanner stream (experimental) — RSSI samples
+    # from a phone-resident scanner threaded into the BLE live-find
+    # smoothing pipeline. Stable contract docs:
+    # find-my-ha/docs/WS_PROTOCOL.md.
+    websocket_api.async_register_command(hass, ws_companion_scan_subscribe)
+    websocket_api.async_register_command(hass, ws_companion_scan_sample)
+    websocket_api.async_register_command(hass, ws_companion_scan_unsubscribe)
 
 
 # Helpers _get_store / _get_buffer / _audit_attempts /

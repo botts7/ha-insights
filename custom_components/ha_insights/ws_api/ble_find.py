@@ -165,6 +165,25 @@ async def ws_ble_capability(
 _BLE_EMA_ALPHA: float = 0.3
 
 
+def apply_rssi_ema(
+    prev: float | None,
+    raw: float,
+    *,
+    alpha: float = _BLE_EMA_ALPHA,
+) -> float:
+    """Single-step EMA for live RSSI samples.
+
+    Shared between ``ws_ble_live_find`` (stationary BLE proxies) and
+    ``companion_scan`` (PWA-streamed samples) so the card UI sees the
+    same smoothing regardless of which scanner produced the sample.
+    First sample (``prev is None``) is its own seed — avoids a long
+    convergence from an arbitrary fixed seed.
+    """
+    if prev is None:
+        return raw
+    return alpha * raw + (1.0 - alpha) * prev
+
+
 @websocket_api.websocket_command(
     {
         vol.Required("type"): "home_insights/ble_live_find",
@@ -238,11 +257,7 @@ async def ws_ble_live_find(
             raw_rssi = float(service_info.rssi)
         except (TypeError, AttributeError, ValueError):
             return
-        prev = ema_state["value"]
-        if prev is None:
-            ema = raw_rssi
-        else:
-            ema = _BLE_EMA_ALPHA * raw_rssi + (1.0 - _BLE_EMA_ALPHA) * prev
+        ema = apply_rssi_ema(ema_state["value"], raw_rssi)
         ema_state["value"] = ema
         connection.send_event(
             msg["id"],
@@ -275,6 +290,7 @@ async def ws_ble_live_find(
 
 
 __all__ = [
+    "apply_rssi_ema",
     "ws_ble_capability",
     "ws_ble_live_find",
 ]
