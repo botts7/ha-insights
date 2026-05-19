@@ -3281,6 +3281,13 @@ class HaInsightsCard extends i {
     button.action:hover:not(:disabled) {
       background: var(--secondary-background-color, rgba(0, 0, 0, 0.04));
     }
+    /* v1.10.15 — a11y: visible keyboard focus on every action button.
+       Desktop bulk-triage users rely on Tab/Shift+Tab; without a ring
+       you genuinely can't tell which button has focus. */
+    button.action:focus-visible {
+      outline: 2px solid var(--primary-color);
+      outline-offset: 2px;
+    }
     button.action:disabled {
       opacity: 0.5;
       cursor: not-allowed;
@@ -10544,18 +10551,68 @@ class HaInsightsPanel extends i {
             this._diagnosticsBusy = false;
         }
     }
-    /** Copy the loaded diagnostics JSON to the user's clipboard. Uses the
-     *  modern Clipboard API; falls back gracefully when not available
-     *  (e.g. running in an insecure context). */
+    /** Copy the loaded diagnostics JSON to the user's clipboard.
+     *
+     *  v1.10.14: Two-tier strategy because HA panels often run in
+     *  contexts where the modern Clipboard API is unavailable:
+     *    - non-https local-network installs (insecure context →
+     *      `navigator.clipboard` is `undefined`)
+     *    - iframe contexts without `clipboard-write` permission
+     *    - some older browsers
+     *
+     *  The previous version called `navigator.clipboard.writeText(...)`
+     *  unconditionally, which threw a TypeError ("Cannot read properties
+     *  of undefined (reading 'writeText')") before the promise could
+     *  even await. The user-visible toast then read the raw TypeError
+     *  message, which wasn't actionable. Now we feature-detect first
+     *  and fall back to the legacy textarea+execCommand pattern, which
+     *  works in every HA panel context.
+     */
     async _copyDiagnostics() {
         if (!this._diagnosticsJson)
             return;
         try {
-            await navigator.clipboard.writeText(this._diagnosticsJson);
+            if (navigator.clipboard?.writeText) {
+                await navigator.clipboard.writeText(this._diagnosticsJson);
+            }
+            else if (!this._legacyCopyToClipboard(this._diagnosticsJson)) {
+                throw new Error("Clipboard API unavailable AND legacy execCommand copy failed.");
+            }
             this._showToast("Diagnostics copied to clipboard. Paste into a GitHub issue or your AI chat.");
         }
         catch (err) {
             this._showToast(`Clipboard copy failed: ${err.message ?? String(err)}`);
+        }
+    }
+    /** Legacy fallback for browsers / contexts where `navigator.clipboard`
+     *  is `undefined`. Creates an off-screen textarea, selects its
+     *  content, runs `document.execCommand('copy')`, and removes the
+     *  textarea. Returns `true` on success, `false` if the browser
+     *  rejected the copy (rare).
+     *
+     *  Off-screen positioning via `fixed` + negative `left` rather than
+     *  `display: none` because Safari and some webkit-based browsers
+     *  refuse to select hidden elements.
+     */
+    _legacyCopyToClipboard(text) {
+        const textarea = document.createElement("textarea");
+        textarea.value = text;
+        textarea.setAttribute("readonly", "");
+        textarea.style.position = "fixed";
+        textarea.style.top = "0";
+        textarea.style.left = "-9999px";
+        textarea.style.opacity = "0";
+        document.body.appendChild(textarea);
+        try {
+            textarea.select();
+            textarea.setSelectionRange(0, text.length);
+            return document.execCommand("copy");
+        }
+        catch {
+            return false;
+        }
+        finally {
+            document.body.removeChild(textarea);
         }
     }
     _closeDiagnostics() {

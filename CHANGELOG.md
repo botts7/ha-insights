@@ -4,6 +4,15 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+## [1.15.2] — 2026-05-19
+
+### Changed — bundle card v1.10.15 panel.js (a11y polish)
+
+Picks up the focus-visible ring on all `.action` buttons in the
+card + panel surface. Desktop keyboard-nav users now see a 2 px
+primary-color outline when tabbing through dialog footers and
+insight rows. CSS-only change; no integration code touched.
+
 ## [1.15.1] — 2026-05-19
 
 ### Fixed — streak + weather_correlation 30 s timeouts on large installs
