@@ -68,6 +68,14 @@ _LOGGER = logging.getLogger(__name__)
 # outages (cloud APIs, ISP flaps, etc.).
 _HOURS_THRESHOLD = 48
 
+# How far back to query recorder when the live `last_changed` is
+# suspect (post-restart reset). HA's recorder retention defaults to
+# 10 days; we'd query 14 to also catch installs with extended
+# retention. Entities continuously unavailable longer than this
+# get a lower-bound timestamp at the start of the window, which
+# still trips the 48-hour gate correctly.
+_RECORDER_LOOKBACK_DAYS = 14
+
 # Confidence tiers by hours-stuck bucket.
 _CONFIDENCE_48_72 = 0.65
 _CONFIDENCE_72_168 = 0.78
@@ -117,6 +125,17 @@ class UnavailableDeviceFixItDetector(Detector):
 
         e_reg = _try_entity_registry(ctx.hass)
 
+        # Stage 1: gather all currently-unavailable candidates. Live
+        # `last_changed` is the first-pass timestamp; entities whose
+        # value falls inside (cutoff, now] are SUSPECT — HA recently
+        # restarted and some integrations reset `last_changed` on boot
+        # even when the entity was unavailable for weeks beforehand.
+        # On a 3,378-entity install with 78 integrations, hardware
+        # validation showed 1,603 unavailable entities ALL with
+        # last_changed <1h after restart — the detector missed every
+        # one because the live value lied.
+        candidates: list[tuple[State, datetime]] = []
+        suspect_eids: list[str] = []
         for state in ctx.hass.states.async_all():
             if state.state not in _DIAGNOSTIC_STATES:
                 continue
@@ -126,8 +145,6 @@ class UnavailableDeviceFixItDetector(Detector):
             domain = entity_id.split(".", 1)[0]
             if domain in _EXCLUDED_DOMAINS:
                 continue
-            # Skip if user already disabled / hidden the entity — they
-            # already know it's gone.
             if e_reg is not None:
                 entry = e_reg.async_get(entity_id)
                 if entry is not None and (
@@ -136,12 +153,39 @@ class UnavailableDeviceFixItDetector(Detector):
                 ):
                     continue
             last_changed = getattr(state, "last_changed", None)
-            if last_changed is None or last_changed > cutoff:
+            if last_changed is None:
                 continue
+            candidates.append((state, last_changed))
+            if last_changed > cutoff:
+                suspect_eids.append(entity_id)
 
+        # Stage 2: for SUSPECT entities, query recorder for the most
+        # recent state that wasn't unavailable/unknown. That timestamp
+        # is the true "unavailable_since" — entity has been continuously
+        # unavailable ever since. Bulk query (one recorder call, not
+        # one per entity).
+        recorder_unavailable_since: dict[str, datetime] = {}
+        if suspect_eids:
+            recorder_unavailable_since = await _recorder_unavailable_since(
+                ctx.hass,
+                suspect_eids,
+                lookback_days=_RECORDER_LOOKBACK_DAYS,
+                now=now,
+            )
+
+        # Stage 3: compute effective unavailable_since per candidate.
+        # min(live, recorder) so we prefer the older timestamp when
+        # recorder has a clearer picture.
+        for state, live_last_changed in candidates:
+            effective_since = live_last_changed
+            recorder_ts = recorder_unavailable_since.get(state.entity_id)
+            if recorder_ts is not None and recorder_ts < live_last_changed:
+                effective_since = recorder_ts
+            if effective_since > cutoff:
+                continue
             insight = self._build_insight(
                 state=state,
-                last_changed=last_changed,
+                last_changed=effective_since,
                 now=now,
                 ctx=ctx,
                 e_reg=e_reg,
@@ -151,8 +195,10 @@ class UnavailableDeviceFixItDetector(Detector):
 
         if insights:
             _LOGGER.debug(
-                "UnavailableDeviceFixItDetector emitted %d insights",
+                "UnavailableDeviceFixItDetector emitted %d insights "
+                "(%d suspect entities resolved via recorder)",
                 len(insights),
+                len(suspect_eids),
             )
         return insights
 
@@ -346,3 +392,131 @@ def _suggested_actions(
     )
 
     return actions
+
+
+async def _recorder_unavailable_since(
+    hass: HomeAssistant,
+    entity_ids: list[str],
+    *,
+    lookback_days: int,
+    now: datetime,
+) -> dict[str, datetime]:
+    """For each entity_id, return the timestamp of the MOST RECENT
+    non-unavailable state in recorder history. Entity has been
+    continuously unavailable since at least then.
+
+    Why: HA restart resets ``state.last_changed`` for many
+    integrations (Tuya cloud, polling-only integrations, etc.).
+    Hardware validation on a 3,378-entity install showed all 1,603
+    unavailable entities had post-restart timestamps even though
+    many had been dead for weeks. The recorder's ``states`` table
+    preserves the true history across restarts.
+
+    If the entity has NO non-unavailable state in the lookback
+    window, returns the start of the window — a conservative lower
+    bound that still trips the 48-hour gate. Failures (recorder
+    unavailable, query timeout, etc.) are swallowed and result in
+    that entity being absent from the returned dict; the caller
+    then falls back to the live ``last_changed`` for those.
+
+    Runs on the recorder's executor (per HA core review guidelines)
+    so the query cooperates with concurrent writes.
+    """
+    if not entity_ids:
+        return {}
+
+    try:
+        from homeassistant.components.recorder import get_instance
+        from homeassistant.components.recorder.history import (
+            get_significant_states,
+        )
+    except ImportError:
+        return {}
+
+    start = now - timedelta(days=lookback_days)
+
+    def _query() -> dict[str, list]:
+        try:
+            return get_significant_states(
+                hass,
+                start,
+                now,
+                entity_ids,
+                significant_changes_only=False,
+                minimal_response=True,
+                no_attributes=True,
+            )
+        except Exception as err:
+            _LOGGER.debug(
+                "Recorder query for unavailable_device_fixit failed: %s", err
+            )
+            return {}
+
+    try:
+        recorder = get_instance(hass)
+        result = await recorder.async_add_executor_job(_query)
+    except Exception:
+        _LOGGER.debug(
+            "Failed to schedule recorder query for unavailable_device_fixit",
+            exc_info=True,
+        )
+        return {}
+
+    out: dict[str, datetime] = {}
+    if not isinstance(result, dict):
+        return out
+    for eid in entity_ids:
+        rows = result.get(eid) or []
+        most_recent_non_unavail: datetime | None = None
+        for row in rows:
+            row_state = _row_state_value(row)
+            if row_state is None or row_state in _DIAGNOSTIC_STATES:
+                continue
+            ts = _row_state_timestamp(row)
+            if ts is None:
+                continue
+            if most_recent_non_unavail is None or ts > most_recent_non_unavail:
+                most_recent_non_unavail = ts
+        if most_recent_non_unavail is not None:
+            out[eid] = most_recent_non_unavail
+        elif rows:
+            # Recorder has rows but ALL were unavailable/unknown —
+            # entity has been continuously dead through the window.
+            # Use start as a conservative lower bound.
+            out[eid] = start
+        # else: no recorder history at all → leave eid absent so the
+        # caller falls back to live last_changed.
+    return out
+
+
+def _row_state_value(row) -> str | None:
+    """Extract the state value from one recorder row.
+
+    Modern recorder returns State objects; ``minimal_response=True``
+    returns dicts with a ``state`` key. Tolerate both.
+    """
+    if hasattr(row, "state"):
+        s = row.state
+        return s if isinstance(s, str) else None
+    if isinstance(row, dict):
+        s = row.get("state")
+        return s if isinstance(s, str) else None
+    return None
+
+
+def _row_state_timestamp(row) -> datetime | None:
+    """Extract the timestamp from one recorder row. Mirrors the
+    pattern in ``audit/rollup.py:_state_timestamp`` for consistency."""
+    if hasattr(row, "last_changed") and row.last_changed is not None:
+        return row.last_changed
+    if isinstance(row, dict):
+        for key in ("last_changed", "last_updated"):
+            v = row.get(key)
+            if isinstance(v, str):
+                try:
+                    return datetime.fromisoformat(v.replace("Z", "+00:00"))
+                except ValueError:
+                    continue
+            elif isinstance(v, datetime):
+                return v
+    return None
