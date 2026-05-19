@@ -4,6 +4,46 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+## [1.14.0] — 2026-05-19
+
+### Added — UnavailableDeviceFixItDetector
+
+New EXPERIMENTAL detector flags entities stuck in `unavailable` or
+`unknown` for **48+ hours** and emits a diagnostic-style ANOMALY
+insight with structured fix guidance.
+
+HA already shows you that an entity is unavailable, but does not
+surface *how long* prominently. A motion sensor dead for 6 weeks
+looks identical in the UI to one that flickered offline this
+afternoon. This detector turns "you have 47 unavailable entities"
+into "8 of them have been broken for >1 month — start here."
+
+Each insight surfaces:
+
+  - Entity friendly name + current state
+  - Hours stuck (and a confidence tier that scales with duration)
+  - Owning integration + deeplink to its Settings page
+  - Tiered suggested actions: physical-device check → cloud/local
+    integration class hints → domain-specific hints (Companion app
+    for device_tracker / person; HVAC hub for climate) → restart-
+    integration walkthrough → "remove if abandoned"
+
+Confidence tiers:
+
+  - 48-72 h: 0.65 (might still be transient)
+  - 72-168 h (3-7 d): 0.78
+  - 168-720 h (1-4 w): 0.88
+  - 720+ h (4+ w): 0.95 (abandoned/broken)
+
+Excluded domains: `automation`, `script`, `scene`, `zone`, `sun`,
+`persistent_notification` (where unavailable/unknown is either
+impossible or expected noise). Registry-disabled and registry-
+hidden entities are skipped (user already knows). Privacy
+blocklist honoured.
+
+Marked `Maturity.EXPERIMENTAL`; threshold and excluded-domain list
+will tune from real-install feedback.
+
 ## [1.13.9] — 2026-05-19
 
 ### Internal — ws_api LLM-handler family extraction (v1.13 step 7)
