@@ -28,10 +28,10 @@ def _ctx_with_buffer(buf: StateEventBuffer) -> DetectorContext:
 
 # v1.14.13: anchor every fixture to the MOST RECENT Monday so the
 # 14-day window deterministically covers the same 10 weekdays at the
-# same jitter offsets. Earlier attempts used a hard-coded date but the
-# detector's LOOKBACK_DAYS=14 cutoff filtered all events out once that
-# date drifted outside the window. A dynamic Monday is fresh AND
-# day-of-week-stable.
+# same jitter offsets. v1.14.12 used a hard-coded date (2026-03-09)
+# but the detector's LOOKBACK_DAYS=14 cutoff filtered all events out
+# once that date drifted outside the window — every CI run after a
+# couple of weeks. A dynamic Monday is fresh AND day-of-week-stable.
 def _most_recent_monday_utc() -> datetime:
     today = datetime.now(tz=UTC).replace(
         hour=10, minute=0, second=0, microsecond=0,
@@ -68,7 +68,8 @@ def _seed_weekday_routine(
     # `dt_util.DEFAULT_TIME_ZONE` to US/Pacific in CI. A fixture that
     # builds `local_when` in UTC produces events whose local time is
     # 22:47/23:47 the previous day — flipping weekday<->weekend, and
-    # putting the mean minute_of_day at 22:47 not 06:47.
+    # putting the mean minute_of_day at 22:47 not 06:47. Both v1.14.12
+    # and v1.15.0 CI runs were red on this for exactly this reason.
     end_raw = end_now or dt_util.now()
     if end_raw.tzinfo is None:
         end_raw = end_raw.replace(tzinfo=UTC)

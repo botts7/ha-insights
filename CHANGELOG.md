@@ -68,6 +68,26 @@ changes will bump `schema_version`.
 
 ## [1.14.12] — 2026-05-19
 
+### Fixed — schedule_detector test flake (day-of-week sensitive)
+
+`test_consistent_weekday_routine_produces_insight` and
+`test_insight_payload_is_valid_automation_shape` were red on
+unfriendly weekdays AND when CI's `dt_util.DEFAULT_TIME_ZONE` was
+US/Pacific (the pytest-homeassistant-custom-component default).
+Two compounding root causes:
+
+1. The seed built `local_when` in UTC; the detector's
+   `dt_util.as_local()` then shifted events to 22:47/23:47 the
+   previous local day, flipping weekday<->weekend.
+2. A hard-coded `_FIXED_NOW` anchor went stale once it drifted
+   outside the detector's `LOOKBACK_DAYS=14` cutoff — every
+   seeded event then filtered out.
+
+Fix: localise `end` into HA's configured timezone before walking
+back the day offsets, and compute `_FIXED_NOW` dynamically as the
+most-recent Monday at 10:00 UTC (fresh AND day-of-week-stable).
+No production code touched.
+
 ### Fixed — dev_audit event-buffer counter always reported 0
 
 Hardware validation showed `events_24h: 0`, `events_7d: 0`,
