@@ -4,6 +4,68 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+## [1.15.0] — 2026-05-19
+
+### Added — `companion_scan_stream` WS handler family (experimental)
+
+A new server-side WebSocket protocol that lets the companion PWA
+(`find-my-ha`, separate repo) stream BLE RSSI samples from the
+user's phone into HA Insights' live-find machinery. Until now, BLE
+live-find could only use stationary scanners — proxies, APs, and
+ESPHome BLE proxies. Stationary scanners give *room-level* find
+because the geometry is fixed; a moving phone gives the "warmer /
+colder" UX the v1.10–v1.12 Find-My-Device feature was designed
+around. This release ships the integration side of the contract;
+the PWA itself is at v0.2 / early-access.
+
+Three new WS messages, namespaced under `home_insights/`:
+
+  - **`companion_scan_subscribe`** — admin-gated. Names the target
+    entity (and optionally the BLE MAC the PWA is filtering on).
+    Replies with `{subscription_id, max_sample_rate_hz: 4}`. A new
+    subscribe for the same `(user, entity_id)` replaces the
+    previous one (per spec); the displaced subscription gets its
+    own unsubscribe audit row for honesty.
+  - **`companion_scan_sample`** — fire-and-forget RSSI reading
+    `{subscription_id, rssi, ts_ms, device_name?}`. Server-side
+    rate-limited to 4 Hz (drop-silent), stale-dropped at > 60 s
+    `ts_ms` skew, and threaded through the same EMA smoothing that
+    stationary proxies feed (extracted as
+    `ws_api.ble_find.apply_rssi_ema` for shared use). Emits a
+    `companion`-source live event on the original subscribe msg id
+    so card-side renderers can use one handler for both phone and
+    proxy streams.
+  - **`companion_scan_unsubscribe`** — idempotent teardown.
+    Connection close also implicitly unsubscribes via the standard
+    HA `connection.subscriptions` cleanup hook.
+
+### Privacy / audit
+
+Subscribe and unsubscribe each write one row to `outbound_calls`
+via `record_call` (agent=`companion-scan`,
+agent_locality=`local`, redaction_mode=`local`). The unsubscribe
+row carries an aggregate summary (samples accepted / dropped /
+duration / reason). Individual samples are NOT logged — at 4 Hz
+× 10 min that'd be 2400 rows per session.
+
+### Maturity
+
+`experimental`. The PWA itself is at v0.2 / early-access. The
+contract is documented at `find-my-ha/docs/WS_PROTOCOL.md`
+(`schema_version: 1`). Behaviour, message names, and the
+sample-rate cap may evolve before v1.16 — forward-incompatible
+changes will bump `schema_version`.
+
+### Files
+
+  - `custom_components/ha_insights/ws_api/companion_scan.py` (new)
+  - `custom_components/ha_insights/ws_api/ble_find.py` (extracted
+    `apply_rssi_ema` from inline EMA, no behaviour change for
+    `ws_ble_live_find`)
+  - `custom_components/ha_insights/ws_api/__init__.py` (register +
+    `SUPPORTED_METHODS`)
+  - `tests/test_ws_companion_scan.py` (new)
+
 ## [1.14.12] — 2026-05-19
 
 ### Fixed — dev_audit event-buffer counter always reported 0
