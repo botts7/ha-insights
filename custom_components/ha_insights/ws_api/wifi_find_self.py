@@ -108,7 +108,7 @@ _CONTROLLER_SIDE_PLATFORMS: frozenset[str] = frozenset({
 
 def _collect_device_state_attrs(
     hass: HomeAssistant, entity_id: str
-) -> tuple[dict[str, Any], list[str]]:
+) -> tuple[dict[str, Any], list[str], bool]:
     """Gather state attributes from `entity_id` AND every sister entity
     on the same device, merged into one dict.
 
@@ -124,9 +124,14 @@ def _collect_device_state_attrs(
     on the same device closes the gap without forcing users to pick
     the right one of three siblings.
 
-    Returns the merged-attribute dict + the list of entity_ids
-    consulted (caller uses the list to subscribe to all of them so
-    state changes on the sister sensor still drive updates).
+    Returns: (merged-attrs, consulted_entities, signal_sensor_exists).
+    The third tuple element is v1.22.2 — tracks whether the device has
+    a sister entity STRUCTURALLY tagged as a Wi-Fi signal sensor (by
+    device_class or name suffix), regardless of whether its current
+    state is a usable value. The WS handler uses this to mark
+    entities as trackable-pending-first-reading instead of rejecting
+    them outright when the Omada (or any) controller's per-client
+    poll cycle hasn't fired yet.
 
     Picked-entity attributes take precedence over sister attributes
     on key collisions, mirroring the v1.18 capability lib's existing
@@ -137,16 +142,17 @@ def _collect_device_state_attrs(
     except ImportError:
         # Standalone unit tests may run without HA registry helpers.
         state = hass.states.get(entity_id)
-        return (dict(state.attributes) if state else {}, [entity_id])
+        return (dict(state.attributes) if state else {}, [entity_id], False)
 
     e_reg = er.async_get(hass)
     state = hass.states.get(entity_id)
     merged: dict[str, Any] = dict(state.attributes) if state else {}
     consulted: list[str] = [entity_id]
+    signal_sensor_exists = False
 
     primary = e_reg.async_get(entity_id)
     if primary is None or primary.device_id is None:
-        return (merged, consulted)
+        return (merged, consulted, signal_sensor_exists)
 
     # v1.21.3: only proceed if the picked entity itself comes from a
     # controller-side integration (or mobile_app). Skips the "ESPHome
@@ -165,7 +171,7 @@ def _collect_device_state_attrs(
         # Picked entity is from a non-controller integration. The merge
         # would just pick up its self-reported wifi_signal sister.
         # Reject before even walking the device's entities.
-        return (merged, consulted)
+        return (merged, consulted, signal_sensor_exists)
 
     # Walk sister entities on the same device. Skip the picked entity
     # itself (already merged); skip disabled / hidden entries (HA
@@ -201,6 +207,15 @@ def _collect_device_state_attrs(
         #     → synthetic attr access_point="UniFi AP Kitchen"
         raw_state = sister_state.state
         dc = sister_state.attributes.get("device_class")
+        # v1.22.2: track structural existence of a signal sensor
+        # regardless of current state — Omada's per-client poll cycle
+        # often leaves these "unknown" between cycles, but the
+        # subscription will populate once a reading lands.
+        if (
+            isinstance(dc, str)
+            and dc.lower() == "signal_strength"
+        ):
+            signal_sensor_exists = True
         if (
             isinstance(dc, str)
             and dc.lower() == "signal_strength"
@@ -213,6 +228,11 @@ def _collect_device_state_attrs(
         # Promote state to a key matching the entity's name-segment when
         # the segment looks like a known capability attribute.
         last_segment = sister.entity_id.split(".", 1)[-1].rsplit("_", 1)[-1]
+        if last_segment in {
+            "signal", "rssi", "rx_signal", "tx_signal",
+        }:
+            # v1.22.2: structural existence flag for the WS handler.
+            signal_sensor_exists = True
         if last_segment in {
             "signal", "rssi", "rx_signal", "tx_signal",
             "access_point", "ap", "bssid",
@@ -243,7 +263,7 @@ def _collect_device_state_attrs(
             }:
                 merged.setdefault(key, value)
         consulted.append(sister.entity_id)
-    return (merged, consulted)
+    return (merged, consulted, signal_sensor_exists)
 
 
 def _resolve_ap_device_id(
@@ -351,7 +371,9 @@ async def ws_wifi_find_self(
     # v1.21.2: merge sister-entity attributes so the cap check uses
     # signal + AP info that may live on different entities of the
     # same device (UniFi's standard layout).
-    merged_attrs, consulted_entities = _collect_device_state_attrs(
+    # v1.22.2: also returns whether a signal sensor structurally
+    # exists — used for the trackable-pending-first-reading override.
+    merged_attrs, consulted_entities, _ = _collect_device_state_attrs(
         hass, entity_id
     )
     cap = wifi_find_capability_for(
@@ -383,7 +405,7 @@ async def ws_wifi_find_self(
         # each state change. Cheap (~ms for typical 2-4 sisters per
         # device); essential so we pick up the AP friendly name from
         # a sensor that ticks at a different cadence than the tracker.
-        sample_attrs, _ = _collect_device_state_attrs(hass, entity_id)
+        sample_attrs, _, _ = _collect_device_state_attrs(hass, entity_id)
         sample_cap = wifi_find_capability_for(
             entity_id, state_attributes=sample_attrs
         )
@@ -537,8 +559,35 @@ async def ws_wifi_find_capability(
         # entity on the same device. UniFi etc. split signal + AP into
         # separate sensors; checking just the picked entity rejected
         # essentially every real install.
-        merged_attrs, consulted = _collect_device_state_attrs(hass, eid)
+        # v1.22.2: also returns whether a signal sensor structurally
+        # exists on the device — used to override is_trackable=False
+        # when the controller's poll cycle hasn't populated values yet.
+        merged_attrs, consulted, signal_sensor_exists = (
+            _collect_device_state_attrs(hass, eid)
+        )
         cap = wifi_find_capability_for(eid, state_attributes=merged_attrs)
+        # v1.22.2: trackable-pending-first-reading. If the structural
+        # check found a signal sensor + the entity exposes an AP id,
+        # mark trackable even when the current signal value is
+        # unknown. The subscription will deliver the first reading
+        # when the controller polls next; v0.7.1 PWA has the 45 s
+        # no-sample-yet warning UX already.
+        trackable_override = (
+            (not cap.is_trackable)
+            and signal_sensor_exists
+            and (cap.ap_identifier is not None)
+        )
+        if trackable_override:
+            is_trackable = True
+            reason = (
+                "Wi-Fi signal sensor exists on this device but its "
+                "current value is unknown — controller's per-client "
+                "poll cycle hasn't reported yet. PWA will wait up to "
+                "45 s for the first sample after subscription."
+            )
+        else:
+            is_trackable = cap.is_trackable
+            reason = cap.reason
         # v1.21.3: also surface the picked entity's integration platform
         # so the PWA can decide whether to even show the Wi-Fi mode button.
         try:
@@ -550,14 +599,18 @@ async def ws_wifi_find_capability(
             picked = e_reg.async_get(eid)
             picked_platform = picked.platform if picked else None
         capabilities[eid] = {
-            "is_trackable": cap.is_trackable,
+            "is_trackable": is_trackable,
             "signal_attribute": cap.signal_attribute,
             "signal_dbm": cap.signal_dbm,
             "ap_attribute": cap.ap_attribute,
             "ap_identifier": cap.ap_identifier,
-            "reason": cap.reason,
+            "reason": reason,
             "consulted_entities": consulted,
             "platform": picked_platform,
+            # v1.22.2: surface the override so PWA can show a "data
+            # pending" badge instead of treating these like fully-
+            # confirmed trackable entities.
+            "pending_first_reading": trackable_override,
         }
     connection.send_result(msg["id"], {"capabilities": capabilities})
 
