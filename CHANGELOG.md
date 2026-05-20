@@ -4,6 +4,26 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+## [1.21.4] — 2026-05-20
+
+### Changed — bundle card v1.10.16 panel.js (modal renderers + layout + Load-more)
+
+Picks up the v1.10.16 panel rebuild:
+
+- **Subject-specific modal bodies for v1.14.x detectors.** Modals
+  for `unavailable_device_fixit`, `reboot_loop`, `hardware_suggestion`,
+  `stale_automation`, and `wifi_find` now render with friendly fields
+  + suggested-actions lists + deeplinks instead of raw JSON.
+- **Panel header layout.** Detector filter chips move out of the
+  titles column into a full-width row below; action buttons get
+  `flex-wrap` so they stop clipping at the viewport's right edge.
+  Eliminates the dead-space gap above insights on busy installs.
+- **Load-more pagination.** The "Showing 200 of 788 — +588 more →"
+  truncation footer is now a working button. Panel listens for
+  `ha-insights-card-load-more` and bumps its cap by 200 each click.
+
+Bundle-only change. No backend code touched. panel.js +15 kB.
+
 ## [1.21.3] — 2026-05-20
 
 ### Fixed — controller-platform whitelist excludes stationary self-reports
