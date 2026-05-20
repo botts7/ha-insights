@@ -4,6 +4,57 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+## [1.21.3] — 2026-05-20
+
+### Fixed — controller-platform whitelist excludes stationary self-reports
+
+Real-install validation 2026-05-20: with v1.21.2's sister-entity
+merge live, a user with 326 device-trackers reported the picker
+showing ONE candidate — "Main Room Light 4," an ESPHome smart
+light. The light is tracked by the router (presence), AND it
+exposes its own ESPHome wifi_signal sensor (default ESPHome
+component). v1.21.2 happily merged the two and flagged the device
+Wi-Fi-findable. But the light is stationary — its self-reported
+RSSI doesn't change a single dB as the user walks. False positive
+that wastes a tap.
+
+### Fix
+
+`_CONTROLLER_SIDE_PLATFORMS` whitelist gates the sister-entity
+merge:
+- **Allowed**: unifi, asuswrt, tplink_omada, mikrotik, ubus,
+  ddwrt, fritz, keenetic_ndms2, luci, huawei_lte (controllers
+  that measure the client's signal from the AP's perspective —
+  signal varies as the client walks), plus mobile_app (HA
+  Companion app — self-reported but the device IS mobile).
+- **Excluded**: esphome, shelly, tasmota, mqtt-platform IoT
+  devices, ZHA, zwave_js (self-reported by stationary devices —
+  signal doesn't change with user movement).
+
+Two gates:
+1. The picked entity's own `platform` must be in the whitelist,
+   otherwise the merge short-circuits and returns only the
+   picked-entity's attributes (so the v1.18 capability check
+   rejects it cleanly).
+2. Each sister entity's `platform` is checked the same way,
+   preventing an ESPHome wifi_signal sister from being merged
+   into a UniFi-tracked device.
+
+The capability response now also includes `platform` so the PWA
+can hide the Wi-Fi mode button entirely on installs with zero
+controller-side trackable entities (find-my-ha v0.7.4 pairing).
+
+### Companion-app upstream context
+
+Real Wi-Fi find for installs without UniFi/Omada needs the HA
+Companion app to expose Wi-Fi RSSI at higher cadence than the
+current default (and ideally as a foreground-streaming sensor
+during an active "find" session). New draft issue at
+`docs/drafts/companion_app_wifi_rssi_streaming.md` mirrors the
+v1.21.x architecture as prior art for the upstream proposal.
+Sister to the BLE active-scan draft from earlier in the
+find-my-device roadmap.
+
 ## [1.21.2] — 2026-05-20
 
 ### Fixed — Wi-Fi capability merges sister-entity attributes

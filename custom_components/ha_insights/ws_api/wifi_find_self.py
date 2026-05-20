@@ -66,6 +66,35 @@ if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
 
 
+# v1.21.3 — only count signal/AP attributes from sister entities sourced
+# by integrations that report CONTROLLER-SIDE RSSI (i.e., the AP/router
+# measures the client's signal as the client moves). Self-reported
+# wifi_signal sensors from ESPHome / Shelly / Tasmota / MQTT-IoT-side
+# integrations are AP-as-seen-by-stationary-device — useless for walking
+# find. Mobile-app self-reports are kept because the device IS mobile,
+# so its self-reported signal does change as the user moves.
+#
+# Real-install validation 2026-05-20 (user with 326 device-trackers):
+# without this whitelist, the "Main Room Light 4" ESPHome smart light
+# leaked through as the only Wi-Fi-findable candidate because its
+# wifi_signal sensor sat on the same device as a router presence
+# tracker. Wrong answer — the light is stationary, walking around won't
+# change its self-reported RSSI by a single dB.
+_CONTROLLER_SIDE_PLATFORMS: frozenset[str] = frozenset({
+    "unifi",            # UniFi Network integration
+    "asuswrt",          # Asuswrt + Asuswrt-Merlin
+    "tplink_omada",     # TP-Link Omada controller
+    "mikrotik",         # RouterOS
+    "ubus",             # OpenWRT
+    "ddwrt",            # DD-WRT routers
+    "fritz",            # AVM Fritz!Box
+    "keenetic_ndms2",   # Keenetic routers
+    "luci",             # OpenWRT LuCI
+    "huawei_lte",       # Huawei LTE routers
+    "mobile_app",       # HA Companion — self-reported but device IS mobile
+})
+
+
 def _collect_device_state_attrs(
     hass: HomeAssistant, entity_id: str
 ) -> tuple[dict[str, Any], list[str]]:
@@ -108,15 +137,42 @@ def _collect_device_state_attrs(
     if primary is None or primary.device_id is None:
         return (merged, consulted)
 
+    # v1.21.3: only proceed if the picked entity itself comes from a
+    # controller-side integration (or mobile_app). Skips the "ESPHome
+    # device tracked by router presence" false positive that fooled
+    # v1.21.2 — the router tracker's `platform` is something like
+    # `asuswrt`, but if a stationary ESPHome device just happens to be
+    # registered by it AND has a self-reported wifi_signal sister, we
+    # don't want to flag the ESP light as Wi-Fi-findable.
+    #
+    # Rule: the picked entity's platform must be in the whitelist.
+    # That excludes ESPHome/Shelly/Tasmota tracked-by-router cases
+    # where the device's primary identity is the IoT integration even
+    # though presence happens to be tracked by the router.
+    primary_platform = (primary.platform or "").lower()
+    if primary_platform and primary_platform not in _CONTROLLER_SIDE_PLATFORMS:
+        # Picked entity is from a non-controller integration. The merge
+        # would just pick up its self-reported wifi_signal sister.
+        # Reject before even walking the device's entities.
+        return (merged, consulted)
+
     # Walk sister entities on the same device. Skip the picked entity
     # itself (already merged); skip disabled / hidden entries (HA
-    # already hides them from the UI).
+    # already hides them from the UI); skip sisters from non-controller
+    # integrations (an ESPHome wifi_signal sister on a UniFi-tracked
+    # device should not be merged).
     for sister in e_reg.entities.values():
         if sister.device_id != primary.device_id:
             continue
         if sister.entity_id == entity_id:
             continue
         if sister.disabled_by or sister.hidden_by:
+            continue
+        sister_platform = (sister.platform or "").lower()
+        if (
+            sister_platform
+            and sister_platform not in _CONTROLLER_SIDE_PLATFORMS
+        ):
             continue
         sister_state = hass.states.get(sister.entity_id)
         if sister_state is None:
@@ -472,6 +528,16 @@ async def ws_wifi_find_capability(
         # essentially every real install.
         merged_attrs, consulted = _collect_device_state_attrs(hass, eid)
         cap = wifi_find_capability_for(eid, state_attributes=merged_attrs)
+        # v1.21.3: also surface the picked entity's integration platform
+        # so the PWA can decide whether to even show the Wi-Fi mode button.
+        try:
+            from homeassistant.helpers import entity_registry as er
+        except ImportError:
+            picked_platform = None
+        else:
+            e_reg = er.async_get(hass)
+            picked = e_reg.async_get(eid)
+            picked_platform = picked.platform if picked else None
         capabilities[eid] = {
             "is_trackable": cap.is_trackable,
             "signal_attribute": cap.signal_attribute,
@@ -480,6 +546,7 @@ async def ws_wifi_find_capability(
             "ap_identifier": cap.ap_identifier,
             "reason": cap.reason,
             "consulted_entities": consulted,
+            "platform": picked_platform,
         }
     connection.send_result(msg["id"], {"capabilities": capabilities})
 
