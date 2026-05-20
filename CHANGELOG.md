@@ -4,6 +4,47 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+## [1.22.2] — 2026-05-20
+
+### Fixed — Wi-Fi mode hidden when RSSI sensor exists but has unknown state
+
+Real-install diagnostic: user has zachcheatham/ha-omada installed,
+`device_tracker.<phone>` has `ap_mac` + `ap_name` populated, sister
+`sensor.<phone>_rssi` exists — but the RSSI sensor's current state
+is `"unknown"` because the Omada controller's per-client statistics
+poll hasn't fired yet. v1.21.2's heuristic correctly skips "unknown"
+states (so we don't promote garbage to a numeric attribute), but
+that caused the trackability check to return False overall,
+hiding the Wi-Fi mode button.
+
+### The fix
+
+`_collect_device_state_attrs` now also returns a third boolean —
+`signal_sensor_exists` — that's True whenever a sister entity is
+structurally tagged as a Wi-Fi signal sensor (by `device_class` or
+name suffix), regardless of its current state value.
+
+The WS handler uses this to apply a **trackable-pending-first-
+reading override**: if the device has both AP info AND a
+structurally-recognised signal sensor (even if currently unknown),
+we mark `is_trackable: True` with a reason explaining the
+controller hasn't polled yet. The v0.7.1 PWA already has a 45 s
+no-sample-yet warning UX, so the subscription handles the wait
+gracefully.
+
+New `pending_first_reading: bool` field in the capability response
+lets the PWA (future v0.7.5) show a "data pending" badge instead
+of treating these like fully-confirmed trackable entities.
+
+### What the user should still do
+
+Even with this fix shipped, the deeper "your Omada controller
+isn't polling per-client stats" issue means the RSSI sensors stay
+at `"unknown"` forever — there's no data for the subscription to
+deliver. The user-side fix is to enable per-client statistics
+polling in the Omada controller settings (Settings → Site →
+Services → Statistics, or Controller Settings → Data Retention).
+
 ## [1.22.1] — 2026-05-20
 
 ### Fixed — Wi-Fi mode hidden on HACS Omada installs
