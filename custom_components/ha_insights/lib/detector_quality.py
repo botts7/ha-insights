@@ -113,9 +113,76 @@ def compute_penalties_by_detector(
     return out
 
 
+# v1.22 — detector-level rejection signal. Distinct from the
+# penalty system: the penalty quietly demotes individual insights;
+# this signal proposes disabling the whole detector via a meta-
+# insight the user can action. Higher bar (n >= 20 vs n >= 5,
+# apply_rate < 0.10 vs < 0.20) because the proposed action is
+# louder and harder to undo. Memory:
+# [[ha_insights_v2_presence_and_adaptive]] §v1.16 Detector-level.
+MIN_DECISIVE_VERDICTS_FOR_DISABLE_HINT: int = 20
+APPLY_RATE_DISABLE_THRESHOLD: float = 0.10
+
+
+def find_rejection_signals(
+    kinds_by_detector: dict[str, list[str]],
+    *,
+    min_decisive: int = MIN_DECISIVE_VERDICTS_FOR_DISABLE_HINT,
+    apply_rate_threshold: float = APPLY_RATE_DISABLE_THRESHOLD,
+) -> list[dict[str, float | int | str]]:
+    """For v1.22 AdaptiveFeedback detector-level emission.
+
+    Returns the list of detectors whose suggestions the user has been
+    rejecting consistently enough to warrant a "consider disabling
+    this detector" prompt. Each entry:
+
+      {
+        "detector": "schedule",
+        "n_decisive": 22,
+        "n_applies": 1,
+        "n_rejections": 21,
+        "apply_rate": 0.045,
+      }
+
+    Sorted ascending by apply_rate so the most-rejected detector
+    leads. Detectors with insufficient data (n_decisive < min_decisive)
+    are filtered out — small samples have wide error bars and we
+    don't want to suggest disabling a detector that's only emitted
+    five things.
+
+    Caller is responsible for time-windowing the input. The store's
+    ``get_decisive_verdict_kinds_by_detector_since(ts)`` returns
+    last-N-days data; passing all-time kinds here would treat
+    historical rejections as fresh, which is what the cooldown +
+    re-suggest layer is supposed to prevent.
+    """
+    out: list[dict[str, float | int | str]] = []
+    for detector, kinds in kinds_by_detector.items():
+        decisive = [k for k in kinds if k in _DECISIVE_KINDS]
+        n_decisive = len(decisive)
+        if n_decisive < min_decisive:
+            continue
+        n_applies = sum(1 for k in decisive if k == "applied")
+        rate = n_applies / n_decisive if n_decisive else 0.0
+        if rate >= apply_rate_threshold:
+            continue
+        out.append({
+            "detector": detector,
+            "n_decisive": n_decisive,
+            "n_applies": n_applies,
+            "n_rejections": n_decisive - n_applies,
+            "apply_rate": round(rate, 3),
+        })
+    out.sort(key=lambda r: float(r["apply_rate"]))
+    return out
+
+
 __all__ = [
+    "APPLY_RATE_DISABLE_THRESHOLD",
     "MIN_DECISIVE_VERDICTS",
+    "MIN_DECISIVE_VERDICTS_FOR_DISABLE_HINT",
     "apply_rate_from_kinds",
     "compute_penalties_by_detector",
     "compute_penalty_factor",
+    "find_rejection_signals",
 ]

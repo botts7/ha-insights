@@ -444,6 +444,39 @@ class InsightStore:
             out.setdefault(r["detector"], []).append(r["kind"])
         return out
 
+    async def get_decisive_verdict_kinds_by_detector_since(
+        self, since_ts: float
+    ) -> dict[str, list[str]]:
+        """v1.22: time-windowed variant for AdaptiveFeedback's detector-
+        level rejection signal.
+
+        The all-time variant powers the v1.14.7 penalty (which is quiet
+        confidence demotion). v1.22's detector-level meta-insight asks
+        the user to consider DISABLING the detector — louder action,
+        higher bar, needs RECENT data. Stale 6-month-old rejections
+        shouldn't drive a "disable me" prompt on a detector the user
+        has been ignoring lately for unrelated reasons.
+
+        ``since_ts`` is a Unix epoch second; rows with
+        ``verdict_history.timestamp >= since_ts`` are included.
+        """
+        async with self._c.execute(
+            """
+            SELECT i.detector, v.kind
+              FROM verdict_history v
+              JOIN insights i ON i.id = v.insight_id
+             WHERE v.kind IN ('applied', 'dismissed', 'retired')
+               AND v.timestamp >= ?
+             ORDER BY i.detector ASC, v.timestamp ASC
+            """,
+            (since_ts,),
+        ) as cur:
+            rows = await cur.fetchall()
+        out: dict[str, list[str]] = {}
+        for r in rows:
+            out.setdefault(r["detector"], []).append(r["kind"])
+        return out
+
     async def get_all_verdict_histories(
         self,
     ) -> dict[str, list[dict[str, object]]]:
