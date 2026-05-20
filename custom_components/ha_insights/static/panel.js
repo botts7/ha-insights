@@ -8136,9 +8136,18 @@ class HaInsightsCard extends i {
      */
     _hasSpecializedCardRenderer(insight) {
         const payload = (insight.payload ?? {});
+        const kind = payload.kind;
         return !!(payload._state_shift ||
             payload._physical_device_link ||
-            payload._location_proposal);
+            payload._location_proposal ||
+            payload._wifi_find ||
+            // v1.10.16 — v1.14.x detectors dispatch by `kind` instead of
+            // payload._key. Without these branches users saw the raw JSON
+            // dump (reported 2026-05-20 on Kogan92 unavailable_device_fixit).
+            kind === "unavailable_device_fixit" ||
+            kind === "reboot_loop" ||
+            kind === "hardware_suggestion" ||
+            kind === "stale_automation");
     }
     _renderCardBody(insight) {
         const payload = (insight.payload ?? {});
@@ -8151,7 +8160,232 @@ class HaInsightsCard extends i {
         if (payload._location_proposal) {
             return this._renderLocationProposalBody(insight, payload._location_proposal);
         }
+        if (payload._wifi_find) {
+            return this._renderWifiFindBody(insight, payload._wifi_find);
+        }
+        const kind = payload.kind;
+        if (kind === "unavailable_device_fixit") {
+            return this._renderUnavailableDeviceFixItBody(insight, payload);
+        }
+        if (kind === "reboot_loop") {
+            return this._renderRebootLoopBody(insight, payload);
+        }
+        if (kind === "hardware_suggestion") {
+            return this._renderHardwareSuggestionBody(insight, payload);
+        }
+        if (kind === "stale_automation") {
+            return this._renderStaleAutomationBody(insight, payload);
+        }
         return A;
+    }
+    /** v1.10.16 — generic "fix it" body shared by unavailable_device_fixit,
+     *  reboot_loop and other v1.14.x kinds. They emit similar payload
+     *  fields (deeplink + suggested_actions + observations); share the
+     *  rendering primitives instead of duplicating them four times. */
+    _renderFixItBlock(payload) {
+        const deeplinkUrl = payload.deeplink_url;
+        const deeplinkLabel = payload.deeplink_label;
+        const suggestedActions = payload.suggested_actions ?? [];
+        return b `
+      ${deeplinkUrl
+            ? b `<a class="action primary" href=${deeplinkUrl} target="_top"
+            style="text-decoration: none; display: inline-block;
+                   margin-top: 12px; padding: 8px 14px;">
+            ${deeplinkLabel ?? "Open integration"} →
+          </a>`
+            : A}
+      ${suggestedActions.length
+            ? b `<div style="margin-top: 14px;">
+            <strong>Try these in order:</strong>
+            <ol style="margin: 8px 0 0 0; padding-left: 22px;
+                       line-height: 1.45;">
+              ${suggestedActions.map((a) => b `<li style="margin-bottom: 6px;">${a}</li>`)}
+            </ol>
+          </div>`
+            : A}
+    `;
+    }
+    /** v1.10.16 — UnavailableDeviceFixItDetector (v1.14.0) */
+    _renderUnavailableDeviceFixItBody(insight, payload) {
+        const confidencePct = Math.round(insight.confidence * 100);
+        const hours = payload.hours_unavailable;
+        const friendly = payload.friendly_name ??
+            payload.entity_id ??
+            "?";
+        const integration = payload.integration ?? "—";
+        const currentState = payload.current_state ?? "unavailable";
+        const durationLabel = hours == null
+            ? "—"
+            : hours < 48
+                ? `${hours} hours`
+                : `${Math.round(hours / 24)} days`;
+        return b `
+      <div class="dialog-body">
+        ${this._renderModalError()}
+        <div class="row-meta">
+          <span class="pill">confidence ${confidencePct}%</span>
+          <span class="pill" style="background: rgba(244, 67, 54, 0.15);
+                                    color: var(--error-color, #c62828);">
+            ${currentState}
+          </span>
+        </div>
+        <h4 style="margin: 6px 0 0 0;">${friendly}</h4>
+        <div style="color: var(--secondary-text-color); font-size: 0.95em;
+                    margin-top: 4px;">
+          Stuck unavailable for <strong>${durationLabel}</strong> ·
+          integration: <code>${integration}</code>
+        </div>
+        ${insight.explanation
+            ? b `<div class="explanation" style="margin-top: 10px;">
+              ${insight.explanation}
+            </div>`
+            : A}
+        ${this._renderFixItBlock(payload)}
+      </div>
+    `;
+    }
+    /** v1.10.16 — RebootLoopDetector (v1.14.1) */
+    _renderRebootLoopBody(insight, payload) {
+        const confidencePct = Math.round(insight.confidence * 100);
+        const friendly = payload.friendly_name ??
+            payload.entity_id ??
+            "?";
+        const flipsCount = payload.flips_count;
+        const lookbackDays = payload.lookback_days;
+        const gapHuman = payload.median_gap_human ?? "—";
+        const cv = payload.cv;
+        const integration = payload.integration ?? "—";
+        return b `
+      <div class="dialog-body">
+        ${this._renderModalError()}
+        <div class="row-meta">
+          <span class="pill">confidence ${confidencePct}%</span>
+          <span class="pill">reboot loop</span>
+        </div>
+        <h4 style="margin: 6px 0 0 0;">${friendly}</h4>
+        <div style="color: var(--secondary-text-color); font-size: 0.95em;
+                    margin-top: 4px;">
+          ${flipsCount ?? "?"} availability flips in
+          ${lookbackDays ?? "?"} d · median gap
+          <strong>${gapHuman}</strong>
+          ${cv != null ? b ` · CV ${cv.toFixed(2)}` : A}
+          · integration: <code>${integration}</code>
+        </div>
+        ${insight.explanation
+            ? b `<div class="explanation" style="margin-top: 10px;">
+              ${insight.explanation}
+            </div>`
+            : A}
+        ${this._renderFixItBlock(payload)}
+      </div>
+    `;
+    }
+    /** v1.10.16 — HardwareSuggestionDetector (v1.14.2) */
+    _renderHardwareSuggestionBody(insight, payload) {
+        const confidencePct = Math.round(insight.confidence * 100);
+        const category = payload.hardware_category ?? "?";
+        const areaName = payload.area_name ?? "?";
+        const rationale = payload.rationale ?? "";
+        const unlocks = payload.unlocks ?? [];
+        const disclaimer = payload.non_commercial_disclaimer ?? "";
+        return b `
+      <div class="dialog-body">
+        ${this._renderModalError()}
+        <div class="row-meta">
+          <span class="pill">confidence ${confidencePct}%</span>
+          <span class="pill">hardware gap</span>
+        </div>
+        <h4 style="margin: 6px 0 0 0;">
+          Consider adding a ${category} to ${areaName}
+        </h4>
+        ${rationale
+            ? b `<div style="margin-top: 8px;">${rationale}</div>`
+            : A}
+        ${unlocks.length
+            ? b `<div style="margin-top: 12px;">
+              <strong>Would unlock:</strong>
+              <div style="display: flex; flex-wrap: wrap; gap: 6px;
+                          margin-top: 6px;">
+                ${unlocks.map((u) => b `<span class="pill" style="background:
+                      rgba(76, 175, 80, 0.18); color: var(--success-color);">
+                      ${u}
+                    </span>`)}
+              </div>
+            </div>`
+            : A}
+        ${disclaimer
+            ? b `<div style="margin-top: 14px; padding: 8px 12px;
+                              background: var(--secondary-background-color);
+                              border-radius: 6px; font-size: 0.88em;
+                              color: var(--secondary-text-color);">
+              ${disclaimer}
+            </div>`
+            : A}
+      </div>
+    `;
+    }
+    /** v1.10.16 — StaleAutomationDetector */
+    _renderStaleAutomationBody(insight, payload) {
+        const confidencePct = Math.round(insight.confidence * 100);
+        const friendly = payload.friendly_name ??
+            payload.entity_id ??
+            "?";
+        const daysIdle = payload.days_idle;
+        const lastTriggered = payload.last_triggered_iso;
+        return b `
+      <div class="dialog-body">
+        ${this._renderModalError()}
+        <div class="row-meta">
+          <span class="pill">confidence ${confidencePct}%</span>
+          <span class="pill">stale automation</span>
+        </div>
+        <h4 style="margin: 6px 0 0 0;">${friendly}</h4>
+        <div style="color: var(--secondary-text-color); font-size: 0.95em;
+                    margin-top: 4px;">
+          ${daysIdle != null ? b `Idle ${daysIdle} days` : A}
+          ${lastTriggered
+            ? b ` · last triggered ${lastTriggered.slice(0, 10)}`
+            : A}
+        </div>
+        ${insight.explanation
+            ? b `<div class="explanation" style="margin-top: 10px;">
+              ${insight.explanation}
+            </div>`
+            : A}
+      </div>
+    `;
+    }
+    /** v1.10.16 — WifiFindDetector (v1.18.0) */
+    _renderWifiFindBody(insight, block) {
+        const confidencePct = Math.round(insight.confidence * 100);
+        const entityId = block.entity_id ?? "?";
+        const proposedArea = block.proposed_area_name ?? "?";
+        const apName = block.ap_name ?? "?";
+        const signalDbm = block.signal_dbm;
+        const confidenceTier = block.confidence_tier ?? "?";
+        return b `
+      <div class="dialog-body">
+        ${this._renderModalError()}
+        <div class="row-meta">
+          <span class="pill">confidence ${confidencePct}%</span>
+          <span class="pill">wi-fi location</span>
+        </div>
+        <h4 style="margin: 6px 0 0 0;">
+          Probably in ${proposedArea}
+        </h4>
+        <div style="color: var(--secondary-text-color); font-size: 0.95em;
+                    margin-top: 4px;">
+          <code>${entityId}</code> sees <strong>${apName}</strong>
+          at ${signalDbm} dBm
+          (${confidenceTier.replace(/_/g, " ")})
+        </div>
+        ${insight.explanation
+            ? b `<div class="explanation" style="margin-top: 10px;">
+              ${insight.explanation}
+            </div>`
+            : A}
+      </div>
+    `;
     }
     /** v1.8.2 StateShiftDetector — "Daily-count for X shifted on YYYY-MM-DD." */
     _renderStateShiftBody(insight, block) {
@@ -8960,15 +9194,34 @@ class HaInsightsCard extends i {
     `;
     }
     /** v1.2.3 — Footer that says "Showing N of M — +X more → View all".
-     *  Only appears when the dashboard tile is sized to show fewer rows
-     *  than the user actually has. Without it the tile shows 1 insight
-     *  with no hint that 25 more are queued behind "View all" in the
-     *  header. */
+     *  v1.10.16 — when `paginate: true` (set by the panel wrapper) the
+     *  footer renders as a button that fires `ha-insights-card-load-more`
+     *  so the panel can bump its cap and re-render. Without paginate the
+     *  footer is a plain link to /ha-insights, kept for dashboard tiles. */
     _renderTruncationFooter(rendered) {
         const total = this._totalFilteredCount;
         if (total <= rendered)
             return A;
         const hidden = total - rendered;
+        if (this._config.paginate) {
+            const next = Math.min(hidden, 200);
+            return b `
+        <button
+          class="truncation-footer"
+          type="button"
+          style="background: none; cursor: pointer; width: 100%;
+                 border-left: none; border-right: none; border-bottom: none;
+                 font: inherit;"
+          title="Load the next batch of insights"
+          @click=${() => this.dispatchEvent(new CustomEvent("ha-insights-card-load-more", {
+                bubbles: true,
+                composed: true,
+            }))}
+        >
+          Showing ${rendered} of ${total} — load ${next} more ↓
+        </button>
+      `;
+        }
         return b `
       <a class="truncation-footer" href="/ha-insights" title="Open the full HA Insights panel">
         Showing ${rendered} of ${total} — +${hidden} more →
@@ -9301,6 +9554,11 @@ class HaInsightsPanel extends i {
         // protocol (~600 token rules) for tricky cases. Persists across
         // page loads. Passed through the embedded card config.
         this._auditDepth = "concise";
+        // v1.10.16: how many extra batches of 200 insights to render beyond
+        // the default cap. Bumped on "Load more" button click in the card's
+        // truncation footer. Reset to 0 whenever filters / search / sort
+        // change so the user doesn't keep paginating through a stale set.
+        this._paginationStep = 0;
         // Total insight count BEFORE chip filters. The card returns the
         // post-filter count via a property; we maintain the pre-filter count
         // here for the "Showing X of Y" hint in the panel header.
@@ -9478,6 +9736,13 @@ class HaInsightsPanel extends i {
         this._findDeviceWatchBaselines = {};
         this._findDeviceWatchCurrent = {};
         this._findDeviceWatchDetected = new Set();
+        /** v1.10.16 — fired by the card's truncation footer when paginate=true.
+         *  Bumps the cap by 200 (cap = 200 * (1 + step)). _embeddedCardConfig
+         *  recomputes the next time it's read because _paginationStep is in
+         *  the cache key. */
+        this._onLoadMore = () => {
+            this._paginationStep += 1;
+        };
     }
     // Persistent filter storage (v0.8 phase 6). Versioned key so future
     // shape changes can ignore old saved state cleanly.
@@ -9502,12 +9767,29 @@ class HaInsightsPanel extends i {
       position: sticky;
       top: 0;
       z-index: 4;
+      /* v1.10.16: stack rows vertically. Previous layout had titles and
+         action-buttons as siblings in a single flex row, which on
+         busy installs (many action buttons + many detector chips)
+         squeezed the titles column narrow, forcing detector-chips to
+         wrap one-per-line and inflating the header height enough to
+         leave a huge blank gap above the insights. */
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .header-row {
       display: flex;
       align-items: flex-start;
       gap: 16px;
+      /* Let the action-buttons row wrap onto a second line when there
+         are too many to fit (Backfill / Run audit rollup / Scan now /
+         Reload UI / Purge all / Diagnostics / Find device / Ask AI all
+         visible at once overflows narrow viewports). */
+      flex-wrap: wrap;
     }
     .header .titles {
-      flex: 1;
+      flex: 1 1 320px;
+      min-width: 0;
     }
     .header h1 {
       margin: 0 0 4px;
@@ -9521,7 +9803,9 @@ class HaInsightsPanel extends i {
     .header .actions {
       display: flex;
       gap: 8px;
-      flex-shrink: 0;
+      /* v1.10.16: wrap inside the actions row so buttons aren't
+         clipped at the right edge of the viewport. */
+      flex-wrap: wrap;
     }
     .header button.action {
       display: inline-flex;
@@ -9926,7 +10210,10 @@ class HaInsightsPanel extends i {
       display: flex;
       flex-wrap: wrap;
       gap: 6px;
-      margin-top: 8px;
+      /* v1.10.16: chips now live in their own row below the header
+         row, so the available width is the full viewport — wrapping
+         is graceful 2-3 lines instead of one-chip-per-line. */
+      margin-top: 0;
     }
     .detector-chip {
       display: inline-flex;
@@ -10184,9 +10471,12 @@ class HaInsightsPanel extends i {
             `${this._filterFloors.join(",")}|${this._filterIntegrations.join(",")}|` +
             `${this._filterLabels.join(",")}|` +
             `${this._hideAlreadyAutomated ? "1" : "0"}|` +
-            `${this._auditDepth}`;
+            `${this._auditDepth}|p${this._paginationStep}`;
         if (this._cachedCardConfigKey !== key) {
             this._cachedCardConfigKey = key;
+            // v1.10.16: filters / sort / search changed — reset pagination
+            // so the user doesn't keep paginating through a stale set.
+            this._paginationStep = 0;
             this._cachedCardConfig = {
                 type: "custom:ha-insights-card",
                 title: this._search ? `Insights matching "${this._search}"` : "All insights",
@@ -10194,7 +10484,10 @@ class HaInsightsPanel extends i {
                 // browser locks up rendering all of them; if a user really has
                 // 1000+ they should use search/filter to narrow first. The card
                 // shows a "showing N of M" hint when the list is truncated.
-                max_rows: 200,
+                // v1.10.16: pagination — cap doubles on each "Load more" click
+                // (200 → 400 → 600 → …). Filter/sort/search changes reset to 200.
+                max_rows: 200 + this._paginationStep * 200,
+                paginate: true,
                 min_confidence: this._minConfidence,
                 search: this._search,
                 sort_by: this._sortBy,
@@ -11225,14 +11518,14 @@ class HaInsightsPanel extends i {
     render() {
         return b `
       <div class="header">
-        <div class="titles">
-          <h1>HA Insights</h1>
-          <div class="sub">
-            Patterns the integration noticed in your home — apply, refine, test, or dismiss each.
+        <div class="header-row">
+          <div class="titles">
+            <h1>HA Insights</h1>
+            <div class="sub">
+              Patterns the integration noticed in your home — apply, refine, test, or dismiss each.
+            </div>
           </div>
-          ${this._renderDetectorCounts()}
-        </div>
-        <div class="actions">
+          <div class="actions">
           <button
             class="action"
             ?disabled=${this._backfillBusy}
@@ -11341,6 +11634,8 @@ class HaInsightsPanel extends i {
             : b `<ha-icon icon="mdi:check-all"></ha-icon> Apply all visible`}
           </button>
         </div>
+        </div>
+        ${this._renderDetectorCounts()}
       </div>
       ${this._renderRollupProgress()}
       <div class="filters">
@@ -12045,6 +12340,7 @@ class HaInsightsPanel extends i {
       <ha-insights-card-bundled
         .hass=${this.hass}
         .config=${this._embeddedCardConfig}
+        @ha-insights-card-load-more=${this._onLoadMore}
       ></ha-insights-card-bundled>
     `;
     }
@@ -12133,6 +12429,9 @@ __decorate([
 __decorate([
     r()
 ], HaInsightsPanel.prototype, "_auditDepth", void 0);
+__decorate([
+    r()
+], HaInsightsPanel.prototype, "_paginationStep", void 0);
 __decorate([
     r()
 ], HaInsightsPanel.prototype, "_totalInsightCount", void 0);
