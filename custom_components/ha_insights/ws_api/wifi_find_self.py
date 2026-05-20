@@ -106,6 +106,50 @@ _CONTROLLER_SIDE_PLATFORMS: frozenset[str] = frozenset({
 })
 
 
+# v1.22.3 — multi-word suffix patterns for sister-entity name matching.
+# Listed longest-first so e.g. `_wifi_signal_strength` resolves before a
+# trailing single-word match would. Maps each recognised suffix to the
+# canonical capability-lib attribute key the merge should populate.
+_SIGNAL_NAME_SUFFIXES: tuple[tuple[str, str], ...] = (
+    # HA Companion app (Android) auto-sensors:
+    ("wifi_signal_strength_dbm", "signal_strength"),
+    ("wifi_signal_strength", "signal_strength"),
+    # UniFi / generic:
+    ("signal_strength", "signal_strength"),
+    ("wifi_signal", "signal_strength"),
+    ("rx_signal", "rx_rssi"),
+    ("tx_signal", "signal_strength"),
+    # Generic suffixes (single-word matches included for backwards-compat):
+    ("rssi", "rssi"),
+    ("signal", "signal"),
+)
+
+_AP_NAME_SUFFIXES: tuple[tuple[str, str], ...] = (
+    # HA Companion app:
+    ("wifi_bssid", "bssid"),
+    ("wifi_connection", "ap_name"),
+    # Generic:
+    ("access_point", "access_point"),
+    ("bssid", "bssid"),
+    ("ap", "access_point"),
+)
+
+
+def _match_name_suffix(
+    entity_name: str, suffixes: tuple[tuple[str, str], ...]
+) -> tuple[str, str] | None:
+    """Return (suffix, canonical-key) when entity_name ends with one of
+    the multi-word suffixes; else None.
+
+    Matches when entity_name is EXACTLY the suffix, or ends with "_" +
+    suffix. Tested via test_collect_device_state_attrs_name_matcher.
+    """
+    for suf, key in suffixes:
+        if entity_name == suf or entity_name.endswith("_" + suf):
+            return suf, key
+    return None
+
+
 def _collect_device_state_attrs(
     hass: HomeAssistant, entity_id: str
 ) -> tuple[dict[str, Any], list[str], bool]:
@@ -225,31 +269,36 @@ def _collect_device_state_attrs(
                 merged.setdefault("signal_strength", int(float(raw_state)))
             except (TypeError, ValueError):
                 pass
-        # Promote state to a key matching the entity's name-segment when
-        # the segment looks like a known capability attribute.
-        last_segment = sister.entity_id.split(".", 1)[-1].rsplit("_", 1)[-1]
-        if last_segment in {
-            "signal", "rssi", "rx_signal", "tx_signal",
-        }:
+        # v1.22.3: detect signal/AP suffix via multi-word match.
+        # Previous (v1.21.2/v1.22.2) used `rsplit("_", 1)[-1]` which
+        # only captured single-word suffixes. The HA Companion app
+        # names sensors like `sensor.<device>_wifi_signal_strength`
+        # → last single segment is `"strength"` → missed entirely.
+        # `_match_name_suffix` checks whether the entity name ends
+        # with any of the known multi-word suffix patterns,
+        # longest-first.
+        entity_name = sister.entity_id.split(".", 1)[-1]
+        signal_match = _match_name_suffix(entity_name, _SIGNAL_NAME_SUFFIXES)
+        ap_match = _match_name_suffix(entity_name, _AP_NAME_SUFFIXES)
+        if signal_match is not None:
             # v1.22.2: structural existence flag for the WS handler.
             signal_sensor_exists = True
-        if last_segment in {
-            "signal", "rssi", "rx_signal", "tx_signal",
-            "access_point", "ap", "bssid",
-        } and raw_state not in (None, "", "unknown", "unavailable"):
-            # Map a few aliases to the canonical capability-lib keys.
-            alias = {
-                "rx_signal": "rx_rssi",
-                "tx_signal": "signal_strength",
-                "ap": "access_point",
-            }.get(last_segment, last_segment)
-            if alias in ("rx_rssi", "signal_strength", "rssi", "signal"):
+        if (
+            (signal_match is not None or ap_match is not None)
+            and raw_state not in (None, "", "unknown", "unavailable")
+        ):
+            canonical_key = (
+                signal_match[1] if signal_match is not None else ap_match[1]
+            )
+            if canonical_key in (
+                "rx_rssi", "signal_strength", "rssi", "signal",
+            ):
                 try:
-                    merged.setdefault(alias, int(float(raw_state)))
+                    merged.setdefault(canonical_key, int(float(raw_state)))
                 except (TypeError, ValueError):
                     pass
             else:
-                merged.setdefault(alias, raw_state)
+                merged.setdefault(canonical_key, raw_state)
         # Finally, lift sister attributes that we recognise as Wi-Fi
         # related. Don't blindly merge everything — that would risk
         # name collisions (two sisters with `state` or `friendly_name`

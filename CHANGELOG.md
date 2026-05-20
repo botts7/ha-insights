@@ -4,6 +4,74 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+## [1.22.3] — 2026-05-20
+
+### Fixed — Companion-app Wi-Fi signal sensors invisible to find
+
+Real-install diagnostic from user 2026-05-20 (continuation of
+v1.22.2): the user has the HA Companion app installed on their
+phone, with the "WiFi Signal Strength" auto-sensor enabled. That
+sensor is named `sensor.<device>_wifi_signal_strength` and reports
+a working dBm value (unlike the Omada path which is stuck at
+"unknown").
+
+**The bug:** v1.21.2 / v1.22.2 used `rsplit("_", 1)[-1]` to
+extract the last segment of the entity name and checked it against
+a set of single-word suffixes (`signal`, `rssi`, `bssid`, ...).
+For `sensor.dans_s23_wifi_signal_strength`, the last single
+segment is `"strength"` — which wasn't in any recognised set, so
+the Companion app's signal sensor was **completely invisible** to
+the sister-merge logic. Even after the v1.22.2 trackable-pending
+fix, picking the Companion-app device_tracker would still show
+"not trackable" because no signal sensor matched.
+
+### The fix
+
+Introduced `_match_name_suffix` — a pure module-level helper that
+matches multi-word entity-name suffix patterns, longest-first.
+
+Recognised signal suffixes (mapped to canonical capability keys):
+- `wifi_signal_strength_dbm` → `signal_strength`
+- `wifi_signal_strength` → `signal_strength`   ← Companion app
+- `signal_strength` → `signal_strength`
+- `wifi_signal` → `signal_strength`
+- `rx_signal` → `rx_rssi`
+- `tx_signal` → `signal_strength`
+- `rssi` → `rssi`
+- `signal` → `signal`
+
+Recognised AP suffixes:
+- `wifi_bssid` → `bssid`   ← Companion app (when enabled)
+- `wifi_connection` → `ap_name`   ← Companion app
+- `access_point` → `access_point`
+- `bssid` → `bssid`
+- `ap` → `access_point`
+
+Ordering matters — listed longest-first so `wifi_signal_strength`
+matches before a hypothetical bare `_strength` rule would. The
+"strength" single-word suffix is intentionally NOT in the list
+(too generic — would false-positive on user custom sensors).
+
+### What the user should do
+
+If they enable the **WiFi BSSID** auto-sensor in the Companion app
+(Settings → Companion app → Manage Sensors), the Companion-app
+device_tracker will become a fully trackable Wi-Fi find candidate
+on its own — completely independent of the Omada controller's
+per-client-stats polling state. This is actually the more reliable
+path for walking-find: phone-resident readings, no controller
+config dependency, faster update cadence.
+
+### Tests
+
+New `tests/test_wifi_find_name_matcher.py` (16 cases):
+- Companion-app naming variants (signal_strength, _dbm, bssid,
+  connection)
+- UniFi / Omada naming (`rx_signal`, `rssi`, `access_point`)
+- Longest-first ordering verification
+- Exact-match edge cases (`sensor.rssi` etc.)
+- Non-match cases (battery, temperature, lone `strength`)
+
 ## [1.22.2] — 2026-05-20
 
 ### Fixed — Wi-Fi mode hidden when RSSI sensor exists but has unknown state
