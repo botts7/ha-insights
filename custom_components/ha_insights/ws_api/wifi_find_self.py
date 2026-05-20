@@ -66,6 +66,119 @@ if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
 
 
+def _collect_device_state_attrs(
+    hass: HomeAssistant, entity_id: str
+) -> tuple[dict[str, Any], list[str]]:
+    """Gather state attributes from `entity_id` AND every sister entity
+    on the same device, merged into one dict.
+
+    Background (v1.21.2): the HA UniFi integration creates one device
+    per client, but splits the data across multiple entities:
+      - device_tracker.<client>     → connected / not_home state, no
+        signal info on recent integration versions
+      - sensor.<client>_rx_signal    → RSSI in dBm
+      - sensor.<client>_access_point → AP friendly name
+    Same for Asuswrt + Omada in various forms. v1.21.0/v1.21.1
+    checked only the picked entity's own attributes, so every
+    user reported "no devices found". Looking across sister entities
+    on the same device closes the gap without forcing users to pick
+    the right one of three siblings.
+
+    Returns the merged-attribute dict + the list of entity_ids
+    consulted (caller uses the list to subscribe to all of them so
+    state changes on the sister sensor still drive updates).
+
+    Picked-entity attributes take precedence over sister attributes
+    on key collisions, mirroring the v1.18 capability lib's existing
+    "first match wins" semantics.
+    """
+    try:
+        from homeassistant.helpers import entity_registry as er
+    except ImportError:
+        # Standalone unit tests may run without HA registry helpers.
+        state = hass.states.get(entity_id)
+        return (dict(state.attributes) if state else {}, [entity_id])
+
+    e_reg = er.async_get(hass)
+    state = hass.states.get(entity_id)
+    merged: dict[str, Any] = dict(state.attributes) if state else {}
+    consulted: list[str] = [entity_id]
+
+    primary = e_reg.async_get(entity_id)
+    if primary is None or primary.device_id is None:
+        return (merged, consulted)
+
+    # Walk sister entities on the same device. Skip the picked entity
+    # itself (already merged); skip disabled / hidden entries (HA
+    # already hides them from the UI).
+    for sister in e_reg.entities.values():
+        if sister.device_id != primary.device_id:
+            continue
+        if sister.entity_id == entity_id:
+            continue
+        if sister.disabled_by or sister.hidden_by:
+            continue
+        sister_state = hass.states.get(sister.entity_id)
+        if sister_state is None:
+            continue
+        # v1.21.2: many UniFi sister sensors put the value in
+        # `state.state` (not state.attributes). The capability lib
+        # only reads attributes, so promote the state-string into a
+        # synthetic attribute keyed by either device_class or the
+        # entity's last name-segment. Both heuristics catch the
+        # common cases:
+        #
+        #   sensor.alice_phone_rx_signal — state="-53", device_class="signal_strength"
+        #     → synthetic attr signal_strength=-53
+        #   sensor.alice_phone_access_point — state="UniFi AP Kitchen"
+        #     → synthetic attr access_point="UniFi AP Kitchen"
+        raw_state = sister_state.state
+        dc = sister_state.attributes.get("device_class")
+        if (
+            isinstance(dc, str)
+            and dc.lower() == "signal_strength"
+            and raw_state not in (None, "", "unknown", "unavailable")
+        ):
+            try:
+                merged.setdefault("signal_strength", int(float(raw_state)))
+            except (TypeError, ValueError):
+                pass
+        # Promote state to a key matching the entity's name-segment when
+        # the segment looks like a known capability attribute.
+        last_segment = sister.entity_id.split(".", 1)[-1].rsplit("_", 1)[-1]
+        if last_segment in {
+            "signal", "rssi", "rx_signal", "tx_signal",
+            "access_point", "ap", "bssid",
+        } and raw_state not in (None, "", "unknown", "unavailable"):
+            # Map a few aliases to the canonical capability-lib keys.
+            alias = {
+                "rx_signal": "rx_rssi",
+                "tx_signal": "signal_strength",
+                "ap": "access_point",
+            }.get(last_segment, last_segment)
+            if alias in ("rx_rssi", "signal_strength", "rssi", "signal"):
+                try:
+                    merged.setdefault(alias, int(float(raw_state)))
+                except (TypeError, ValueError):
+                    pass
+            else:
+                merged.setdefault(alias, raw_state)
+        # Finally, lift sister attributes that we recognise as Wi-Fi
+        # related. Don't blindly merge everything — that would risk
+        # name collisions (two sisters with `state` or `friendly_name`
+        # both populated etc.).
+        for key, value in sister_state.attributes.items():
+            if key in {
+                "rx_rssi", "signal_strength", "rssi", "signal",
+                "signal_dbm", "wifi_signal",
+                "ap_mac", "bssid", "access_point", "ap_name",
+                "host", "connected_to",
+            }:
+                merged.setdefault(key, value)
+        consulted.append(sister.entity_id)
+    return (merged, consulted)
+
+
 def _resolve_ap_device_id(
     hass: HomeAssistant,
     ap_identifier: str,
@@ -168,8 +281,14 @@ async def ws_wifi_find_self(
             "Wi-Fi integration is loaded and the phone is online.",
         )
         return
+    # v1.21.2: merge sister-entity attributes so the cap check uses
+    # signal + AP info that may live on different entities of the
+    # same device (UniFi's standard layout).
+    merged_attrs, consulted_entities = _collect_device_state_attrs(
+        hass, entity_id
+    )
     cap = wifi_find_capability_for(
-        entity_id, state_attributes=dict(state.attributes)
+        entity_id, state_attributes=merged_attrs
     )
 
     # Per-subscription EMA state. Reused across every advertisement
@@ -193,8 +312,13 @@ async def ws_wifi_find_self(
         new_state = event.data.get("new_state")
         if new_state is None:
             return
+        # v1.21.2: re-collect merged attrs from device's siblings on
+        # each state change. Cheap (~ms for typical 2-4 sisters per
+        # device); essential so we pick up the AP friendly name from
+        # a sensor that ticks at a different cadence than the tracker.
+        sample_attrs, _ = _collect_device_state_attrs(hass, entity_id)
         sample_cap = wifi_find_capability_for(
-            entity_id, state_attributes=dict(new_state.attributes)
+            entity_id, state_attributes=sample_attrs
         )
         if not sample_cap.is_trackable or sample_cap.signal_dbm is None:
             return
@@ -242,8 +366,12 @@ async def ws_wifi_find_self(
         )
 
     try:
+        # v1.21.2: subscribe to state changes on every consulted entity
+        # (the picked tracker plus its sisters), so a UniFi signal-
+        # sensor tick re-evaluates the capability + forwards an event,
+        # not just state changes on the tracker itself.
         cancel = async_track_state_change_event(
-            hass, [entity_id], _on_state_change
+            hass, list({entity_id, *consulted_entities}), _on_state_change
         )
     except Exception as err:
         connection.send_error(
@@ -335,11 +463,15 @@ async def ws_wifi_find_capability(
                     f"{eid} is not in the state machine. Integration "
                     "may not be loaded, or the entity is disabled."
                 ),
+                "consulted_entities": [eid],
             }
             continue
-        cap = wifi_find_capability_for(
-            eid, state_attributes=dict(state.attributes)
-        )
+        # v1.21.2: gather attributes from the entity AND every sister
+        # entity on the same device. UniFi etc. split signal + AP into
+        # separate sensors; checking just the picked entity rejected
+        # essentially every real install.
+        merged_attrs, consulted = _collect_device_state_attrs(hass, eid)
+        cap = wifi_find_capability_for(eid, state_attributes=merged_attrs)
         capabilities[eid] = {
             "is_trackable": cap.is_trackable,
             "signal_attribute": cap.signal_attribute,
@@ -347,6 +479,7 @@ async def ws_wifi_find_capability(
             "ap_attribute": cap.ap_attribute,
             "ap_identifier": cap.ap_identifier,
             "reason": cap.reason,
+            "consulted_entities": consulted,
         }
     connection.send_result(msg["id"], {"capabilities": capabilities})
 
