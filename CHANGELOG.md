@@ -4,6 +4,51 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+## [1.21.2] — 2026-05-20
+
+### Fixed — Wi-Fi capability merges sister-entity attributes
+
+User report: "no devices found that this Wi-Fi method can be used."
+Real fault was architectural — most HA Wi-Fi integrations split
+signal + AP info across multiple entities on the same device:
+
+  - UniFi: `device_tracker.alice_phone` carries home/not_home state,
+    but RSSI is on `sensor.alice_phone_rx_signal` and AP name is on
+    `sensor.alice_phone_access_point`. All same device, three
+    different entities.
+  - Asuswrt/Omada: similar split.
+
+v1.21.0–v1.21.1 only checked the picked entity's own attributes,
+so essentially every real install rejected every candidate.
+
+### The fix
+
+New helper `_collect_device_state_attrs(hass, entity_id)` walks
+the entity registry for every sister entity sharing the picked
+entity's `device_id`, then merges their state + attributes into
+one dict (the picked entity's own attrs win on key collision).
+Two promotion heuristics catch the common cases where the value
+is on `state.state` rather than `state.attributes`:
+
+  - `device_class == "signal_strength"` → synthetic
+    `signal_strength` attribute pulled from `state.state`
+  - Entity name segment ending in `signal` / `rssi` / `rx_signal`
+    / `access_point` / `ap` / `bssid` → synthetic attribute under
+    the canonical capability-lib key
+
+Wired into both:
+  - `ws_wifi_find_capability` — batch check now uses merged attrs
+    so device-trackers with sensor-side signal sisters report
+    `is_trackable: true`. Response also includes
+    `consulted_entities` so the PWA can show "found data on
+    sensor.alice_phone_rx_signal" diagnostics.
+  - `ws_wifi_find_self` — subscribes to state-change events on
+    EVERY consulted entity (not just the tracker), so RSSI sensor
+    ticks at their own cadence drive the warmer/colder updates.
+
+Pure capability lib (`lib/wifi_find_capability.py`) unchanged —
+all the registry-walking logic lives in the WS-handler shim.
+
 ## [1.21.1] — 2026-05-20
 
 ### Added — `home_insights/wifi_find_capability` batch trackability query
