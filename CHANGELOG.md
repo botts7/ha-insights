@@ -4,6 +4,39 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+## [1.22.1] — 2026-05-20
+
+### Fixed — Wi-Fi mode hidden on HACS Omada installs
+
+Real-install validation 2026-05-20: user installed a HACS Omada
+integration, enabled per-client RSSI sensors, confirmed they were
+working — but the find-my-ha PWA still hid the Wi-Fi mode button.
+
+Root cause: v1.21.3's `_CONTROLLER_SIDE_PLATFORMS` whitelist only
+included `tplink_omada` (the official HA core integration). HACS
+community Omada packages register under different platform names
+(`omada`, `omada_open_api`, `omada_controller`, etc.) which the
+gate rejected as if they were stationary IoT self-reports.
+
+### Fix
+
+Expanded the whitelist to cover every plausible HACS Omada
+package's platform identifier:
+- `omada` (zachcheatham/ha-omada)
+- `ha_omada` (alternative naming)
+- `omada_open_api` (bullitt186/ha-omada-open-api)
+- `omada_controller` (community fork variant)
+- `tplink_omada_open_api` (belt-and-suspenders)
+
+All are controller integrations and safe to allow — controller-side
+RSSI is direction-correct for walking find regardless of which
+package registers the sensors.
+
+PWA-side: no change required. After HACS picks this up and the
+user reloads, `wifi_find_capability` returns `is_trackable: true`
+for the Omada-tracked clients, the count goes non-zero, and v0.7.4
+unhides the 📶 Wi-Fi mode button automatically.
+
 ## [1.22.0] — 2026-05-20
 
 ### Added — AdaptiveFeedback detector-level rejection signal
