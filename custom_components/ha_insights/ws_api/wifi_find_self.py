@@ -83,7 +83,18 @@ if TYPE_CHECKING:
 _CONTROLLER_SIDE_PLATFORMS: frozenset[str] = frozenset({
     "unifi",            # UniFi Network integration
     "asuswrt",          # Asuswrt + Asuswrt-Merlin
-    "tplink_omada",     # TP-Link Omada controller
+    "tplink_omada",     # TP-Link Omada (official HA core integration)
+    # v1.21.5 — HACS community Omada integrations. Real-install
+    # validation 2026-05-20: user had RSSI sensors working from a
+    # HACS Omada package but v1.21.3's whitelist (tplink_omada only)
+    # rejected them as if they were stationary IoT self-reports.
+    # Defensively include every plausible platform name; all are
+    # controller integrations and safe to allow.
+    "omada",            # zachcheatham/ha-omada
+    "ha_omada",         # alternative naming
+    "omada_open_api",   # bullitt186/ha-omada-open-api
+    "omada_controller", # community fork variant
+    "tplink_omada_open_api",  # belt-and-suspenders
     "mikrotik",         # RouterOS
     "ubus",             # OpenWRT
     "ddwrt",            # DD-WRT routers
