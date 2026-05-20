@@ -4,6 +4,58 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+## [1.22.0] — 2026-05-20
+
+### Added — AdaptiveFeedback detector-level rejection signal
+
+The long-tail extension to the v1.14 AdaptiveFeedbackDetector
+lineage. Closes the second insight kind from the original
+memory-note design: **detector-level meta-insights** that ask the
+user to consider disabling a detector whose suggestions they keep
+rejecting.
+
+### What's new
+
+- **`lib/detector_quality.find_rejection_signals()`** — pure
+  function that scans `{detector → [verdict_kinds]}` and returns
+  detectors with `apply_rate < 0.10` AND `n_decisive >= 20` in the
+  input window. Higher bar than the v1.14.7 confidence penalty
+  (which kicks in at `< 0.20` with `n >= 5`) because the action
+  proposed here is louder.
+
+- **`store.get_decisive_verdict_kinds_by_detector_since(since_ts)`**
+  — time-windowed variant of the existing all-time aggregator. The
+  detector-level signal uses last-30-days data so the prompt
+  tracks current sentiment, not lifetime rejections.
+
+- **`AdaptiveFeedbackDetector.scan()` extension** — after the
+  pattern-level re-suggestion pass (unchanged), runs the new
+  detector-level signal pass. For each flagged detector, emits a
+  `PATTERN_OBSERVATION` insight:
+
+  > Consider disabling **schedule** — 21/22 suggestions rejected
+  > in the last 30 days (4.5% apply rate)
+
+  Payload includes `n_decisive`, `n_applies`, `n_rejections`,
+  `apply_rate_pct`, deeplink to Devices & Services, and suggested
+  actions (disable / wait / Refine). Skips emitting against itself
+  (no tail-eating ouroboros).
+
+### Hard rules retained
+
+- Never auto-disables a detector. ALWAYS surfaces as an insight
+  the user actions.
+- Dedupes via `{kind: "adaptive_feedback_detector_disable",
+  detector: <name>}` so the same flag doesn't multi-emit per scan.
+- Maturity stays EXPERIMENTAL — thresholds need real-install
+  calibration before promotion.
+
+### Tests
+
+10 cases covering: empty input, below-min sample, threshold
+boundaries, snooze/undo exclusion, retire-as-rejection, multi-
+detector sorting, healthy-detector filter, custom thresholds.
+
 ## [1.21.4] — 2026-05-20
 
 ### Changed — bundle card v1.10.16 panel.js (modal renderers + layout + Load-more)

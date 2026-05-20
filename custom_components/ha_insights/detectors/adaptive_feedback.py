@@ -58,11 +58,16 @@ just works.
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 from ..const import DOMAIN
 from ..insight import Insight, InsightKind
+from ..lib.detector_quality import (
+    APPLY_RATE_DISABLE_THRESHOLD,
+    MIN_DECISIVE_VERDICTS_FOR_DISABLE_HINT,
+    find_rejection_signals,
+)
 from ..lib.environmental_fingerprint import (
     capture_environmental_fingerprint,
     dict_to_fingerprint,
@@ -86,6 +91,27 @@ _LOGGER = logging.getLogger(__name__)
 # once; we're noting that the situation changed. They get to weigh
 # whether the change matters enough to revisit.
 _CONFIDENCE = 0.70
+
+# v1.22: detector-level "you keep rejecting this" insight.
+# Higher confidence because the signal is statistical (20+ rejections
+# vs the per-pattern nudge's "environment changed") and the action
+# (disable detector) is louder. The user can still dismiss.
+_CONFIDENCE_DETECTOR_REJECTION = 0.80
+
+# v1.22: time window for the detector-level rejection signal. The
+# v1.14.7 penalty uses all-time data — fine for quietly demoting
+# confidence. But "consider disabling this detector" is a louder
+# action that should track CURRENT user sentiment; 6-month-old
+# rejections from before the user actively engaged shouldn't drive
+# it. 30 days matches the cooldown in `should_re_suggest`.
+_DETECTOR_REJECTION_WINDOW_DAYS = 30
+
+# v1.22: dedup cooldown for the detector-level emission. Once we
+# surface "consider disabling schedule", we shouldn't re-surface it
+# every scan even if the user hasn't acted. Honor a 7-day cooldown:
+# emit once, let the user act or ignore for a week. After 7 days
+# without action AND continued rejection pattern, re-surface.
+_DETECTOR_REJECTION_REEMIT_DAYS = 7
 
 
 @register_detector
@@ -159,6 +185,39 @@ class AdaptiveFeedbackDetector(Detector):
                     history=history,
                     now=now,
                 )
+            )
+
+        # v1.22 — detector-level rejection signal. SEPARATE pass from
+        # the pattern-level re-suggestion above; uses a time-windowed
+        # query so the prompt tracks current sentiment, not lifetime
+        # rejections.
+        try:
+            since_ts = (
+                now - timedelta(days=_DETECTOR_REJECTION_WINDOW_DAYS)
+            ).timestamp()
+            recent_kinds = (
+                await store.get_decisive_verdict_kinds_by_detector_since(
+                    since_ts
+                )
+            )
+            signals = find_rejection_signals(recent_kinds)
+            for signal in signals:
+                detector_name = str(signal["detector"])
+                # Skip self — recommending the user disable
+                # AdaptiveFeedback would be a tail-eating ouroboros.
+                if detector_name == "adaptive_feedback":
+                    continue
+                insights.append(
+                    _build_detector_rejection_insight(
+                        signal=signal,
+                        window_days=_DETECTOR_REJECTION_WINDOW_DAYS,
+                        now=now,
+                    )
+                )
+        except Exception:
+            _LOGGER.debug(
+                "AdaptiveFeedback detector-level rejection signal failed",
+                exc_info=True,
             )
 
         if insights:
@@ -370,3 +429,96 @@ def _verdict_summary(history: VerdictHistory) -> str:
         return "no verdicts"
     bits = [f"{n} {kind}" for kind, n in sorted(counts.items())]
     return ", ".join(bits)
+
+
+def _build_detector_rejection_insight(
+    *,
+    signal: dict[str, float | int | str],
+    window_days: int,
+    now: datetime,
+) -> Insight:
+    """v1.22 — meta-insight proposing the user disable a detector
+    whose suggestions they keep rejecting.
+
+    Fingerprint keyed by the target detector name (NOT the AF
+    detector's own name) so dedup works per-target across scans.
+    """
+    detector_name = str(signal["detector"])
+    n_decisive = int(signal["n_decisive"])
+    n_applies = int(signal["n_applies"])
+    n_rejections = int(signal["n_rejections"])
+    rate = float(signal["apply_rate"])
+    rate_pct = round(rate * 100, 1)
+
+    fingerprint = {
+        "kind": "adaptive_feedback_detector_disable",
+        "detector": detector_name,
+    }
+
+    title = (
+        f"Consider disabling **{detector_name}** — "
+        f"{n_rejections}/{n_decisive} suggestions rejected in the "
+        f"last {window_days} days ({rate_pct}% apply rate)"
+    )
+
+    explanation = (
+        f"In the last {window_days} days, **{detector_name}** has "
+        f"emitted {n_decisive} suggestions you acted on. You applied "
+        f"**{n_applies}** and rejected (dismissed / retired) "
+        f"**{n_rejections}**. That's a {rate_pct}% apply rate — "
+        f"below the {int(APPLY_RATE_DISABLE_THRESHOLD * 100)}% "
+        f"threshold we use to flag detectors that aren't earning "
+        f"their slot in the panel.\n\n"
+        f"**Options:**\n"
+        f"- **Disable**: Settings → Devices & Services → HA Insights → "
+        f"Configure → uncheck `{detector_name}`. Quiet immediately; "
+        f"never auto-re-enables.\n"
+        f"- **Wait and see**: dismiss this nudge; we'll re-check in "
+        f"{_DETECTOR_REJECTION_REEMIT_DAYS} days if the pattern "
+        f"continues.\n"
+        f"- **Keep tuning**: if the detector's value just hasn't "
+        f"clicked for your install yet, try opening one of its "
+        f"insights and using the LLM Refine button to nudge the "
+        f"suggestion shape.\n\n"
+        f"*This nudge is advisory. We never auto-disable a detector.*"
+    )
+
+    payload: dict[str, Any] = {
+        "kind": "adaptive_feedback_detector_disable",
+        "detector": detector_name,
+        "window_days": window_days,
+        "n_decisive": n_decisive,
+        "n_applies": n_applies,
+        "n_rejections": n_rejections,
+        "apply_rate": rate,
+        "apply_rate_pct": rate_pct,
+        "apply_rate_threshold_pct": int(
+            APPLY_RATE_DISABLE_THRESHOLD * 100
+        ),
+        "min_decisive_verdicts": MIN_DECISIVE_VERDICTS_FOR_DISABLE_HINT,
+        "reemit_after_days": _DETECTOR_REJECTION_REEMIT_DAYS,
+        "deeplink_url": "/config/integrations",
+        "deeplink_label": "Open Devices & Services",
+        "suggested_actions": [
+            f"Disable `{detector_name}` in Settings → Devices & "
+            "Services → HA Insights → Configure.",
+            "OR dismiss this nudge — we'll re-check in "
+            f"{_DETECTOR_REJECTION_REEMIT_DAYS} days.",
+            "OR open one of the detector's existing insights and "
+            "use 🤖 Refine to shape its output toward something you "
+            "would apply.",
+        ],
+    }
+
+    return Insight(
+        id=Insight.compute_id(InsightKind.PATTERN_OBSERVATION, fingerprint),
+        kind=InsightKind.PATTERN_OBSERVATION,
+        detector="adaptive_feedback",
+        title=title,
+        confidence=_CONFIDENCE_DETECTOR_REJECTION,
+        fingerprint=fingerprint,
+        payload=payload,
+        payload_format="report",
+        explanation=explanation,
+        created_at=now,
+    )
