@@ -26,20 +26,18 @@ def _ctx_with_buffer(buf: StateEventBuffer) -> DetectorContext:
     return DetectorContext(hass=MagicMock(), event_buffer=buf)
 
 
-# v1.14.13: anchor every fixture to the MOST RECENT Monday so the
-# 14-day window deterministically covers the same 10 weekdays at the
-# same jitter offsets. v1.14.12 used a hard-coded date (2026-03-09)
-# but the detector's LOOKBACK_DAYS=14 cutoff filtered all events out
-# once that date drifted outside the window — every CI run after a
-# couple of weeks. A dynamic Monday is fresh AND day-of-week-stable.
-def _most_recent_monday_utc() -> datetime:
-    today = datetime.now(tz=UTC).replace(
-        hour=10, minute=0, second=0, microsecond=0,
-    )
-    return today - timedelta(days=today.weekday())
-
-
-_FIXED_NOW = _most_recent_monday_utc()
+# v1.22.4: anchor _FIXED_NOW to TODAY rather than the most-recent
+# Monday. v1.14.13's Monday anchoring broke the test on any day that
+# wasn't Monday: tests seeded events ending at the most-recent Monday
+# (e.g. Mon 2026-05-18 when CI ran Sat 2026-05-23) but the detector
+# itself uses datetime.now() for its 14-day cutoff. That meant the
+# earliest seeded events fell BEFORE the detector's window and were
+# filtered out — dropping below the ≥10-weekday gate every time CI
+# ran late in the week. A 14-day window from today is guaranteed to
+# contain ≥10 weekdays regardless of which day we anchor to.
+_FIXED_NOW = datetime.now(tz=UTC).replace(
+    hour=10, minute=0, second=0, microsecond=0,
+)
 
 
 def _seed_weekday_routine(
