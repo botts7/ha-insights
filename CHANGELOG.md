@@ -26,8 +26,12 @@ of the four rolling-baseline detectors now has a
 |---|---|
 | `FrequencyAnomalyDetector` | 7 |
 | `StateShiftDetector` | 7 |
-| `LaggedCorrelationDetector` | 7 |
 | `SeasonalityDetector` | 14 (needs ≥2 weekly cycles) |
+
+`LaggedCorrelationDetector` doesn't get a day-span gate — its
+existing `MIN_OCCURRENCES` per-pair + `MIN_CONFIDENCE_TO_EMIT`
+already filter sparse signals out, so day-1 flood doesn't reach
+it regardless.
 
 When the buffer's data span is below the gate, the detector
 returns `[]` silently (no insights, no log spam). Once the buffer

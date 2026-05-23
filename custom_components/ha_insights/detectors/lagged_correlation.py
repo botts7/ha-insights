@@ -96,28 +96,18 @@ class LaggedCorrelationDetector(CooccurrenceDetector):
     # (=0.55), while symmetric is just a hint to deprioritize.
     DIRECTIONALITY_DEMOTE_REVERSED = 0.5
     DIRECTIONALITY_DEMOTE_SYMMETRIC = 0.85
-    # v1.23.2 — Discussion #104: transfer-entropy and lag estimation
-    # need enough lagged samples to separate real cross-entity coupling
-    # from coincidence. With <7 days of data the math is unstable.
-    MIN_DATA_DAYS_FOR_EMIT = 7
+    # v1.23.2 — no day-span gate on LaggedCorrelation. The detector's
+    # own MIN_OCCURRENCES (per-pair) + MIN_CONFIDENCE_TO_EMIT already
+    # filter weak signals; on a fresh install you simply don't have
+    # enough pair co-occurrences to clear those gates, so the day-1
+    # flood doesn't reach this detector regardless. Other rolling-
+    # baseline detectors (FrequencyAnomaly, Seasonality, StateShift)
+    # have the gate because they CAN emit from sparse data.
 
     async def scan(self, ctx: DetectorContext) -> list[Insight]:
         # Reset per-scan stream cache so a re-used detector instance
-        # doesn't leak streams from the prior scan. Set BEFORE the
-        # warmup gate so the attribute exists even when we early-exit
-        # (tests assert on it).
+        # doesn't leak streams from the prior scan.
         self._entity_streams: dict[str, list[tuple[float, str]]] | None = None
-        # v1.23.2 warmup gate (see MIN_DATA_DAYS_FOR_EMIT).
-        if (
-            ctx.event_buffer is not None
-            and hasattr(ctx.event_buffer, "data_span_days")
-        ):
-            span = ctx.event_buffer.data_span_days()
-            if (
-                isinstance(span, (int, float))
-                and span < self.MIN_DATA_DAYS_FOR_EMIT
-            ):
-                return []
         try:
             return await super().scan(ctx)
         finally:
