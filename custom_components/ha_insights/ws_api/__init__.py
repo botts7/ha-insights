@@ -214,6 +214,9 @@ SUPPORTED_METHODS = (
     # Reversible via `unretire`.
     "retire",
     "unretire",
+    # v1.23.0: bulk dismiss / retire — clear batches of noise items.
+    "bulk_dismiss",
+    "bulk_retire",
     # v1.7.7: per-device "managed externally" flag — Strategy 2 from
     # the device-internal-logic memory. User asserts "this device
     # handles its own logic" and insights from it are fully suppressed.
