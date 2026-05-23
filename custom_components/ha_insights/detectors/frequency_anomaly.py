@@ -155,9 +155,30 @@ class FrequencyAnomalyDetector(Detector):
     # spike. Sorted by ratio descending so the most extreme stick out.
     MAX_INSIGHTS_PER_SCAN = 15
 
+    # v1.23.2 — minimum days of buffered data before this detector
+    # produces output. With <7 days the rolling baseline is statistically
+    # meaningless, so today's count looks anomalous vs everything.
+    # Discussion #104 (dziban303): fresh installs see hundreds of
+    # FrequencyAnomaly insights because the baseline is essentially a
+    # single day. Server-side gate eliminates that day-1 flood.
+    MIN_DATA_DAYS_FOR_EMIT = 7
+
     async def scan(self, ctx: DetectorContext) -> list[Insight]:
         if ctx.event_buffer is None:
             return []
+
+        # v1.23.2 warmup gate. The buffer's actual data span (earliest
+        # event → now) tells us whether enough baseline has accumulated
+        # to produce meaningful anomaly ratios. isinstance check
+        # protects tests that pass MagicMock buffers (hasattr is True
+        # there but the call returns a MagicMock, not a number).
+        if hasattr(ctx.event_buffer, "data_span_days"):
+            span = ctx.event_buffer.data_span_days()
+            if (
+                isinstance(span, (int, float))
+                and span < self.MIN_DATA_DAYS_FOR_EMIT
+            ):
+                return []
 
         # Bucket by HA-local midnight, not UTC midnight — otherwise on the
         # west coast a 4 PM event lands "tomorrow" and a 9 PM event lands

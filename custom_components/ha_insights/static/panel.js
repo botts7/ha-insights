@@ -7590,9 +7590,11 @@ ${JSON.stringify(value, null, 2)}
       <h4>Devices</h4>
       <div class="managed-devices">
         <p style="margin-top:0; color: var(--secondary-text-color); font-size: 0.92em;">
-          Mark a device "managed externally" to stop surfacing patterns
-          from it. Different from automatic device-managed detection
-          — this is your explicit assertion.
+          <strong>Suppress device</strong> kills ALL future suggestions from
+          this device, every detector. Use for devices that just aren't
+          relevant to HA (vendor app schedules them, etc.). Broader than
+          <em>Retire</em> (which only blocks this one fingerprint) or
+          <em>Dismiss</em> (one-off "not now").
         </p>
         <ul style="list-style: none; padding: 0; margin: 0;">
           ${devices.map((d) => b `
@@ -7605,12 +7607,12 @@ ${JSON.stringify(value, null, 2)}
             ? b `<button
                     class="pill-action"
                     style="background: var(--warning-color, #ef6c00); color: white; border-color: var(--warning-color, #ef6c00);"
-                    title="Currently suppressed. Click to restore — future patterns from this device will surface again."
+                    title="Currently suppressed across ALL detectors. Click to restore — future patterns from this device will surface again."
                     @click=${() => this._setDeviceManaged(d.device_id, false)}
                   >✓ Suppressed — restore</button>`
             : b `<button
                     class="pill-action"
-                    title="Stop surfacing future insights from this device. Existing insights stay until next scan."
+                    title="Stop surfacing future insights from this device, across EVERY detector. Existing insights stay until the next scan. Reversible — click again to restore."
                     @click=${() => this._setDeviceManaged(d.device_id, true)}
                   >🔇 Suppress device</button>`}
             </li>
@@ -8494,16 +8496,26 @@ ${JSON.stringify(value, null, 2)}
         </div>
       </div>
       <div class="dialog-footer">
-        <button class="action" ?disabled=${busy} @click=${() => this._dismiss(insight)}>
+        <button
+          class="action"
+          ?disabled=${busy}
+          title="One-off 'not now'. Hidden from the panel, but the pattern can resurface on a future scan if it persists. Use Snooze for a known temporary skip, Retire for a permanent decision."
+          @click=${() => this._dismiss(insight)}
+        >
           Dismiss
         </button>
-        <button class="action" ?disabled=${busy} @click=${() => this._snooze(insight)}>
+        <button
+          class="action"
+          ?disabled=${busy}
+          title="Hide for 7 days. After that, the next scan can re-emit this insight. For when you'll deal with it later — e.g. 'I'm travelling this week'."
+          @click=${() => this._snooze(insight)}
+        >
           Snooze 7d
         </button>
         <button
           class="action retire"
           ?disabled=${busy}
-          title="Permanently retire this suggestion — won't appear again unless un-retired from the history view"
+          title="Permanent 'don't auto-suggest' for THIS specific suggestion-fingerprint. The same entity can still produce different findings from other detectors. Reversible from the history view."
           @click=${() => this._retire(insight)}
         >
           Retire
@@ -9099,17 +9111,19 @@ ${JSON.stringify(value, null, 2)}
         <button
           class="action"
           ?disabled=${busy}
+          title="One-off 'not now'. Hidden from the panel, but the pattern can resurface on a future scan if it persists. Use Snooze for a known temporary skip, Retire for a permanent decision."
           @click=${() => this._dismiss(insight)}
         >Dismiss</button>
         <button
           class="action"
           ?disabled=${busy}
+          title="Hide for 7 days. After that, the next scan can re-emit this insight. For when you'll deal with it later — e.g. 'I'm travelling this week'."
           @click=${() => this._snooze(insight)}
         >Snooze 7d</button>
         <button
           class="action retire"
           ?disabled=${busy}
-          title="Permanently retire this suggestion — won't appear again unless un-retired from the history view"
+          title="Permanent 'don't auto-suggest' for THIS specific suggestion-fingerprint. The same entity can still produce different findings from other detectors. Reversible from the history view."
           @click=${() => this._retire(insight)}
         >Retire</button>
       </div>
@@ -9449,7 +9463,12 @@ ${JSON.stringify(value, null, 2)}
                             : A}
                 </div>
                 <div class="dialog-footer">
-                  <button class="action" ?disabled=${busy} @click=${() => this._dismiss(insight)}>
+                  <button
+                    class="action"
+                    ?disabled=${busy}
+                    title="One-off 'not now'. Hidden from the panel, but the pattern can resurface on a future scan if it persists. Use Snooze for a known temporary skip, Retire for a permanent decision."
+                    @click=${() => this._dismiss(insight)}
+                  >
                     Dismiss
                   </button>
                   ${insight.applied_at
@@ -9457,6 +9476,7 @@ ${JSON.stringify(value, null, 2)}
                             : b `<button
                         class="action"
                         ?disabled=${busy}
+                        title="Hide for 7 days. After that, the next scan can re-emit this insight. For when you'll deal with it later — e.g. 'I'm travelling this week'."
                         @click=${() => this._snooze(insight)}
                       >
                         Snooze 7d
@@ -9466,7 +9486,7 @@ ${JSON.stringify(value, null, 2)}
                             : b `<button
                         class="action retire"
                         ?disabled=${busy}
-                        title="Permanently retire this suggestion — won't appear again unless un-retired from the history view"
+                        title="Permanent 'don't auto-suggest' for THIS specific suggestion-fingerprint. The same entity can still produce different findings from other detectors. Reversible from the history view."
                         @click=${() => this._retire(insight)}
                       >
                         Retire

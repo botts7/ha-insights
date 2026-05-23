@@ -96,6 +96,13 @@ class LaggedCorrelationDetector(CooccurrenceDetector):
     # (=0.55), while symmetric is just a hint to deprioritize.
     DIRECTIONALITY_DEMOTE_REVERSED = 0.5
     DIRECTIONALITY_DEMOTE_SYMMETRIC = 0.85
+    # v1.23.2 — no day-span gate on LaggedCorrelation. The detector's
+    # own MIN_OCCURRENCES (per-pair) + MIN_CONFIDENCE_TO_EMIT already
+    # filter weak signals; on a fresh install you simply don't have
+    # enough pair co-occurrences to clear those gates, so the day-1
+    # flood doesn't reach this detector regardless. Other rolling-
+    # baseline detectors (FrequencyAnomaly, Seasonality, StateShift)
+    # have the gate because they CAN emit from sparse data.
 
     async def scan(self, ctx: DetectorContext) -> list[Insight]:
         # Reset per-scan stream cache so a re-used detector instance

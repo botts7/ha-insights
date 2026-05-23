@@ -77,9 +77,25 @@ class SeasonalityDetector(Detector):
     # at high confidence.
     TIME_STDDEV_MIN_MIN = 0.25
 
+    # v1.23.2 — Discussion #104: seasonality detection needs at least
+    # two cycles of the seasonal pattern to be statistically meaningful.
+    # For weekly seasonality (the only kind we detect today) that's
+    # 14 days. Below that, every event looks "seasonal" relative to
+    # an empty baseline.
+    MIN_DATA_DAYS_FOR_EMIT = 14
+
     async def scan(self, ctx: DetectorContext) -> list[Insight]:
         if ctx.event_buffer is None:
             return []
+
+        # v1.23.2 warmup gate (see SeasonalityDetector.MIN_DATA_DAYS_FOR_EMIT).
+        if hasattr(ctx.event_buffer, "data_span_days"):
+            span = ctx.event_buffer.data_span_days()
+            if (
+                isinstance(span, (int, float))
+                and span < self.MIN_DATA_DAYS_FOR_EMIT
+            ):
+                return []
 
         cutoff = datetime.now(tz=UTC) - timedelta(days=self.LOOKBACK_DAYS)
         groups: dict[tuple[str, str], list[StateEvent]] = defaultdict(list)
