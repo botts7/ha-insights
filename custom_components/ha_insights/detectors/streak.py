@@ -116,6 +116,12 @@ class StreakDetector(Detector):
 
         insights: list[Insight] = []
         for (entity_id, new_state), events in groups.items():
+            # v1.23.3 (Discussion #104 sweep): if any existing automation
+            # already acts on this entity, the user has presumably
+            # already decided how it should be triggered. Skip — same
+            # rule applied to manual_habit + long_tail in v1.22.4.
+            if entity_id in ctx.entities_already_automated:
+                continue
             # v1.5.26: pass ctx through so the per-group evaluator can
             # query HA's astral data for sun-relative trigger detection.
             insight = self._evaluate_group(

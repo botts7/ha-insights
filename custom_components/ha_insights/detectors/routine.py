@@ -146,6 +146,17 @@ class RoutineDetector(Detector):
         routine_pairs: list[tuple[str, str]] = [
             p for p, c in pair_counts.most_common() if c >= min_present
         ]
+        # v1.23.3 (Discussion #104 sweep): a routine is a bundled
+        # multi-entity automation. If ANY entity in the bundle is
+        # already in an existing automation, the user has been
+        # tweaking their setup manually — emitting a fresh routine
+        # would conflict. Drop those pairs; if not enough remain, skip.
+        if ctx.entities_already_automated:
+            routine_pairs = [
+                (eid, st)
+                for (eid, st) in routine_pairs
+                if eid not in ctx.entities_already_automated
+            ]
         if len(routine_pairs) < _MIN_ROUTINE_SIZE:
             return None
 

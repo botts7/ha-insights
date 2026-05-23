@@ -248,6 +248,15 @@ class CooccurrenceDetector(Detector):
         for key, deltas in pairs.items():
             if len(deltas) < self.MIN_OCCURRENCES:
                 continue
+            # v1.23.3 (Discussion #104 sweep): the proposal would
+            # automate the follower entity when the leader fires. If
+            # the follower is ALREADY acted on by an existing automation,
+            # the user has presumably thought about how it should be
+            # controlled — a duplicate suggestion is noise. key shape is
+            # (leader_eid, leader_state, follower_eid, follower_state).
+            follower_eid = key[2]
+            if follower_eid in ctx.entities_already_automated:
+                continue
             insight = self._evaluate_pair(key, deltas, events, leader_counts)
             if insight is None:
                 continue
