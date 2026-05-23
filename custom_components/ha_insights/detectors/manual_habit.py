@@ -127,6 +127,15 @@ class ManualHabitDetector(Detector):
 
         insights: list[Insight] = []
         for (entity_id, new_state), events in groups.items():
+            # v1.22.4 — Discussion #104. The strict time-bucket
+            # signature check above only catches existing automations
+            # at the same time. If the user already has ANY automation
+            # acting on this entity (even at a different time), they've
+            # presumably thought about how it should be controlled.
+            # Suggesting "and ALSO add this automation at 21:45" felt
+            # like noise to real-install users; skip outright.
+            if entity_id in ctx.entities_already_automated:
+                continue
             insight = self._evaluate_group(
                 ctx, entity_id, new_state, events, already_handled
             )

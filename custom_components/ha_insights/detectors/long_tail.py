@@ -95,6 +95,15 @@ class LongTailDetector(Detector):
             threshold_min = DEFAULT_DURATION_THRESHOLDS.get(domain)
             if threshold_min is None:
                 continue
+            # v1.22.4 — skip entities the user already automates.
+            # Discussion #104: LongTail was suggesting "auto-off this
+            # light" for lights that already had an auto-off automation
+            # the user wrote themselves. The user takes the existing
+            # automation as evidence they've thought about it; we
+            # shouldn't second-guess unless AutomationAuditDetector
+            # finds the existing one is broken.
+            if entity_id in ctx.entities_already_automated:
+                continue
             spans = self._compute_active_spans(entity_events)
             long_spans = [
                 seconds

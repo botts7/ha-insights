@@ -108,6 +108,23 @@ _EXCLUDED_DOMAINS = frozenset({
     "persistent_notification",
 })
 
+# v1.22.4 — domains where "unknown" is the NORMAL pre-activation state.
+# Field report (Discussion #104, 2026-05-22): user had dozens of
+# never-pressed `button.*` entities flagged as "unavailable for 8 days
+# — diagnose connection". Buttons don't have a meaningful state until
+# pressed; same for `event.*` (no event fired yet), `input_button.*`
+# (helper, never pressed), `tag.*` (NFC tag never scanned).
+#
+# For these domains we still flag `state == "unavailable"` (the
+# underlying integration is genuinely broken), just not `"unknown"`
+# (which is the expected pre-activation default).
+_DOMAINS_UNKNOWN_IS_NORMAL = frozenset({
+    "button",
+    "event",
+    "input_button",
+    "tag",
+})
+
 
 @register_detector
 class UnavailableDeviceFixItDetector(Detector):
@@ -153,6 +170,14 @@ class UnavailableDeviceFixItDetector(Detector):
                 continue
             domain = entity_id.split(".", 1)[0]
             if domain in _EXCLUDED_DOMAINS:
+                continue
+            # v1.22.4: for trigger-style domains, "unknown" is normal.
+            # Only flag genuine "unavailable" (the underlying
+            # integration is broken).
+            if (
+                state.state == "unknown"
+                and domain in _DOMAINS_UNKNOWN_IS_NORMAL
+            ):
                 continue
             if e_reg is not None:
                 entry = e_reg.async_get(entity_id)
