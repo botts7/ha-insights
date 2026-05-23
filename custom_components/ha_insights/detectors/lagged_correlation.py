@@ -102,6 +102,11 @@ class LaggedCorrelationDetector(CooccurrenceDetector):
     MIN_DATA_DAYS_FOR_EMIT = 7
 
     async def scan(self, ctx: DetectorContext) -> list[Insight]:
+        # Reset per-scan stream cache so a re-used detector instance
+        # doesn't leak streams from the prior scan. Set BEFORE the
+        # warmup gate so the attribute exists even when we early-exit
+        # (tests assert on it).
+        self._entity_streams: dict[str, list[tuple[float, str]]] | None = None
         # v1.23.2 warmup gate (see MIN_DATA_DAYS_FOR_EMIT).
         if (
             ctx.event_buffer is not None
@@ -113,9 +118,6 @@ class LaggedCorrelationDetector(CooccurrenceDetector):
                 and span < self.MIN_DATA_DAYS_FOR_EMIT
             ):
                 return []
-        # Reset per-scan stream cache so a re-used detector instance
-        # doesn't leak streams from the prior scan.
-        self._entity_streams: dict[str, list[tuple[float, str]]] | None = None
         try:
             return await super().scan(ctx)
         finally:

@@ -195,10 +195,13 @@ class _FrozenBufferView:
         FrequencyAnomaly / Seasonality / StateShift / LaggedCorrelation).
         The detectors get a FrozenBufferView, not the live buffer, so
         the method has to exist here too. Returns 0.0 when empty.
+
+        Same caveat as StateEventBuffer.data_span_days — events are
+        in INSERTION order, not time order. Scan for the min timestamp.
         """
         if not self._events:
             return 0.0
-        earliest = self._events[0].timestamp
+        earliest = min(ev.timestamp for ev in self._events)
         now = datetime.now(tz=UTC)
         return max(0.0, (now - earliest).total_seconds() / 86400.0)
 

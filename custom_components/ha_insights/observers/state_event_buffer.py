@@ -273,13 +273,17 @@ class StateEventBuffer:
         Detectors gate on this value to suppress emissions until
         enough data has accumulated. Returns 0.0 when empty.
 
-        Cheap — peeks the first event's timestamp without copying the
-        full deque.
+        Implementation note: events are stored in INSERTION order
+        (deque.append), not time order. Tests + bootstrap can insert
+        events out of chronological order (e.g. seed today's first,
+        then backfill the baseline). So we scan for the min timestamp
+        rather than trust `self._events[0]`. Cheap — O(n) over the
+        deque, ~10k events even on big installs.
         """
         if not self._events:
             return 0.0
         from datetime import UTC, datetime
 
-        earliest = self._events[0].timestamp
+        earliest = min(ev.timestamp for ev in self._events)
         now = datetime.now(tz=UTC)
         return max(0.0, (now - earliest).total_seconds() / 86400.0)
