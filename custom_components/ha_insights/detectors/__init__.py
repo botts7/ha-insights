@@ -14,7 +14,7 @@ import logging
 import pkgutil
 from collections.abc import Iterator
 from dataclasses import replace
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from homeassistant.core import CoreState, HomeAssistant
@@ -186,6 +186,21 @@ class _FrozenBufferView:
 
     def __len__(self) -> int:
         return len(self._events)
+
+    def data_span_days(self) -> float:
+        """Mirror StateEventBuffer.data_span_days over the frozen snapshot.
+
+        v1.23.2 — detectors gate emission on whether the buffer has
+        enough accumulated history (see *.MIN_DATA_DAYS_FOR_EMIT on
+        FrequencyAnomaly / Seasonality / StateShift / LaggedCorrelation).
+        The detectors get a FrozenBufferView, not the live buffer, so
+        the method has to exist here too. Returns 0.0 when empty.
+        """
+        if not self._events:
+            return 0.0
+        earliest = self._events[0].timestamp
+        now = datetime.now(tz=UTC)
+        return max(0.0, (now - earliest).total_seconds() / 86400.0)
 
 
 def _run_detector_in_thread(

@@ -260,3 +260,26 @@ class StateEventBuffer:
         runs on the event loop before the heavy scan starts.
         """
         return tuple(self._events)
+
+    def data_span_days(self) -> float:
+        """Return how many days of data the buffer currently holds.
+
+        v1.23.2 (Discussion #104 day-1 noise): rolling-baseline detectors
+        (FrequencyAnomaly, Seasonality, StateShift, LaggedCorrelation)
+        compare today's pattern against a multi-day baseline. On a
+        fresh install the buffer has <1 day of data — every event is
+        an "anomaly" because there's no baseline to compare against.
+
+        Detectors gate on this value to suppress emissions until
+        enough data has accumulated. Returns 0.0 when empty.
+
+        Cheap — peeks the first event's timestamp without copying the
+        full deque.
+        """
+        if not self._events:
+            return 0.0
+        from datetime import UTC, datetime
+
+        earliest = self._events[0].timestamp
+        now = datetime.now(tz=UTC)
+        return max(0.0, (now - earliest).total_seconds() / 86400.0)

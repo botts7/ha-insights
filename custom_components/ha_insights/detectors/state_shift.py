@@ -97,10 +97,25 @@ class StateShiftDetector(Detector):
         "investigate before the schedule / streak detectors drift."
     )
     required_data = ("feature:event_buffer",)
+    # v1.23.2 — Discussion #104: changepoint detection needs enough
+    # pre+post-shift data to separate signal from noise. With <7 days
+    # of data the algorithm finds "shifts" everywhere because it has
+    # nothing to compare against. Server-side gate suppresses output
+    # until the buffer accumulates a meaningful baseline.
+    MIN_DATA_DAYS_FOR_EMIT = 7
 
     async def scan(self, ctx: DetectorContext) -> list[Insight]:
         if ctx.event_buffer is None:
             return []
+
+        # v1.23.2 warmup gate (see StateShiftDetector.MIN_DATA_DAYS_FOR_EMIT).
+        if hasattr(ctx.event_buffer, "data_span_days"):
+            span = ctx.event_buffer.data_span_days()
+            if (
+                isinstance(span, (int, float))
+                and span < self.MIN_DATA_DAYS_FOR_EMIT
+            ):
+                return []
 
         now_local = dt_util.as_local(datetime.now(tz=UTC).replace(microsecond=0))
         today_local_date = now_local.date()

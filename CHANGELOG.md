@@ -4,6 +4,45 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+## [1.23.2] — 2026-05-23
+
+### Fixed — Day-1 noise: warmup clamp on rolling-baseline detectors
+
+From Discussion #104 (dziban303). Rolling-baseline detectors
+(FrequencyAnomaly, Seasonality, StateShift, LaggedCorrelation)
+compare today's behaviour to a multi-day baseline. On a fresh
+install with <1 day of data, every event looks "anomalous"
+because there's no baseline to compare against — the user sees
+hundreds of insights that quiet down once data accumulates.
+
+### What lands
+
+New `data_span_days()` on `StateEventBuffer` + `_FrozenBufferView`
+returns the gap between the earliest buffered event and now. Each
+of the four rolling-baseline detectors now has a
+`MIN_DATA_DAYS_FOR_EMIT` class attribute and gates its `scan()`:
+
+| Detector | Min days |
+|---|---|
+| `FrequencyAnomalyDetector` | 7 |
+| `StateShiftDetector` | 7 |
+| `LaggedCorrelationDetector` | 7 |
+| `SeasonalityDetector` | 14 (needs ≥2 weekly cycles) |
+
+When the buffer's data span is below the gate, the detector
+returns `[]` silently (no insights, no log spam). Once the buffer
+matures past the threshold, normal scanning resumes.
+
+`isinstance(span, (int, float))` guard protects tests passing
+MagicMock buffers from spurious comparison results.
+
+### Added — Verdict-action tooltips (bundled card v1.10.19)
+
+Tooltips on Dismiss / Snooze / Retire / Suppress Device
+explaining the three-tier lifecycle. From the same Discussion
+#104 — actions were visually indistinguishable buttons; only
+Retire had a tooltip.
+
 ## [1.23.1] — 2026-05-23
 
 ### Fixed — "Load 200 more" button truly works now

@@ -96,8 +96,23 @@ class LaggedCorrelationDetector(CooccurrenceDetector):
     # (=0.55), while symmetric is just a hint to deprioritize.
     DIRECTIONALITY_DEMOTE_REVERSED = 0.5
     DIRECTIONALITY_DEMOTE_SYMMETRIC = 0.85
+    # v1.23.2 — Discussion #104: transfer-entropy and lag estimation
+    # need enough lagged samples to separate real cross-entity coupling
+    # from coincidence. With <7 days of data the math is unstable.
+    MIN_DATA_DAYS_FOR_EMIT = 7
 
     async def scan(self, ctx: DetectorContext) -> list[Insight]:
+        # v1.23.2 warmup gate (see MIN_DATA_DAYS_FOR_EMIT).
+        if (
+            ctx.event_buffer is not None
+            and hasattr(ctx.event_buffer, "data_span_days")
+        ):
+            span = ctx.event_buffer.data_span_days()
+            if (
+                isinstance(span, (int, float))
+                and span < self.MIN_DATA_DAYS_FOR_EMIT
+            ):
+                return []
         # Reset per-scan stream cache so a re-used detector instance
         # doesn't leak streams from the prior scan.
         self._entity_streams: dict[str, list[tuple[float, str]]] | None = None
