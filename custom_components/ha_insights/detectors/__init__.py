@@ -397,6 +397,12 @@ async def run_all_detectors(
     # enough to do on the loop, since it's a single memcpy of pointers.
     # The view also enforces blocked_entities and area_filter, so every
     # detector gets the same scoped data without per-detector code.
+    # v1.22.4 — precompute the set of entity_ids any automation acts on.
+    # Detectors that emit "automation" payloads consult this before
+    # suggesting a new automation for an already-covered entity. See
+    # base.DetectorContext.entities_already_automated docstring.
+    entities_already_automated = _entities_acted_on(existing_automations)
+
     snapshot_ctx = replace(
         ctx,
         blocked_entities=effective_blocked,
@@ -406,6 +412,7 @@ async def run_all_detectors(
         container_to_members=container_to_members,
         hierarchy=hierarchy,
         iot_class_by_integration=iot_class_by_integration,
+        entities_already_automated=entities_already_automated,
     )
     if ctx.event_buffer is not None:
         snapshot = ctx.event_buffer.snapshot()
@@ -427,6 +434,7 @@ async def run_all_detectors(
             device_id_by_entity=device_id_by_entity,
             existing_automations=existing_automations,
             entity_dependencies=entity_dependencies,
+            entities_already_automated=entities_already_automated,
         )
 
     enabled = None
@@ -1168,6 +1176,46 @@ def _build_entity_dependencies(
         return {}
 
     return {k: frozenset(v) for k, v in raw.items()}
+
+
+def _entities_acted_on(
+    existing_automations: list[dict],
+) -> frozenset[str]:
+    """Return every entity_id that ANY existing automation acts on.
+
+    v1.22.4 — Discussion #104: detectors that emit ``payload_format=
+    "automation"`` consult this set before suggesting a new automation
+    for an entity the user has already automated. Field report:
+    ManualHabit / LongTail were producing redundant "automate this
+    light" suggestions for lights already covered by an existing
+    automation.
+
+    Walks every automation's ``action`` block, pulling out:
+      - ``target.entity_id`` (str or list)
+      - ``entity_id`` on the service call (legacy form)
+      - Recursively descends ``choose.*.sequence`` and nested ``parallel``
+        / ``repeat`` blocks via the existing
+        ``apply.conflict_scanner._extract_target_entities`` helper.
+
+    Returns a frozenset for O(1) membership tests in the hot loop.
+    Cheap to build (~ms for a few hundred automations).
+    """
+    if not existing_automations:
+        return frozenset()
+    out: set[str] = set()
+    try:
+        from ..apply.conflict_scanner import _extract_target_entities
+    except Exception:  # pragma: no cover — defensive
+        return frozenset()
+    for auto in existing_automations:
+        actions = auto.get("action")
+        if actions is None:
+            continue
+        try:
+            out |= _extract_target_entities(actions)
+        except Exception:  # pragma: no cover — best-effort
+            continue
+    return frozenset(out)
 
 
 async def _load_existing_automations(hass: HomeAssistant) -> list[dict]:

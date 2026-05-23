@@ -4,6 +4,54 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+## [1.22.4] — 2026-05-23
+
+### Fixed — Quietude pass from Discussion #104 field report
+
+Two unrelated sources of noise reported by @dziban303 after a few
+days of real-install use:
+
+#### 1. Buttons stuck at "unknown" treated as unavailable
+
+`button.*`, `event.*`, `input_button.*`, `tag.*` entities have
+`"unknown"` as their NORMAL pre-activation state — a never-pressed
+button is fine, not broken. v1.14.0's UnavailableDeviceFixIt
+treated `state in {"unavailable", "unknown"}` uniformly and emitted
+"unavailable for 8 days — diagnose connection" for every untouched
+button on the install.
+
+Fix: new `_DOMAINS_UNKNOWN_IS_NORMAL` frozenset in
+`unavailable_device_fixit.py`. For these domains we still flag
+genuine `"unavailable"` (the integration is broken), but skip
+`"unknown"` (the entity just hasn't been activated yet).
+
+#### 2. Already-automated entities still being suggested
+
+Field report: `manual_habit` and `long_tail` were suggesting "add
+an automation for this light" for lights the user already had
+automations for. The user takes their existing automation as a
+sign they've already thought about how the entity should be
+controlled — a new auto-generated automation feels redundant.
+
+Fix: pre-compute `entities_already_automated: frozenset[str]`
+once per scan (in `detectors/__init__.py`'s `run_all_detectors`
+helper) by walking every existing automation's `action` block.
+Wire into `DetectorContext` so any detector emitting
+`payload_format="automation"` can consult it before emit.
+
+Applied to:
+- `LongTailDetector`: skip outright when entity is already
+  automated.
+- `ManualHabitDetector`: skip outright (in addition to the
+  existing time-bucket signature check, which only caught matches
+  at the same time-of-day).
+
+Other automation-emitting detectors (`cooccurrence`,
+`button_press_habit`, `lagged_correlation`, `streak`) remain
+unchanged for now — those produce pairwise / cross-entity rules
+where "already automated" is fuzzier. Will revisit case-by-case
+if real-install reports show similar noise.
+
 ## [1.22.3] — 2026-05-20
 
 ### Fixed — Companion-app Wi-Fi signal sensors invisible to find

@@ -120,6 +120,17 @@ class DetectorContext:
     # With 60+ integrations the sequential awaits compounded into the
     # automation_audit detector exceeding its 30s budget every scan.
     iot_class_by_integration: dict[str, str] = field(default_factory=dict)
+    # v1.22.4 — set of entity_ids that ANY existing automation acts on
+    # (i.e. appears as a target.entity_id or service entity_id in any
+    # action block). Built once per scan from existing_automations.
+    # Detectors that emit `payload_format="automation"` should consult
+    # this before suggesting a new automation for an entity that's
+    # already covered. Discussion #104, 2026-05-22: ManualHabit /
+    # LongTail were suggesting automations for entities the user
+    # already had automations for, with no cross-reference check.
+    entities_already_automated: frozenset[str] = field(
+        default_factory=frozenset
+    )
 
 
 class Detector(ABC):
