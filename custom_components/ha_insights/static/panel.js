@@ -3836,6 +3836,95 @@ class HaInsightsCard extends i {
       border-radius: 4px;
       margin-top: 6px;
     }
+    /* v1.10.17 — generic structured-fields renderer for any insight
+       kind without a specialized card-body. Replaces the raw JSON dump
+       fallback that users reported on long-tail kinds (frequency_anomaly,
+       manual_habit, habitual_override, etc.). */
+    .structured-fields {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      margin-top: 8px;
+    }
+    .structured-fields .sf-prose {
+      color: var(--primary-text-color);
+      line-height: 1.45;
+      white-space: pre-wrap;
+    }
+    .structured-fields .sf-subject {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      border-radius: 14px;
+      background: var(--primary-color, #4c6ef5);
+      color: var(--text-primary-color, #fff);
+      font-size: 0.92em;
+      text-decoration: none;
+      font-weight: 500;
+    }
+    .structured-fields .sf-subject:hover {
+      filter: brightness(1.1);
+    }
+    .structured-fields .sf-section-label {
+      font-size: 0.78em;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: var(--secondary-text-color);
+      margin: 0 0 4px 0;
+      font-weight: 600;
+    }
+    .structured-fields .sf-rows {
+      display: grid;
+      grid-template-columns: max-content 1fr;
+      gap: 6px 14px;
+      align-items: baseline;
+    }
+    .structured-fields .sf-rows dt {
+      color: var(--secondary-text-color);
+      font-size: 0.9em;
+      white-space: nowrap;
+    }
+    .structured-fields .sf-rows dd {
+      margin: 0;
+      color: var(--primary-text-color);
+      font-size: 0.95em;
+      overflow-wrap: anywhere;
+    }
+    .structured-fields .sf-rows dd code {
+      background: var(--secondary-background-color, #f5f5f5);
+      padding: 1px 6px;
+      border-radius: 4px;
+      font-size: 0.92em;
+    }
+    .structured-fields .sf-observations {
+      margin: 0;
+      padding-left: 18px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .structured-fields .sf-observations li {
+      color: var(--primary-text-color);
+      font-size: 0.92em;
+    }
+    .structured-fields .sf-raw-disclosure {
+      margin-top: 4px;
+    }
+    .structured-fields .sf-raw-disclosure summary {
+      cursor: pointer;
+      font-size: 0.82em;
+      color: var(--secondary-text-color);
+    }
+    .structured-fields .sf-raw-disclosure pre {
+      max-height: 280px;
+      overflow: auto;
+      font-size: 0.78em;
+      background: var(--code-editor-background-color, var(--secondary-background-color, #f5f5f5));
+      padding: 8px;
+      border-radius: 4px;
+      margin-top: 6px;
+    }
     .setup-step {
       border: 1px solid var(--divider-color, #e0e0e0);
       border-left: 4px solid var(--divider-color, #e0e0e0);
@@ -6188,6 +6277,13 @@ class HaInsightsCard extends i {
         // bookkeeping. The server-side writer (v1.5.34) strips the same
         // keys before write — this is the visual equivalent.
         const view = this._stripPrivateKeys(rawView);
+        // v1.10.17: pick a renderer based on payload_format. The JSON-dump
+        // view is correct for "automation" / "blueprint" (the user reviews
+        // what will be written) but unhelpful for "report" and unspecialized
+        // "card" insights — those get the structured-fields renderer below.
+        const useStructured = !editing
+            && insight.payload_format !== "automation"
+            && insight.payload_format !== "blueprint";
         return b `
       <div class="payload-edit">
         <button
@@ -6211,8 +6307,322 @@ class HaInsightsCard extends i {
                 ? b `<div class="payload-error">${parseError}</div>`
                 : A}
           `
-            : b `<pre>${JSON.stringify(view, null, 2)}</pre>`}
+            : useStructured
+                ? this._renderStructuredFields(insight, view)
+                : b `<pre>${JSON.stringify(view, null, 2)}</pre>`}
     `;
+    }
+    /** v1.10.17 — generic structured-fields renderer for any payload
+     *  without a specialized card body. Replaces the raw JSON dump that
+     *  fell through for 20+ detector kinds (long_tail, frequency_anomaly,
+     *  manual_habit, habitual_override, presence_inference, etc.).
+     *
+     *  Extracts:
+     *    - subject:          entity_id (linked via more-info popup)
+     *    - prose:            rationale / description / summary
+     *    - observations:     array of structured findings or strings
+     *    - remaining fields: scalar / array values, humanised + labelled
+     *    - escape hatch:     "Show raw JSON" disclosure for power users
+     *
+     *  Keys already represented in the insight envelope (confidence,
+     *  detector, area, maturity) are skipped to avoid duplication with
+     *  the row-meta pills above. Same for entity_id when it's the subject.
+     */
+    _renderStructuredFields(insight, payload) {
+        // Subject: prefer fingerprint's entity_id (canonical) but fall back
+        // to payload-level entity_id / subject_entity_id when missing.
+        const fp = (insight.fingerprint ?? {});
+        const subjectEntityId = fp.entity_id
+            ?? payload.entity_id
+            ?? payload.subject_entity_id
+            ?? null;
+        // Prose: collect the first non-empty narrative field. Many detectors
+        // emit one of these; some emit several with subtly different roles.
+        const proseFields = [
+            "rationale",
+            "description",
+            "summary",
+            "explanation",
+            "advice",
+        ];
+        const proseChunks = [];
+        for (const key of proseFields) {
+            const value = payload[key];
+            if (typeof value === "string" && value.trim().length > 0) {
+                proseChunks.push({
+                    label: this._humaniseKey(key),
+                    text: value.trim(),
+                });
+            }
+        }
+        // Observations: array of {kind, summary, ...} or array of strings.
+        const observationsRaw = payload.observations;
+        const observations = [];
+        if (Array.isArray(observationsRaw)) {
+            for (const obs of observationsRaw) {
+                if (typeof obs === "string") {
+                    observations.push(b `<li>${obs}</li>`);
+                }
+                else if (obs && typeof obs === "object") {
+                    const obsObj = obs;
+                    const summary = obsObj.summary
+                        ?? obsObj.text
+                        ?? obsObj.message;
+                    const obsKind = obsObj.kind;
+                    // Render summary line + selected key=value pairs underneath.
+                    const inlineFields = Object.entries(obsObj)
+                        .filter(([k, v]) => k !== "summary"
+                        && k !== "text"
+                        && k !== "message"
+                        && k !== "kind"
+                        && v !== null
+                        && v !== undefined
+                        && (typeof v !== "object" || Array.isArray(v)))
+                        .slice(0, 4); // cap to keep rows compact
+                    observations.push(b `
+            <li>
+              ${summary
+                        ? b `<span>${summary}</span>`
+                        : obsKind
+                            ? b `<code>${obsKind}</code>`
+                            : A}
+              ${inlineFields.length
+                        ? b `<span style="color: var(--secondary-text-color); margin-left: 6px;">
+                    ${inlineFields
+                            .map(([k, v]) => `${this._humaniseKey(k)}: ${this._formatScalar(v)}`)
+                            .join(" · ")}
+                  </span>`
+                        : A}
+            </li>
+          `);
+                }
+            }
+        }
+        // Remaining scalar / array fields, in detector-supplied order.
+        // Skip the ones we've already promoted above + envelope-duplicates.
+        const skipKeys = new Set([
+            "entity_id",
+            "subject_entity_id",
+            "rationale",
+            "description",
+            "summary",
+            "explanation",
+            "advice",
+            "observations",
+            // Envelope duplicates (already shown in row-meta pills):
+            "confidence",
+            "detector",
+            "kind",
+            "title",
+            "area_id",
+            "maturity",
+            // Internal / formatting noise:
+            "type", // Lovelace card type
+        ]);
+        const scalarRows = [];
+        for (const [key, value] of Object.entries(payload)) {
+            if (skipKeys.has(key))
+                continue;
+            if (value === null || value === undefined)
+                continue;
+            if (typeof value === "string" && value.trim().length === 0)
+                continue;
+            scalarRows.push({ label: this._humaniseKey(key), value });
+        }
+        return b `
+      <div class="structured-fields">
+        ${subjectEntityId
+            ? b `
+              <a
+                class="sf-subject"
+                href="#"
+                @click=${(e) => {
+                e.preventDefault();
+                this._openMoreInfo(subjectEntityId);
+            }}
+                title="Open ${subjectEntityId}"
+              >📄 ${subjectEntityId}</a>
+            `
+            : A}
+        ${proseChunks.map((chunk) => b `
+            <div>
+              <div class="sf-section-label">${chunk.label}</div>
+              <div class="sf-prose">${chunk.text}</div>
+            </div>
+          `)}
+        ${observations.length
+            ? b `
+              <div>
+                <div class="sf-section-label">
+                  Observations (${observations.length})
+                </div>
+                <ul class="sf-observations">
+                  ${observations}
+                </ul>
+              </div>
+            `
+            : A}
+        ${scalarRows.length
+            ? b `
+              <div>
+                <div class="sf-section-label">Details</div>
+                <dl class="sf-rows">
+                  ${scalarRows.map((row) => b `
+                      <dt>${row.label}</dt>
+                      <dd>${this._renderStructuredValue(row.value)}</dd>
+                    `)}
+                </dl>
+              </div>
+            `
+            : A}
+        <details class="sf-raw-disclosure">
+          <summary>Show raw payload (debug)</summary>
+          <pre>${JSON.stringify(payload, null, 2)}</pre>
+        </details>
+      </div>
+    `;
+    }
+    /** v1.10.17 — fire the standard HA `hass-more-info` event so the
+     *  host dialog opens the entity's more-info popup. Used by clickable
+     *  entity_id rows in the structured-fields fallback renderer. */
+    _openMoreInfo(entityId) {
+        if (!entityId)
+            return;
+        this.dispatchEvent(new CustomEvent("hass-more-info", {
+            detail: { entityId },
+            bubbles: true,
+            composed: true,
+        }));
+    }
+    /** v1.10.17 — convert snake_case / camelCase keys to "Title Case"
+     *  display labels. Includes a few hand-mapped overrides for keys
+     *  that would otherwise expand awkwardly (e.g. "iot_class"). */
+    _humaniseKey(key) {
+        const overrides = {
+            iot_class: "IoT class",
+            bssid: "BSSID",
+            ssid: "SSID",
+            rssi: "RSSI",
+            dbm: "dBm",
+            ap_mac: "AP MAC",
+            mac: "MAC",
+            url: "URL",
+            uuid: "UUID",
+            id: "ID",
+            yaml: "YAML",
+            json: "JSON",
+            ha: "HA",
+        };
+        if (overrides[key])
+            return overrides[key];
+        return key
+            .replace(/_/g, " ")
+            .replace(/([a-z])([A-Z])/g, "$1 $2")
+            .split(" ")
+            .map((word) => overrides[word.toLowerCase()]
+            ? overrides[word.toLowerCase()]
+            : word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+            .join(" ");
+    }
+    /** Convert a scalar (or short array) into a readable inline string.
+     *  Used for compact observation summaries. */
+    _formatScalar(value) {
+        if (value === null || value === undefined)
+            return "—";
+        if (typeof value === "boolean")
+            return value ? "yes" : "no";
+        if (typeof value === "number") {
+            // Integer or short float — leave alone.
+            return Number.isInteger(value) ? `${value}` : value.toFixed(2);
+        }
+        if (typeof value === "string")
+            return value;
+        if (Array.isArray(value)) {
+            if (value.length === 0)
+                return "(empty)";
+            if (value.length <= 3)
+                return value.map((v) => this._formatScalar(v)).join(", ");
+            return `${value.slice(0, 3).map((v) => this._formatScalar(v)).join(", ")} + ${value.length - 3} more`;
+        }
+        return JSON.stringify(value);
+    }
+    /** Pretty-render a single payload value as a <dd> body. Strings get
+     *  italic / code formatting based on heuristics; numbers stay plain;
+     *  arrays expand into comma-separated items; objects fall back to a
+     *  compact JSON snippet. */
+    _renderStructuredValue(value) {
+        if (value === null || value === undefined) {
+            return b `<span style="color: var(--secondary-text-color);">—</span>`;
+        }
+        if (typeof value === "boolean") {
+            return b `${value ? "✓ yes" : "✗ no"}`;
+        }
+        if (typeof value === "number") {
+            return b `${Number.isInteger(value) ? value : value.toFixed(2)}`;
+        }
+        if (typeof value === "string") {
+            // ISO timestamp: render as relative + absolute
+            if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(value)) {
+                try {
+                    const d = new Date(value);
+                    return b `<span title="${value}">${d.toLocaleString()}</span>`;
+                }
+                catch {
+                    return b `${value}`;
+                }
+            }
+            // entity_id pattern: highlight as code, click → more-info
+            if (/^[a-z_]+\.[a-z0-9_]+$/.test(value)) {
+                return b `<code
+          style="cursor: pointer; text-decoration: underline; text-decoration-style: dotted;"
+          @click=${() => this._openMoreInfo(value)}
+          title="Open ${value}"
+        >${value}</code>`;
+            }
+            // URL: render as link
+            if (/^https?:\/\//.test(value) || value.startsWith("/")) {
+                return b `<a href="${value}" target="_top">${value}</a>`;
+            }
+            return b `${value}`;
+        }
+        if (Array.isArray(value)) {
+            if (value.length === 0) {
+                return b `<span style="color: var(--secondary-text-color);">(empty list)</span>`;
+            }
+            // Short array of strings: comma list.
+            if (value.every((v) => typeof v === "string" || typeof v === "number")) {
+                return b `${value.join(", ")}`;
+            }
+            // Array of objects: dump count + collapsed disclosure.
+            return b `
+        <details>
+          <summary>${value.length} items</summary>
+          <pre style="font-size: 0.82em; margin-top: 4px;">
+${JSON.stringify(value, null, 2)}
+          </pre>
+        </details>
+      `;
+        }
+        if (typeof value === "object") {
+            const entries = Object.entries(value);
+            if (entries.length === 0) {
+                return b `<span style="color: var(--secondary-text-color);">(empty)</span>`;
+            }
+            if (entries.length <= 4) {
+                return b `${entries
+                    .map(([k, v]) => `${this._humaniseKey(k)}: ${this._formatScalar(v)}`)
+                    .join(" · ")}`;
+            }
+            return b `
+        <details>
+          <summary>${entries.length} fields</summary>
+          <pre style="font-size: 0.82em; margin-top: 4px;">
+${JSON.stringify(value, null, 2)}
+          </pre>
+        </details>
+      `;
+        }
+        return b `${String(value)}`;
     }
     /** v1.2.16 — drop top-level keys prefixed with `_` from the YAML
      *  preview. Detectors stash internal metadata under `_manual_habit`,
@@ -10465,18 +10875,37 @@ class HaInsightsPanel extends i {
         this._minConfidence = Number.isFinite(value) ? value : 0;
     }
     get _embeddedCardConfig() {
-        const key = `${this._search}|${this._minConfidence}|${this._sortBy}|${this._groupBy}|` +
+        // v1.10.17 — split into two keys so "Load more" works correctly.
+        // Previous (v1.10.16) used a single combined key and reset
+        // _paginationStep=0 inside the cache-miss branch — which fired on
+        // every key change INCLUDING pagination bumps. Net effect: clicking
+        // "Load more" bumped the step to 1, the getter saw the key change,
+        // reset it back to 0, and the cap stayed at 200. Load-more button
+        // appeared dead.
+        //
+        // The filterKey only changes when a filter/sort/search actually
+        // changes — that's when we reset pagination. The configKey adds
+        // the pagination step on top so the cached config object is
+        // rebuilt when EITHER changes.
+        const filterKey = `${this._search}|${this._minConfidence}|${this._sortBy}|${this._groupBy}|` +
             `${this._filterDomains.join(",")}|${this._filterAreas.join(",")}|` +
             `${this._filterDeviceClasses.join(",")}|${this._filterDetectors.join(",")}|` +
             `${this._filterFloors.join(",")}|${this._filterIntegrations.join(",")}|` +
             `${this._filterLabels.join(",")}|` +
             `${this._hideAlreadyAutomated ? "1" : "0"}|` +
-            `${this._auditDepth}|p${this._paginationStep}`;
-        if (this._cachedCardConfigKey !== key) {
-            this._cachedCardConfigKey = key;
-            // v1.10.16: filters / sort / search changed — reset pagination
-            // so the user doesn't keep paginating through a stale set.
+            `${this._auditDepth}`;
+        // Reset pagination only when the filter actually changed (and only
+        // after the first time we cache a filter — initial mount should
+        // not reset step). Do this BEFORE the configKey is computed so
+        // pagination=0 is included in the cached config on filter change.
+        if (this._cachedFilterKey !== undefined
+            && this._cachedFilterKey !== filterKey) {
             this._paginationStep = 0;
+        }
+        this._cachedFilterKey = filterKey;
+        const configKey = `${filterKey}|p${this._paginationStep}`;
+        if (this._cachedConfigKey !== configKey) {
+            this._cachedConfigKey = configKey;
             this._cachedCardConfig = {
                 type: "custom:ha-insights-card",
                 title: this._search ? `Insights matching "${this._search}"` : "All insights",
@@ -11429,6 +11858,114 @@ class HaInsightsPanel extends i {
             this._showToast(`Applied ${succeeded} / ${visible.length}; ${errors.length} error(s) — first: ${errors[0]}`);
         }
     }
+    /** v1.10.18 — Bulk dismiss every visible insight in one WS call.
+     *  Counterpart to "Apply all visible" but for clearing noise rather
+     *  than triaging suggestions. Hits home_insights/bulk_dismiss
+     *  (integration v1.23.0+), which mirrors the per-id dismiss
+     *  semantics: writes a "dismissed" verdict, clears any HA Repairs
+     *  issue mirrored from the insight, and returns a summary. Works
+     *  on insights of any payload_format (unlike "Apply all visible"
+     *  which only targets automation suggestions). Confirms first
+     *  because the operation is destructive across many items at once,
+     *  though each dismiss IS individually reversible. */
+    async _runBulkDismiss() {
+        if (!this.hass)
+            return;
+        const visible = await this._listVisibleForBulk();
+        if (visible === null)
+            return; // toast already shown
+        if (visible.length === 0) {
+            this._showToast("Nothing to dismiss");
+            return;
+        }
+        const proceed = window.confirm(`Dismiss ${visible.length} insight${visible.length === 1 ? "" : "s"}? `
+            + "Each will be hidden from the panel; the pattern can resurface "
+            + "on a future scan if it persists. Use Retire instead for a "
+            + "permanent decision.");
+        if (!proceed)
+            return;
+        this._bulkBusy = true;
+        try {
+            const result = await this.hass.connection.sendMessagePromise({
+                type: "home_insights/bulk_dismiss",
+                insight_ids: visible.map((i) => i.id),
+            });
+            const nf = result.not_found?.length ?? 0;
+            this._showToast(nf === 0
+                ? `Dismissed all ${result.dismissed}`
+                : `Dismissed ${result.dismissed} / ${visible.length}; ${nf} not found (already cleared?)`);
+        }
+        catch (err) {
+            const message = err.message ?? String(err);
+            this._showToast(`Bulk dismiss failed: ${message}`);
+        }
+        finally {
+            this._bulkBusy = false;
+        }
+    }
+    /** v1.10.18 — Bulk retire every visible insight in one WS call.
+     *  Retire is PERMANENT per-fingerprint: re-detections of the same
+     *  pattern stay suppressed until explicitly cleared via the history
+     *  view. Confirmation prompt is louder than dismiss for that reason
+     *  ("permanent" called out explicitly). Useful for clearing 105
+     *  Uptime-Kuma-style noise items in one go when the user knows the
+     *  whole category isn't going to become interesting later. */
+    async _runBulkRetire() {
+        if (!this.hass)
+            return;
+        const visible = await this._listVisibleForBulk();
+        if (visible === null)
+            return; // toast already shown
+        if (visible.length === 0) {
+            this._showToast("Nothing to retire");
+            return;
+        }
+        const proceed = window.confirm(`Retire ${visible.length} insight${visible.length === 1 ? "" : "s"}? \n\n`
+            + "This is PERMANENT — re-detections of the same fingerprint stay "
+            + "suppressed until you Unretire them from the history view. "
+            + "Use Dismiss if you'd rather just hide them for now.");
+        if (!proceed)
+            return;
+        this._bulkBusy = true;
+        try {
+            const result = await this.hass.connection.sendMessagePromise({
+                type: "home_insights/bulk_retire",
+                insight_ids: visible.map((i) => i.id),
+            });
+            const nf = result.not_found?.length ?? 0;
+            this._showToast(nf === 0
+                ? `Retired all ${result.retired}`
+                : `Retired ${result.retired} / ${visible.length}; ${nf} not found`);
+        }
+        catch (err) {
+            const message = err.message ?? String(err);
+            this._showToast(`Bulk retire failed: ${message}`);
+        }
+        finally {
+            this._bulkBusy = false;
+        }
+    }
+    /** v1.10.18 — Shared "what's visible to the user right now" query.
+     *  Used by _runBulkDismiss / _runBulkRetire so both apply to the
+     *  same filtered set the user sees in the panel. Mirrors the
+     *  _runBulkApply filter chain (search + min_confidence) but
+     *  doesn't restrict to payload_format=="automation" — every
+     *  insight kind is dismissable. */
+    async _listVisibleForBulk() {
+        if (!this.hass)
+            return null;
+        try {
+            const result = await this.hass.connection.sendMessagePromise({ type: "home_insights/list" });
+            const search = this._search.trim().toLowerCase();
+            return result.insights
+                .filter((i) => i.confidence >= this._minConfidence)
+                .filter((i) => !search || i.title.toLowerCase().includes(search));
+        }
+        catch (err) {
+            this._showToast(`Could not list: ${err.message ?? String(err)}`);
+            return null;
+        }
+    }
     _showToast(message) {
         this._toast = message;
         window.clearTimeout(this._toastTimer);
@@ -11632,6 +12169,28 @@ class HaInsightsPanel extends i {
             ${this._bulkBusy
             ? "Applying…"
             : b `<ha-icon icon="mdi:check-all"></ha-icon> Apply all visible`}
+          </button>
+          <button
+            class="action"
+            ?disabled=${this._bulkBusy}
+            aria-label="Dismiss every visible insight"
+            title="Dismiss every visible insight (respects search + confidence filters). Dismissed insights can resurface on a future scan if the pattern persists. Confirms first."
+            @click=${this._runBulkDismiss}
+          >
+            ${this._bulkBusy
+            ? "Working…"
+            : b `<ha-icon icon="mdi:close-circle-outline"></ha-icon> Dismiss all visible`}
+          </button>
+          <button
+            class="action"
+            ?disabled=${this._bulkBusy}
+            aria-label="Retire every visible insight (permanent)"
+            title="Retire every visible insight (respects search + confidence filters). PERMANENT per-fingerprint — re-detections stay suppressed until Unretire from the history view. Confirms first."
+            @click=${this._runBulkRetire}
+          >
+            ${this._bulkBusy
+            ? "Working…"
+            : b `<ha-icon icon="mdi:archive-outline"></ha-icon> Retire all visible`}
           </button>
         </div>
         </div>

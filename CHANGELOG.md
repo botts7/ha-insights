@@ -4,6 +4,32 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+## [1.23.1] — 2026-05-23
+
+### Fixed — "Load 200 more" button truly works now
+
+The fix shipped in card v1.10.17 (cache-key split so pagination
+bumps don't trigger the filter-reset branch) only reached users
+who installed the standalone ha-insights-card via HACS. **Panel
+users got their `panel.js` bundled inside the integration** — and
+the integration was still shipping v1.10.16's buggy `panel.js`
+(last refreshed in v1.21.4).
+
+v1.23.1 re-bundles `static/panel.js` from card v1.10.18, which
+contains:
+
+- The v1.10.17 pagination-cache fix (so Load-more actually loads
+  more)
+- The v1.10.18 "Dismiss all visible" / "Retire all visible"
+  toolbar buttons (paired with the v1.23.0 WS handlers)
+
+### Lesson learned
+
+Adding to the pre-flight checklist: **whenever a card-side fix
+lands, the integration also needs a re-bundle release**. Currently
+this is manual (no CI step pulls the latest card release into the
+integration). Tracking as a backlog item to automate.
+
 ## [1.23.0] — 2026-05-23
 
 ### Added — bulk dismiss / retire WS handlers
