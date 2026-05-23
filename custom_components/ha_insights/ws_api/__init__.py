@@ -310,6 +310,10 @@ def async_register(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_suggest_additions)
     websocket_api.async_register_command(hass, ws_retire)
     websocket_api.async_register_command(hass, ws_unretire)
+    # v1.23.0: bulk dismiss / retire for clearing batches of noise
+    # (Discussion #104 — user had 105 Uptime Kuma items to dismiss).
+    websocket_api.async_register_command(hass, ws_bulk_dismiss)
+    websocket_api.async_register_command(hass, ws_bulk_retire)
     # v1.7.7: per-device "managed externally" flag
     websocket_api.async_register_command(hass, ws_list_managed_devices)
     websocket_api.async_register_command(hass, ws_set_device_managed)
@@ -1789,6 +1793,118 @@ async def ws_unretire(
         return
     await _record_verdict_safely(hass, connection, msg["insight_id"], "unretired")
     connection.send_result(msg["id"])
+
+
+# ---------------------------------------------------------------------------
+# v1.23.0 — Bulk dismiss / retire. Discussion #104 (dziban303,
+# 2026-05-22): user had 105 Uptime Kuma noise items to clear one click
+# at a time. Mirror of the existing per-id WS handlers; takes a list
+# of insight_ids and applies the same operation across them, returning
+# a summary so the card can surface "97 dismissed, 8 not found".
+#
+# Single-shot WS message rather than a stream — the bulk size is
+# bounded by the panel's render cap (200 by default, 1000 with paginate
+# load-more). Always-admin-gated to mirror destructive ops elsewhere.
+# ---------------------------------------------------------------------------
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "home_insights/bulk_dismiss",
+        vol.Required("insight_ids"): [str],
+    }
+)
+@websocket_api.require_admin
+@websocket_api.async_response
+async def ws_bulk_dismiss(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Dismiss a batch of insights in one round-trip.
+
+    Returns: {dismissed: int, not_found: list[str]}. Errors are
+    swallowed per-id so a single bad id doesn't abort the batch —
+    the card can re-emit them via the regular per-id handler if it
+    cares. Mirrors single ws_dismiss semantics: each successful
+    dismiss writes a 'dismissed' verdict and clears any HA Repairs
+    issue that was mirrored from the insight.
+    """
+    store = _get_store(hass)
+    if store is None:
+        connection.send_error(msg["id"], "not_set_up", "Store not initialized")
+        return
+    insight_ids: list[str] = msg["insight_ids"]
+    dismissed = 0
+    not_found: list[str] = []
+    try:
+        from ..audit.repairs import clear_issue_for_insight as _clear_repair
+    except Exception:  # pragma: no cover — defensive
+        _clear_repair = None  # type: ignore[assignment]
+    for iid in insight_ids:
+        try:
+            ok = await store.dismiss_insight(iid)
+        except Exception:
+            ok = False
+        if not ok:
+            not_found.append(iid)
+            continue
+        dismissed += 1
+        await _record_verdict_safely(hass, connection, iid, "dismissed")
+        if _clear_repair is not None:
+            try:
+                _clear_repair(hass, iid)
+            except Exception:
+                pass
+    connection.send_result(
+        msg["id"],
+        {"dismissed": dismissed, "not_found": not_found},
+    )
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "home_insights/bulk_retire",
+        vol.Required("insight_ids"): [str],
+    }
+)
+@websocket_api.require_admin
+@websocket_api.async_response
+async def ws_bulk_retire(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Retire a batch of insights in one round-trip.
+
+    Returns: {retired: int, not_found: list[str]}. Same swallow-and-
+    continue semantics as ws_bulk_dismiss. Each successful retire
+    writes a 'retired' verdict. Retire is the harder of the two —
+    it's a permanent "don't auto-suggest" decision per-fingerprint —
+    so the card should confirm intent before invoking this for a
+    large batch.
+    """
+    store = _get_store(hass)
+    if store is None:
+        connection.send_error(msg["id"], "not_set_up", "Store not initialized")
+        return
+    insight_ids: list[str] = msg["insight_ids"]
+    retired = 0
+    not_found: list[str] = []
+    for iid in insight_ids:
+        try:
+            ok = await store.retire_insight(iid)
+        except Exception:
+            ok = False
+        if not ok:
+            not_found.append(iid)
+            continue
+        retired += 1
+        await _record_verdict_safely(hass, connection, iid, "retired")
+    connection.send_result(
+        msg["id"],
+        {"retired": retired, "not_found": not_found},
+    )
 
 
 @websocket_api.websocket_command(

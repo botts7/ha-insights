@@ -4,6 +4,39 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+## [1.23.0] — 2026-05-23
+
+### Added — bulk dismiss / retire WS handlers
+
+Discussion #104 (dziban303): user had 105 Uptime-Kuma noise items
+to clear one click at a time. Mirror of the existing per-id
+`home_insights/dismiss` and `home_insights/retire` operations as a
+batch.
+
+#### `home_insights/bulk_dismiss`
+- Body: `{insight_ids: list[str]}`
+- Returns: `{dismissed: int, not_found: list[str]}`
+- Admin-gated (destructive). Each successful dismiss writes a
+  `dismissed` verdict to user-verdict-history AND clears the
+  mirrored HA Repairs issue if one existed. Single bad id doesn't
+  abort the batch — surfaces as a `not_found` entry instead.
+
+#### `home_insights/bulk_retire`
+- Body: `{insight_ids: list[str]}`
+- Returns: `{retired: int, not_found: list[str]}`
+- Admin-gated. Each successful retire writes a `retired` verdict.
+  Retire is the harder of the two (permanent "don't auto-suggest"
+  per fingerprint), so the card should confirm intent before
+  invoking this for a large batch.
+
+Each handler validates input via voluptuous, swallows per-id
+exceptions to keep the batch moving, and reports the full summary
+in the single result so the card can show "97 dismissed, 8 not
+found" without a second round-trip.
+
+Card-side "Dismiss all visible" / "Retire all visible" toolbar
+buttons land in card v1.10.18.
+
 ## [1.22.4] — 2026-05-23
 
 ### Fixed — Quietude pass from Discussion #104 field report
