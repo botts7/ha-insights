@@ -4,6 +4,24 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+## [1.23.4] — 2026-05-23
+
+### Added — Per-group collapse/expand (bundled card v1.10.20)
+
+Re-bundles `static/panel.js` from card v1.10.20. Closes Task #242
+from the original "Showing 200 of 788" conversation.
+
+With **Group by** set to anything other than "None" (Detector,
+Area, Floor, Integration, Label), any section with >5 items now
+starts collapsed showing only the top 5, with a clickable header
+chevron + a "Show all N ▾" footer button.
+
+To get the triage view, set Group by → Detector. Each detector
+becomes a collapsed top-5 stack; click into the noisy ones, leave
+the rest alone.
+
+No backend changes — pure card-side UX.
+
 ## [1.23.3] — 2026-05-23
 
 ### Fixed — Extend already-automated check to remaining auto-emitting detectors
