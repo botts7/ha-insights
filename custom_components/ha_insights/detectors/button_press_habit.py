@@ -196,6 +196,12 @@ class ButtonPressHabitDetector(Detector):
             occurrences = len(delays)
             if occurrences < _MIN_OCCURRENCES:
                 continue
+            # v1.23.3 (Discussion #104 sweep): the suggested automation
+            # would act on the consequent entity when the button event
+            # fires. If the consequent is already in an existing
+            # automation, skip — the user has thought about it.
+            if consequent_eid in ctx.entities_already_automated:
+                continue
             # Consistency = pairs / total firings of this event_type.
             # A button you press 20 times that produces this same
             # consequent 18 times is 90% consistent (strong signal).

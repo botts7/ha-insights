@@ -102,6 +102,13 @@ class ScheduleDetector(Detector):
 
         insights: list[Insight] = []
         for (entity_id, new_state), events in groups.items():
+            # v1.23.3 (Discussion #104 sweep): if any existing automation
+            # already acts on this entity, the user has presumably
+            # already decided how it should be triggered/scheduled.
+            # Skip — same rule applied to manual_habit + long_tail in
+            # v1.22.4 and streak in v1.23.3.
+            if entity_id in ctx.entities_already_automated:
+                continue
             insight = self._evaluate_group(entity_id, new_state, events, ctx)
             if insight is not None:
                 insights.append(insight)

@@ -4,6 +4,31 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+## [1.23.3] — 2026-05-23
+
+### Fixed — Extend already-automated check to remaining auto-emitting detectors
+
+v1.22.4 added the `ctx.entities_already_automated` check to
+`ManualHabitDetector` + `LongTailDetector`. The other detectors
+that emit `payload_format="automation"` still didn't check.
+Preemptive sweep before another field report surfaces it.
+
+| Detector | Rule |
+|---|---|
+| `StreakDetector` | skip if `entity_id` is already automated (single-entity) |
+| `ScheduleDetector` | skip if `entity_id` is already automated (single-entity) |
+| `CooccurrenceDetector` | skip if **follower** entity is already automated (pair → automation acts on follower) |
+| `ButtonPressHabitDetector` | skip if **consequent** entity is already automated (event → action on consequent) |
+| `RoutineDetector` | drop already-automated pairs from the routine bundle; skip the whole routine if too few remain |
+
+`LaggedCorrelationDetector` stays unchanged — its existing
+`MIN_OCCURRENCES` + `MIN_CONFIDENCE_TO_EMIT` already filter
+sparse signals.
+
+Same rationale as v1.22.4: when a user already has an automation
+acting on an entity, the duplicate suggestion is noise — they've
+thought about it.
+
 ## [1.23.2] — 2026-05-23
 
 ### Fixed — Day-1 noise: warmup clamp on rolling-baseline detectors
