@@ -115,12 +115,23 @@ _EXCLUDED_DOMAINS = frozenset({
 # pressed; same for `event.*` (no event fired yet), `input_button.*`
 # (helper, never pressed), `tag.*` (NFC tag never scanned).
 #
+# v1.23.5 — add `image`. HA's ImageEntity returns the
+# `image_last_updated` timestamp as its state, falling back to
+# STATE_UNKNOWN when the integration doesn't expose that property.
+# Many URL-based webcam/snapshot integrations (windy_webcams, generic
+# IP-camera proxies, etc.) serve images correctly without ever
+# setting `image_last_updated`, so their entities stay at
+# `state == "unknown"` indefinitely even when working. Field report
+# (Issue #112, 2026-05-31): windy_webcams image entities flagged as
+# "unavailable for 8 days" while displaying live images.
+#
 # For these domains we still flag `state == "unavailable"` (the
 # underlying integration is genuinely broken), just not `"unknown"`
 # (which is the expected pre-activation default).
 _DOMAINS_UNKNOWN_IS_NORMAL = frozenset({
     "button",
     "event",
+    "image",
     "input_button",
     "tag",
 })

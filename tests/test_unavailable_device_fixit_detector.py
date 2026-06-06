@@ -166,6 +166,44 @@ async def test_excluded_domain_not_flagged() -> None:
     assert insights == []
 
 
+@pytest.mark.asyncio
+async def test_unknown_state_skipped_for_trigger_style_domains() -> None:
+    """button / event / input_button / tag legitimately stay at
+    "unknown" until the first trigger fires — flagging them as
+    "unavailable for N days" is noise (Discussion #104)."""
+    states = [
+        _state("button.reboot_router", "unknown", hours_ago=200),
+        _state("event.doorbell_pressed", "unknown", hours_ago=200),
+        _state("input_button.dismiss_notif", "unknown", hours_ago=200),
+        _state("tag.front_door_nfc", "unknown", hours_ago=200),
+    ]
+    insights = await UnavailableDeviceFixItDetector().scan(_ctx(states))
+    assert insights == []
+
+
+@pytest.mark.asyncio
+async def test_unknown_state_skipped_for_image_domain() -> None:
+    """Image entities use the `image_last_updated` timestamp as state;
+    integrations that serve URL-based images without setting that
+    property leave state at "unknown" indefinitely while the image
+    works (Issue #112)."""
+    states = [_state("image.windy_webcam_alps", "unknown", hours_ago=200)]
+    insights = await UnavailableDeviceFixItDetector().scan(_ctx(states))
+    assert insights == []
+
+
+@pytest.mark.asyncio
+async def test_unavailable_state_still_flagged_for_unknown_is_normal_domains() -> None:
+    """"unknown" is normal for these domains, but explicit
+    "unavailable" still means the integration is broken — flag it."""
+    states = [
+        _state("button.broken_reboot", "unavailable", hours_ago=200),
+        _state("image.broken_webcam", "unavailable", hours_ago=200),
+    ]
+    insights = await UnavailableDeviceFixItDetector().scan(_ctx(states))
+    assert len(insights) == 2
+
+
 # ---------- Payload structure ---------------------------------------
 
 
