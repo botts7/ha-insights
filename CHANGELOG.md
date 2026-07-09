@@ -4,6 +4,27 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+## [1.24.0] — 2026-07-09
+
+### Added — `critical_device_offline` detector (BETA)
+
+Fast-path ANOMALY insight when a *load-bearing* device goes fully
+offline (every eligible entity `unavailable`) for 1+ hour — devices
+with entities referenced by automations (confidence 0.90, clears the
+mobile-push floor) or exposing actuator entities (0.80, panel +
+persistent notification).
+
+Field-motivated: a Shelly 2.5 wall switch in decoupled mode wedged
+overnight (2026-07-09). Its relay stayed latched so the lights kept
+working from HA, but the wall button — forwarded via the HA API —
+silently died. `unavailable_device_fixit` would have flagged it 47
+hours later; its 48 h gate is right for "long-broken junk" triage
+and wrong for "something you rely on is down NOW".
+
+Device-level (fingerprint = device_id), one insight per device;
+`cohort_dedup = False` — each offline device is its own incident.
+Pure sensors nobody automates on stay with the 48 h slow path.
+
 ## [1.23.4] — 2026-05-23
 
 ### Added — Per-group collapse/expand (bundled card v1.10.20)
