@@ -4,6 +4,20 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+## [1.24.1] — 2026-07-09
+
+### Fixed — Merged devices dodge `critical_device_offline`
+
+First live run missed the exact wall switch that motivated the
+detector. HA merges registry devices sharing a MAC, so the dead
+ESPHome switch also carried a live Omada `device_tracker` (the router
+still saw the wedged ESP as associated) — "all entities unavailable"
+never held. Outage detection is now per *(device, integration
+platform)* slice: the esphome slice fully dark flags even while the
+router integration reports Wi-Fi association. Fingerprint gains a
+`platform` key; titles show the slice (``(esphome)``). Verified live
+against the real wedged device.
+
 ## [1.24.0] — 2026-07-09
 
 ### Added — `critical_device_offline` detector (BETA)

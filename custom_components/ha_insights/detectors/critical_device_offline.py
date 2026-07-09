@@ -56,6 +56,20 @@ user's phone; 0.80 lands in the panel + persistent notification.
   - Devices where ANY eligible entity is still reporting → skipped
     (partially-degraded devices are an integration bug, not an outage)
 
+## Merged devices (multi-integration)
+
+v1.24.1 — the very first live run missed the wall switch that
+motivated this detector. HA merges registry devices that share a
+connection (MAC), so the ESPHome wall switch, its Omada Wi-Fi client
+record, and the ESPHome-dashboard update entity all live on ONE
+device_id. The ESP was dead, but Omada still reported the tracker as
+``home`` → "all entities unavailable" never held. The unit of outage
+is therefore the *(device, integration platform)* slice, not the
+device: the esphome slice fully dark means the ESP is unreachable,
+regardless of what the router integration thinks of its Wi-Fi
+association. Without an entity registry (direct ctx construction in
+tests) platform resolves to None and grouping degrades to per-device.
+
 ## Restart semantics
 
 Live ``last_changed`` resets on HA restart, so a device that was
@@ -147,9 +161,13 @@ class CriticalDeviceOfflineDetector(Detector):
         e_reg = _try_entity_registry(ctx.hass)
         d_reg = _try_device_registry(ctx.hass)
 
-        # Pass 1 — bucket every eligible entity's state by device.
-        # eligible[device_id] = list[(entity_id, state_value, last_changed)]
-        eligible: dict[str, list[tuple[str, str, datetime]]] = {}
+        # Pass 1 — bucket every eligible entity's state by
+        # (device_id, platform). Platform-sliced because HA merges
+        # devices across integrations by MAC — see "Merged devices"
+        # in the module docstring.
+        eligible: dict[
+            tuple[str, str | None], list[tuple[str, str, datetime]]
+        ] = {}
         for state in ctx.hass.states.async_all():
             entity_id = state.entity_id
             if entity_id in ctx.blocked_entities:
@@ -160,22 +178,26 @@ class CriticalDeviceOfflineDetector(Detector):
             device_id = ctx.device_id_by_entity.get(entity_id)
             if device_id is None:
                 continue  # helpers / templates — no physical device
+            platform: str | None = None
             if e_reg is not None:
                 entry = e_reg.async_get(entity_id)
-                if entry is not None and (
-                    entry.disabled_by is not None
-                    or entry.hidden_by is not None
-                ):
-                    continue
+                if entry is not None:
+                    if (
+                        entry.disabled_by is not None
+                        or entry.hidden_by is not None
+                    ):
+                        continue
+                    raw = getattr(entry, "platform", None)
+                    platform = raw if isinstance(raw, str) else None
             last_changed = getattr(state, "last_changed", None)
             if last_changed is None:
                 continue
-            eligible.setdefault(device_id, []).append(
+            eligible.setdefault((device_id, platform), []).append(
                 (entity_id, state.state, last_changed)
             )
 
         insights: list[Insight] = []
-        for device_id, entities in eligible.items():
+        for (device_id, platform), entities in eligible.items():
             offline = [e for e in entities if e[1] == _OFFLINE_STATE]
             if len(offline) != len(entities):
                 continue  # something still reports — not a device outage
@@ -200,6 +222,7 @@ class CriticalDeviceOfflineDetector(Detector):
             insights.append(
                 self._build_insight(
                     device_id=device_id,
+                    platform=platform,
                     entity_ids=entity_ids,
                     automated=automated,
                     offline_since=offline_since,
@@ -219,6 +242,7 @@ class CriticalDeviceOfflineDetector(Detector):
         self,
         *,
         device_id: str,
+        platform: str | None,
         entity_ids: list[str],
         automated: list[str],
         offline_since: datetime,
@@ -226,6 +250,8 @@ class CriticalDeviceOfflineDetector(Detector):
         d_reg,
     ) -> Insight:
         device_name, area_id, integration = _device_meta(d_reg, device_id)
+        if platform is not None:
+            integration = platform
         display = device_name or entity_ids[0].split(".", 1)[1]
         minutes_offline = int((now - offline_since).total_seconds() // 60)
         if minutes_offline >= 2880:
@@ -243,8 +269,9 @@ class CriticalDeviceOfflineDetector(Detector):
             if automated
             else "physical/dashboard controls on it are dead"
         )
+        via = f" ({platform})" if platform else ""
         title = (
-            f"`{display}` fully offline for {duration} — {impact}"
+            f"`{display}`{via} fully offline for {duration} — {impact}"
         )
 
         payload = {
@@ -273,6 +300,7 @@ class CriticalDeviceOfflineDetector(Detector):
         fingerprint = {
             "kind": "critical_device_offline",
             "device_id": device_id,
+            "platform": platform,
         }
 
         return Insight(

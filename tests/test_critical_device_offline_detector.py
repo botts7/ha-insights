@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, ClassVar
 
 import pytest
 
@@ -97,6 +97,7 @@ async def test_actuator_device_offline_90min_emits() -> None:
     assert ins.fingerprint == {
         "kind": "critical_device_offline",
         "device_id": _SWITCH_DEV,
+        "platform": None,
     }
     assert ins.payload["minutes_offline"] >= 89
     assert "switch.entrance_relay" in ins.payload["entity_ids"]
@@ -254,6 +255,58 @@ async def test_two_devices_two_insights() -> None:
         _SWITCH_DEV,
         "dev_garage",
     }
+
+
+@pytest.mark.asyncio
+async def test_merged_device_platform_slice_flagged(monkeypatch) -> None:
+    """Regression: the 2026-07-09 entrance switch. HA merged the
+    ESPHome device with its Omada Wi-Fi client record (same MAC), so
+    the device carried a live omada tracker while every esphome
+    entity was dead. Per-device grouping missed it; the esphome
+    platform slice must flag."""
+
+    @dataclass
+    class _RegEntry:
+        platform: str
+        disabled_by: None = None
+        hidden_by: None = None
+
+    class _FakeEReg:
+        _platforms: ClassVar[dict[str, str]] = {
+            "switch.entrance_relay": "esphome",
+            "sensor.entrance_power": "esphome",
+            "device_tracker.entrance_wifi": "omada",
+        }
+
+        def async_get(self, entity_id: str) -> _RegEntry | None:
+            p = self._platforms.get(entity_id)
+            return _RegEntry(platform=p) if p else None
+
+    from custom_components.ha_insights.detectors import (
+        critical_device_offline as mod,
+    )
+
+    monkeypatch.setattr(mod, "_try_entity_registry", lambda hass: _FakeEReg())
+
+    states = [
+        _state("switch.entrance_relay", "unavailable", 130),
+        _state("sensor.entrance_power", "unavailable", 130),
+        _state("device_tracker.entrance_wifi", "home", 5),
+    ]
+    dev_map = {
+        "switch.entrance_relay": _SWITCH_DEV,
+        "sensor.entrance_power": _SWITCH_DEV,
+        "device_tracker.entrance_wifi": _SWITCH_DEV,
+    }
+    insights = await CriticalDeviceOfflineDetector().scan(_ctx(states, dev_map))
+    assert len(insights) == 1
+    ins = insights[0]
+    assert ins.fingerprint["platform"] == "esphome"
+    assert "(esphome)" in ins.title
+    assert sorted(ins.payload["entity_ids"]) == [
+        "sensor.entrance_power",
+        "switch.entrance_relay",
+    ]
 
 
 @pytest.mark.asyncio
