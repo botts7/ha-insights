@@ -62,6 +62,7 @@ nav:
   - Home: index.md
   - Architecture: ARCHITECTURE.md
   - Privacy: privacy.md
+  - Conflict scanner: conflict-scanner.md
   - Writing a detector: writing-a-detector.md
   - WebSocket API: ws-api.md
 

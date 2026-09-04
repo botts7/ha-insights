@@ -338,6 +338,7 @@ A per-month USD budget can be set in OptionsFlow for cloud agents; the backgroun
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — full architectural charter
 - [`docs/HA_EVENT_SEMANTICS.md`](docs/HA_EVENT_SEMANTICS.md) — HA state-change event gotchas detector authors must know
 - [`docs/privacy.md`](docs/privacy.md) — what's stored / what isn't / how to wipe
+- [`docs/conflict-scanner.md`](docs/conflict-scanner.md) — how "🔁 already automated" matching works (and its limits)
 - [`docs/ws-api.md`](docs/ws-api.md) — stable WebSocket API contract
 - [`docs/writing-a-detector.md`](docs/writing-a-detector.md) — community detector contribution guide
 

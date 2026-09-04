@@ -7,8 +7,11 @@ Algorithm:
   - **State-trigger overlap** on the same source entity = conflict
     (Two automations both firing on `state(entity_id) -> X` would
     cascade; we flag this so the user can decide whether to consolidate)
-
-Numeric-state and template-trigger overlap are not yet checked.
+  - **Cross-trigger shadow** (#114): a schedule-driven side vs an
+    event-driven side (state / numeric_state / template / zone /
+    device) calling the SAME service on an overlapping target =
+    conflict. Catches "motion turns on these lights every evening"
+    shadowing a learned clock-time insight for the same lights.
 """
 from __future__ import annotations
 
@@ -153,6 +156,34 @@ def _automations_overlap(
     ):
         return True
 
+    # Cross-trigger shadow (#114): one side is schedule-driven (the
+    # learned clock-time insight), the other event-driven (motion /
+    # presence / numeric_state / template / zone / device). The streak
+    # detector sees "these lights turn on at ~17:34 daily" — but the
+    # cause IS the user's motion automation, which no branch above can
+    # match (state sigs compare source entities; the schedule fallback
+    # needs schedule-y triggers on BOTH sides). Target overlap alone
+    # would flag far too much ("motion → light on" vs "22:00 → same
+    # light OFF" are complementary, not duplicates), so this branch
+    # additionally requires the SAME service on an overlapping target.
+    if (
+        _has_schedule_like_trigger(a_triggers)
+        and _has_event_driven_trigger(b_triggers)
+    ) or (
+        _has_event_driven_trigger(a_triggers)
+        and _has_schedule_like_trigger(b_triggers)
+    ):
+        a_services = _extract_service_targets(a.get("action", []))
+        b_services = _extract_service_targets(b.get("action", []))
+        for service, a_ents in a_services.items():
+            b_ents = b_services.get(service)
+            if not b_ents:
+                continue
+            if _expand_groups_and_scenes(
+                a_ents, members_of
+            ) & _expand_groups_and_scenes(b_ents, members_of):
+                return True
+
     return False
 
 
@@ -184,6 +215,29 @@ def _has_schedule_like_trigger(triggers: list[Any]) -> bool:
     """Whether any trigger fires on a schedule-driven event."""
     for t in triggers:
         if isinstance(t, dict) and t.get("platform") in _SCHEDULE_LIKE_PLATFORMS:
+            return True
+    return False
+
+
+_EVENT_DRIVEN_PLATFORMS: frozenset[str] = frozenset(
+    {
+        "state",
+        "numeric_state",
+        "template",
+        "zone",
+        # UI-built motion/presence automations commonly land on
+        # `platform: device` rather than `state` — same intent,
+        # different YAML surface.
+        "device",
+    }
+)
+
+
+def _has_event_driven_trigger(triggers: list[Any]) -> bool:
+    """Whether any trigger fires on an entity/event condition rather
+    than a schedule."""
+    for t in triggers:
+        if isinstance(t, dict) and t.get("platform") in _EVENT_DRIVEN_PLATFORMS:
             return True
     return False
 
@@ -317,6 +371,28 @@ def _times_close(t1: str | None, t2: str | None, threshold_min: int) -> bool:
 def _to_minutes(t: str) -> int:
     parts = t.split(":")
     return int(parts[0]) * 60 + int(parts[1])
+
+
+def _extract_service_targets(actions: Any) -> dict[str, set[str]]:
+    """Map service name → target entity_ids across a list of actions.
+
+    Used by the cross-trigger shadow branch, which needs intent
+    (service) — not just target — to avoid flagging complementary
+    automations ("turn_on at dusk" vs "turn_off at bedtime") as
+    duplicates. Reads both the classic `service:` key and the
+    2024.8+ `action:` key.
+    """
+    out: dict[str, set[str]] = {}
+    for action in _as_list(actions):
+        if not isinstance(action, dict):
+            continue
+        service = action.get("service") or action.get("action")
+        if not isinstance(service, str):
+            continue
+        entities = _extract_target_entities([action])
+        if entities:
+            out.setdefault(service, set()).update(entities)
+    return out
 
 
 def _extract_target_entities(actions: Any) -> set[str]:

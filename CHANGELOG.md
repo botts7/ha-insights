@@ -4,6 +4,35 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+### Fixed — conflict scanner: event-driven automations now shadow clock-time insights (#114)
+
+Field report #114: a user's lights fired at the same time every
+evening *because a motion automation turned them on* — yet the
+insight never got the "🔁 already automated" pill, and the panel's
+hide-filter had nothing to hide. No matching branch could catch it:
+state-signature matching compares trigger *source* entities, and the
+schedule-like fallback needs schedule-y triggers on BOTH sides.
+
+New **cross-trigger shadow** branch: when one side is schedule-driven
+(`time` / `time_pattern` / `sun` / `calendar`) and the other is
+event-driven (`state` / `numeric_state` / `template` / `zone` /
+`device` — the last covers UI-built motion automations), and both
+call the **same service on an overlapping action target**, that's a
+conflict. The same-service requirement is the false-positive guard:
+"motion → lights ON" vs "22:00 → same lights OFF" are complementary,
+not duplicates, and stay unmatched. Group/scene member expansion
+(v1.5.24) applies to this branch too. Also reads the 2024.8+
+`action:` key in action dicts alongside classic `service:`.
+
+### Added — user docs for the conflict scanner (#114)
+
+`docs/conflict-scanner.md` (+ mkdocs nav + README link): the scanner
+runs automatically inside every scan (nothing to start), what the
+pill and the "Hide 🔁 already automated" filter actually do, the full
+matching-rules table, known limits, and Dismiss as the manual
+workaround for false negatives. Direct answer to #114's literal ask —
+the feature had zero user-facing documentation.
+
 ## [1.24.1] — 2026-07-09
 
 ### Fixed — Merged devices dodge `critical_device_offline`
