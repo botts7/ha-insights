@@ -19,7 +19,7 @@
       
       
       <link rel="icon" href="../assets/images/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
     
     
       
@@ -27,7 +27,7 @@
       
     
     
-      <link rel="stylesheet" href="../assets/stylesheets/main.484c7ddc.min.css">
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
       
         
         <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
@@ -320,6 +320,33 @@
     
   
     Privacy
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../conflict-scanner/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Conflict scanner
   
 
     
@@ -764,12 +791,12 @@ The 🔗 coupling badge renders correctly on the running HA install (integration
 <div class="language-text highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>mcp__chrome-devtools__navigate_page: http://192.168.86.68:8123/ha-insights
 </span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>mcp__chrome-devtools__evaluate_script:
 </span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>  (async () =&gt; {
-</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>    const hass = document.querySelector(&#39;home-assistant&#39;).hass;
-</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>    const hello = await hass.callWS({type: &#39;home_insights/hello&#39;});
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>    const hass = document.querySelector('home-assistant').hass;
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>    const hello = await hass.callWS({type: 'home_insights/hello'});
 </span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>    return {
 </span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>      integration_version: hello.integration_version,
-</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>      panel_url: &#39;/ha_insights_static/panel.js&#39;,
-</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>      panel_size: (await fetch(&#39;/ha_insights_static/panel.js&#39;)).headers.get(&#39;content-length&#39;),
+</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>      panel_url: '/ha_insights_static/panel.js',
+</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>      panel_size: (await fetch('/ha_insights_static/panel.js')).headers.get('content-length'),
 </span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>    };
 </span><span id="__span-0-11"><a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>  })()
 </span></code></pre></div>
@@ -777,18 +804,18 @@ The 🔗 coupling badge renders correctly on the running HA install (integration
 <h3 id="verification-2-ha-insights-card-bundled-registered">Verification 2 — <code>ha-insights-card-bundled</code> registered<a class="headerlink" href="#verification-2-ha-insights-card-bundled-registered" title="Permanent link">&para;</a></h3>
 <div class="language-text highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>mcp__chrome-devtools__evaluate_script:
 </span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>  ({
-</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>    card_class_registered: !!customElements.get(&#39;ha-insights-card&#39;),
-</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>    bundled_class_registered: !!customElements.get(&#39;ha-insights-card-bundled&#39;),
-</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>    bundled_instances: document.querySelectorAll(&#39;ha-insights-card-bundled&#39;).length,
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>    card_class_registered: !!customElements.get('ha-insights-card'),
+</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>    bundled_class_registered: !!customElements.get('ha-insights-card-bundled'),
+</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>    bundled_instances: document.querySelectorAll('ha-insights-card-bundled').length,
 </span><span id="__span-1-6"><a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>  })
 </span></code></pre></div>
 <p>Expected: <code>bundled_class_registered: true</code>. If <code>false</code>, the v1.3.4 alias didn't ship — re-check panel.js content.</p>
 <h3 id="verification-3-badge-renders-on-injected-example">Verification 3 — Badge renders on injected example<a class="headerlink" href="#verification-3-badge-renders-on-injected-example" title="Permanent link">&para;</a></h3>
 <div class="language-text highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>mcp__chrome-devtools__evaluate_script:
 </span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>  (async () =&gt; {
-</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>    const hass = document.querySelector(&#39;home-assistant&#39;).hass;
-</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>    await hass.callWS({type: &#39;home_insights/clear_examples&#39;});
-</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>    await hass.callWS({type: &#39;home_insights/inject_examples&#39;});
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>    const hass = document.querySelector('home-assistant').hass;
+</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>    await hass.callWS({type: 'home_insights/clear_examples'});
+</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>    await hass.callWS({type: 'home_insights/inject_examples'});
 </span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>    // Wait for re-render
 </span><span id="__span-2-7"><a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>    await new Promise(r =&gt; setTimeout(r, 1000));
 </span><span id="__span-2-8"><a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>    return null;
@@ -802,11 +829,11 @@ The 🔗 coupling badge renders correctly on the running HA install (integration
 </span><span id="__span-2-16"><a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a>    const findAll = (root, sel, acc = []) =&gt; {
 </span><span id="__span-2-17"><a id="__codelineno-2-17" name="__codelineno-2-17" href="#__codelineno-2-17"></a>      if (!root) return acc;
 </span><span id="__span-2-18"><a id="__codelineno-2-18" name="__codelineno-2-18" href="#__codelineno-2-18"></a>      if (root.querySelectorAll) acc.push(...root.querySelectorAll(sel));
-</span><span id="__span-2-19"><a id="__codelineno-2-19" name="__codelineno-2-19" href="#__codelineno-2-19"></a>      const els = root.querySelectorAll ? root.querySelectorAll(&#39;*&#39;) : [];
+</span><span id="__span-2-19"><a id="__codelineno-2-19" name="__codelineno-2-19" href="#__codelineno-2-19"></a>      const els = root.querySelectorAll ? root.querySelectorAll('*') : [];
 </span><span id="__span-2-20"><a id="__codelineno-2-20" name="__codelineno-2-20" href="#__codelineno-2-20"></a>      for (const el of els) if (el.shadowRoot) findAll(el.shadowRoot, sel, acc);
 </span><span id="__span-2-21"><a id="__codelineno-2-21" name="__codelineno-2-21" href="#__codelineno-2-21"></a>      return acc;
 </span><span id="__span-2-22"><a id="__codelineno-2-22" name="__codelineno-2-22" href="#__codelineno-2-22"></a>    };
-</span><span id="__span-2-23"><a id="__codelineno-2-23" name="__codelineno-2-23" href="#__codelineno-2-23"></a>    const badges = findAll(document, &#39;.coupling-badge&#39;);
+</span><span id="__span-2-23"><a id="__codelineno-2-23" name="__codelineno-2-23" href="#__codelineno-2-23"></a>    const badges = findAll(document, '.coupling-badge');
 </span><span id="__span-2-24"><a id="__codelineno-2-24" name="__codelineno-2-24" href="#__codelineno-2-24"></a>    return {
 </span><span id="__span-2-25"><a id="__codelineno-2-25" name="__codelineno-2-25" href="#__codelineno-2-25"></a>      count: badges.length,
 </span><span id="__span-2-26"><a id="__codelineno-2-26" name="__codelineno-2-26" href="#__codelineno-2-26"></a>      first_text: badges[0]?.textContent,
@@ -826,9 +853,9 @@ The 🔗 coupling badge renders correctly on the running HA install (integration
 <h3 id="a-cache-most-likely">A. Cache (most likely)<a class="headerlink" href="#a-cache-most-likely" title="Permanent link">&para;</a></h3>
 <p>Browser still serving v1.7.5 panel.js. Verify by checking the <code>&lt;script&gt;</code> src URL in the panel's parent DOM — should contain <code>v=1.7.6-...</code>.</p>
 <div class="language-text highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>mcp__chrome-devtools__evaluate_script:
-</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>  Array.from(document.querySelectorAll(&#39;script&#39;))
+</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>  Array.from(document.querySelectorAll('script'))
 </span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>    .map(s =&gt; s.src)
-</span><span id="__span-4-4"><a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>    .filter(s =&gt; s.includes(&#39;ha_insights&#39;))
+</span><span id="__span-4-4"><a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>    .filter(s =&gt; s.includes('ha_insights'))
 </span></code></pre></div>
 <p>If URL says <code>v=1.7.5-...</code>, hard-refresh hasn't pulled the new bundle. Force-refresh via HA → HACS → ⋮ → Reload.</p>
 <h3 id="b-different-render-path">B. Different render path<a class="headerlink" href="#b-different-render-path" title="Permanent link">&para;</a></h3>
@@ -843,22 +870,22 @@ The 🔗 coupling badge renders correctly on the running HA install (integration
 </span><span id="__span-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>  const findAll = (root, sel, acc = []) =&gt; {
 </span><span id="__span-5-4"><a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>    if (!root) return acc;
 </span><span id="__span-5-5"><a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>    if (root.querySelectorAll) acc.push(...root.querySelectorAll(sel));
-</span><span id="__span-5-6"><a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>    const els = root.querySelectorAll ? root.querySelectorAll(&#39;*&#39;) : [];
+</span><span id="__span-5-6"><a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>    const els = root.querySelectorAll ? root.querySelectorAll('*') : [];
 </span><span id="__span-5-7"><a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a>    for (const el of els) if (el.shadowRoot) findAll(el.shadowRoot, sel, acc);
 </span><span id="__span-5-8"><a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a>    return acc;
 </span><span id="__span-5-9"><a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a>  };
-</span><span id="__span-5-10"><a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a>  const rows = findAll(document, &#39;.row, .row-title, [class*=&quot;row&quot;]&#39;);
+</span><span id="__span-5-10"><a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a>  const rows = findAll(document, '.row, .row-title, [class*="row"]');
 </span><span id="__span-5-11"><a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a>  return rows.map(r =&gt; ({
 </span><span id="__span-5-12"><a id="__codelineno-5-12" name="__codelineno-5-12" href="#__codelineno-5-12"></a>    tag: r.tagName,
 </span><span id="__span-5-13"><a id="__codelineno-5-13" name="__codelineno-5-13" href="#__codelineno-5-13"></a>    class: r.className,
 </span><span id="__span-5-14"><a id="__codelineno-5-14" name="__codelineno-5-14" href="#__codelineno-5-14"></a>    text: r.textContent?.slice(0, 100),
-</span><span id="__span-5-15"><a id="__codelineno-5-15" name="__codelineno-5-15" href="#__codelineno-5-15"></a>  })).filter(r =&gt; r.text?.includes(&#39;Kitchen scene&#39;));
+</span><span id="__span-5-15"><a id="__codelineno-5-15" name="__codelineno-5-15" href="#__codelineno-5-15"></a>  })).filter(r =&gt; r.text?.includes('Kitchen scene'));
 </span></code></pre></div>
 <p>Then read the surrounding HTML to identify which renderer produced it.</p>
 <h3 id="c-css-hiding-the-badge">C. CSS hiding the badge<a class="headerlink" href="#c-css-hiding-the-badge" title="Permanent link">&para;</a></h3>
 <div class="language-text highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>mcp__chrome-devtools__evaluate_script:
 </span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>  const findAll = (root, sel, acc = []) =&gt; { /* ...as above... */ };
-</span><span id="__span-6-3"><a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>  const badges = findAll(document, &#39;.coupling-badge&#39;);
+</span><span id="__span-6-3"><a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>  const badges = findAll(document, '.coupling-badge');
 </span><span id="__span-6-4"><a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>  return badges.map(b =&gt; ({
 </span><span id="__span-6-5"><a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a>    visible: b.offsetParent !== null,
 </span><span id="__span-6-6"><a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a>    display: getComputedStyle(b).display,
@@ -983,7 +1010,7 @@ The 🔗 coupling badge renders correctly on the running HA install (integration
       <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.instant", "navigation.tracking", "navigation.sections", "navigation.top", "search.suggest", "search.highlight", "content.code.copy", "content.action.edit"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
     
     
-      <script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
       
     
   </body>

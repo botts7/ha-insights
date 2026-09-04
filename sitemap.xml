@@ -2,50 +2,50 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
     <url>
          <loc>https://botts7.github.io/ha-insights/</loc>
-         <lastmod>2026-07-09</lastmod>
+         <lastmod>2026-09-04</lastmod>
     </url>
     <url>
          <loc>https://botts7.github.io/ha-insights/ARCHITECTURE/</loc>
-         <lastmod>2026-07-09</lastmod>
+         <lastmod>2026-09-04</lastmod>
     </url>
     <url>
          <loc>https://botts7.github.io/ha-insights/HA_EVENT_SEMANTICS/</loc>
-         <lastmod>2026-07-09</lastmod>
+         <lastmod>2026-09-04</lastmod>
+    </url>
+    <url>
+         <loc>https://botts7.github.io/ha-insights/conflict-scanner/</loc>
+         <lastmod>2026-09-04</lastmod>
     </url>
     <url>
          <loc>https://botts7.github.io/ha-insights/device_identify_quirks/</loc>
-         <lastmod>2026-07-09</lastmod>
+         <lastmod>2026-09-04</lastmod>
     </url>
     <url>
          <loc>https://botts7.github.io/ha-insights/panel-troubleshooting/</loc>
-         <lastmod>2026-07-09</lastmod>
+         <lastmod>2026-09-04</lastmod>
     </url>
     <url>
          <loc>https://botts7.github.io/ha-insights/privacy/</loc>
-         <lastmod>2026-07-09</lastmod>
+         <lastmod>2026-09-04</lastmod>
     </url>
     <url>
          <loc>https://botts7.github.io/ha-insights/session-handoff-2026-05-17/</loc>
-         <lastmod>2026-07-09</lastmod>
+         <lastmod>2026-09-04</lastmod>
     </url>
     <url>
          <loc>https://botts7.github.io/ha-insights/setup-chrome-devtools-mcp/</loc>
-         <lastmod>2026-07-09</lastmod>
+         <lastmod>2026-09-04</lastmod>
     </url>
     <url>
          <loc>https://botts7.github.io/ha-insights/writing-a-detector/</loc>
-         <lastmod>2026-07-09</lastmod>
+         <lastmod>2026-09-04</lastmod>
     </url>
     <url>
          <loc>https://botts7.github.io/ha-insights/ws-api/</loc>
-         <lastmod>2026-07-09</lastmod>
-    </url>
-    <url>
-         <loc>https://botts7.github.io/ha-insights/drafts/companion_app_ble_active_scan_issue/</loc>
-         <lastmod>2026-07-09</lastmod>
+         <lastmod>2026-09-04</lastmod>
     </url>
     <url>
          <loc>https://botts7.github.io/ha-insights/drafts/companion_app_wifi_rssi_streaming/</loc>
-         <lastmod>2026-07-09</lastmod>
+         <lastmod>2026-09-04</lastmod>
     </url>
 </urlset>

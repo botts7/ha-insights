@@ -10,27 +10,31 @@
       
       
       
-        <link rel="canonical" href="https://botts7.github.io/ha-insights/drafts/companion_app_ble_active_scan_issue/">
+        <link rel="canonical" href="https://botts7.github.io/ha-insights/conflict-scanner/">
       
       
+        <link rel="prev" href="../privacy/">
+      
+      
+        <link rel="next" href="../writing-a-detector/">
       
       
         
       
       
-      <link rel="icon" href="../../assets/images/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
     
     
       
-        <title>Companion app feature request — drafts for github issues - HA Insights</title>
+        <title>Conflict scanner - HA Insights</title>
       
     
     
-      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
       
         
-        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
       
       
 
@@ -49,7 +53,7 @@
       
     
     
-    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
     
       
 
@@ -74,7 +78,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#companion-app-feature-request-drafts-for-github-issues" class="md-skip">
+        <a href="#conflict-scanner" class="md-skip">
           Skip to content
         </a>
       
@@ -90,7 +94,7 @@
 
 <header class="md-header md-header--shadow" data-md-component="header">
   <nav class="md-header__inner md-grid" aria-label="Header">
-    <a href="../.." title="HA Insights" class="md-header__button md-logo" aria-label="HA Insights" data-md-component="logo">
+    <a href=".." title="HA Insights" class="md-header__button md-logo" aria-label="HA Insights" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
@@ -110,7 +114,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Companion app feature request — drafts for github issues
+              Conflict scanner
             
           </span>
         </div>
@@ -228,7 +232,7 @@
 
 <nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
   <label class="md-nav__title" for="__drawer">
-    <a href="../.." title="HA Insights" class="md-nav__button md-logo" aria-label="HA Insights" data-md-component="logo">
+    <a href=".." title="HA Insights" class="md-nav__button md-logo" aria-label="HA Insights" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
@@ -258,7 +262,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../.." class="md-nav__link">
+      <a href=".." class="md-nav__link">
         
   
   
@@ -285,7 +289,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../ARCHITECTURE/" class="md-nav__link">
+      <a href="../ARCHITECTURE/" class="md-nav__link">
         
   
   
@@ -312,7 +316,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../privacy/" class="md-nav__link">
+      <a href="../privacy/" class="md-nav__link">
         
   
   
@@ -336,10 +340,139 @@
       
   
   
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Conflict scanner
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Conflict scanner
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#there-is-nothing-to-start" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        There is nothing to start
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-counts-as-a-match" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What counts as a match
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#known-limits" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Known limits
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#when-the-scanner-is-wrong" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        When the scanner is wrong
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#for-detector-authors" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        For detector authors
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
   
   
     <li class="md-nav__item">
-      <a href="../../writing-a-detector/" class="md-nav__link">
+      <a href="../writing-a-detector/" class="md-nav__link">
         
   
   
@@ -366,7 +499,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../ws-api/" class="md-nav__link">
+      <a href="../ws-api/" class="md-nav__link">
         
   
   
@@ -413,104 +546,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#file-at-httpsgithubcomhome-assistantiosissuesnew-and-httpsgithubcomhome-assistantandroidissuesnew" class="md-nav__link">
+  <a href="#there-is-nothing-to-start" class="md-nav__link">
     <span class="md-ellipsis">
       
-        File at: https://github.com/home-assistant/iOS/issues/new AND https://github.com/home-assistant/android/issues/new
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="File at: https://github.com/home-assistant/iOS/issues/new AND https://github.com/home-assistant/android/issues/new">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#summary" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Summary
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#motivation" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Motivation
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#proposed-api" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Proposed API
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#ux-requirements" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        UX requirements
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#alternatives-considered" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Alternatives considered
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#reference-implementation" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Reference implementation
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#companion-app-capability-advertisement" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Companion-app capability advertisement
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#followup-ha-core-service-proposal" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Followup: HA core service proposal
+        There is nothing to start
       
     </span>
   </a>
@@ -518,10 +557,43 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#related-local-artifacts" class="md-nav__link">
+  <a href="#what-counts-as-a-match" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Related local artifacts
+        What counts as a match
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#known-limits" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Known limits
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#when-the-scanner-is-wrong" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        When the scanner is wrong
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#for-detector-authors" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        For detector authors
       
     </span>
   </a>
@@ -545,7 +617,7 @@
 
 
   
-    <a href="https://github.com/botts7/ha-insights/edit/main/docs/drafts/companion_app_ble_active_scan_issue.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
+    <a href="https://github.com/botts7/ha-insights/edit/main/docs/conflict-scanner.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
       
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4zm10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1z"/></svg>
     </a>
@@ -553,94 +625,95 @@
   
 
 
-<h1 id="companion-app-feature-request-drafts-for-github-issues">Companion app feature request — drafts for github issues<a class="headerlink" href="#companion-app-feature-request-drafts-for-github-issues" title="Permanent link">&para;</a></h1>
-<p>Drafted 2026-05-18 to support HA Insights "Find My HA Device" feature (card v1.10.8 / integration v1.12.18). Copy/paste into the respective companion-app repos.</p>
-<hr />
-<h2 id="file-at-httpsgithubcomhome-assistantiosissuesnew-and-httpsgithubcomhome-assistantandroidissuesnew">File at: https://github.com/home-assistant/iOS/issues/new AND https://github.com/home-assistant/android/issues/new<a class="headerlink" href="#file-at-httpsgithubcomhome-assistantiosissuesnew-and-httpsgithubcomhome-assistantandroidissuesnew" title="Permanent link">&para;</a></h2>
-<p><strong>Title</strong>: Feature request: opt-in active BLE scanner with on-demand RSSI streaming</p>
-<p><strong>Body</strong>:</p>
-<h3 id="summary">Summary<a class="headerlink" href="#summary" title="Permanent link">&para;</a></h3>
-<p>Add an opt-in, on-demand BLE active-scan mode to the Companion app that streams per-device RSSI back to Home Assistant via WebSocket while a subscription is active. The intent is to turn the user's phone into a temporary mobile BLE receiver so HA integrations (and future HA core features) can offer "warmer / colder" proximity-find UX for any BLE-advertising device known to HA — without depending on stationary Bluetooth proxies.</p>
-<h3 id="motivation">Motivation<a class="headerlink" href="#motivation" title="Permanent link">&para;</a></h3>
-<p>Home Assistant currently has scattered identification primitives:</p>
+<h1 id="conflict-scanner">Conflict scanner<a class="headerlink" href="#conflict-scanner" title="Permanent link">&para;</a></h1>
+<p><em>"HA noticed this pattern — but you already have an automation for it."</em></p>
+<p>The conflict scanner checks every automation-proposal insight against your <strong>existing
+automations</strong> and tags the ones that overlap. It answers the most common panel question:
+<em>why am I seeing suggestions for things I already automated?</em> — and, just as often, <em>why
+am I NOT seeing the "already automated" pill on something I know is covered?</em></p>
+<h2 id="there-is-nothing-to-start">There is nothing to start<a class="headerlink" href="#there-is-nothing-to-start" title="Permanent link">&para;</a></h2>
+<p>The scanner is <strong>not a separate tool</strong>. It runs automatically inside every scan —
+scheduled scans and <strong>Scan now</strong> alike. There is no button, service call, or option to
+trigger it on its own.</p>
+<p>When it finds a match, the insight:</p>
 <ul>
-<li><code>light.flash</code> service (lights only, single-fire)</li>
-<li>Companion app "Ring my phone" (mobile_app only)</li>
-<li>Stationary Bluetooth proxies (ESPHome <code>bluetooth_proxy</code>, Shelly H&amp;T, etc.) — fixed in one room each</li>
+<li>keeps showing in the panel (matches are <strong>annotated, never hidden or suppressed</strong>),</li>
+<li>gets the <strong>🔁 already automated</strong> pill, listing the matching automation(s) with links,</li>
+<li>loses its "Automate this?" call-to-action in notifications.</li>
 </ul>
-<p>Stationary proxies enable <strong>room-level</strong> localisation (compare per-proxy RSSI → "device is closer to the kitchen proxy than the lounge proxy"), but they cannot enable <strong>warmer / colder</strong> UX because they don't move. Users who want to physically locate a misnamed Zigbee bulb (<code>light.0x0015abcd...</code>) or a re-paired smart switch with a cryptic id have no good tool today.</p>
-<p>The phone is the obvious mobile scanner: users already carry it everywhere, and the Companion app already has Bluetooth permission for its passive presence-advertising feature.</p>
-<p>Real-world precedent in the HA community is the "BLE Find My Device" workflow that HA Insights (https://github.com/botts7/ha-insights) attempted to ship: the modal currently degrades to room-level only because there's no mobile-scanner data source.</p>
-<h3 id="proposed-api">Proposed API<a class="headerlink" href="#proposed-api" title="Permanent link">&para;</a></h3>
-<p>A new WS command <strong>subscribed by HA, served by the Companion app</strong> (reverse direction from current Companion → HA pattern):</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>{
-</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>  &quot;type&quot;: &quot;mobile_app/active_ble_scan&quot;,
-</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>  &quot;duration_seconds&quot;: 60,      // capped at ~120 server-side
-</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>  &quot;target_addresses&quot;: [        // optional filter; empty = all nearby
-</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>    &quot;AA:BB:CC:DD:EE:FF&quot;
-</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>  ]
-</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>}
-</span></code></pre></div>
-<p>Server (Companion) streams events:</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>{
-</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>  &quot;device_address&quot;: &quot;AA:BB:CC:DD:EE:FF&quot;,
-</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>  &quot;rssi_raw&quot;: -67,
-</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>  &quot;rssi_smoothed&quot;: -65,
-</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>  &quot;name&quot;: &quot;Hue White E27&quot;,     // when in advertisement
-</span><span id="__span-1-6"><a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>  &quot;received_at&quot;: 1716230000.123
-</span><span id="__span-1-7"><a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>}
-</span></code></pre></div>
-<p>Subscription auto-tears down at <code>duration_seconds</code> OR when consumer unsubscribes.</p>
-<h3 id="ux-requirements">UX requirements<a class="headerlink" href="#ux-requirements" title="Permanent link">&para;</a></h3>
+<p>The <strong>"Hide 🔁 already automated"</strong> checkbox in the panel filter bar hides exactly the
+insights carrying that pill. If a finding you consider covered isn't disappearing when
+you enable the filter, it means the scanner didn't match it — see the rules below.</p>
+<h2 id="what-counts-as-a-match">What counts as a match<a class="headerlink" href="#what-counts-as-a-match" title="Permanent link">&para;</a></h2>
+<p>A match always requires <strong>overlapping action targets</strong>: both the insight and the existing
+automation must act on at least one common entity. Groups and scenes are expanded to
+their members on both sides, so an insight targeting <code>light.garden_group</code> matches an
+automation that targets <code>light.deck_01</code>.</p>
+<p>On top of target overlap, one of these trigger rules must hit:</p>
+<table>
+<thead>
+<tr>
+<th>Rule</th>
+<th>Insight trigger</th>
+<th>Existing automation trigger</th>
+<th>Extra requirement</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Time window</td>
+<td><code>time</code></td>
+<td><code>time</code></td>
+<td>trigger times within ±10 minutes</td>
+</tr>
+<tr>
+<td>Same state trigger</td>
+<td><code>state</code></td>
+<td><code>state</code></td>
+<td>same source entity, same <code>to:</code> value, same <code>for:</code> duration</td>
+</tr>
+<tr>
+<td>Schedule-like</td>
+<td>any of <code>time</code> / <code>time_pattern</code> / <code>sun</code> / <code>calendar</code></td>
+<td>any of the same set</td>
+<td>—</td>
+</tr>
+<tr>
+<td>Cross-trigger shadow</td>
+<td>schedule-like</td>
+<td>event-driven (<code>state</code>, <code>numeric_state</code>, <code>template</code>, <code>zone</code>, <code>device</code>) — or the reverse</td>
+<td>both call the <strong>same service</strong> (e.g. <code>light.turn_on</code>) on the common target</td>
+</tr>
+</tbody>
+</table>
+<p>The <em>cross-trigger shadow</em> rule is what catches the classic case: the streak detector
+learns "these lights come on around 17:34 every day", but the reason they do is your
+<strong>motion automation</strong>. Same lights, same <code>light.turn_on</code> — different trigger platform.
+The same-service requirement keeps complementary pairs apart: a "motion → lights on"
+automation does <strong>not</strong> match a "22:00 → lights off" insight.</p>
+<h2 id="known-limits">Known limits<a class="headerlink" href="#known-limits" title="Permanent link">&para;</a></h2>
 <ul>
-<li><strong>Opt-in</strong>: a single setting (<code>Settings → Companion → Allow active BLE scan: off by default</code>) gates the entire feature. App must NOT scan in background without consent.</li>
-<li><strong>Foreground indicator</strong>: while scanning, show a persistent notification on the phone ("HA is using your Bluetooth to find a device"). Tap to cancel.</li>
-<li><strong>Battery-aware</strong>: short default duration (60s), hard cap (120s), explicit user dismissal on every session. No "always-on" mode.</li>
-<li><strong>Permission flow</strong>: standard OS BLE permission request the first time; clear messaging that the data goes ONLY to the user's own Home Assistant instance (already paired via the existing companion link).</li>
-<li><strong>Sub-cycle stop</strong>: an explicit "Stop scanning now" button in the panel notification kills the scan immediately, regardless of remaining duration.</li>
+<li>Matching is <strong>static YAML analysis</strong> — the scanner never evaluates templates or
+  entity states at runtime.</li>
+<li>Two <code>state</code> triggers on <strong>different source entities</strong> only match via the
+  cross-trigger rule (which needs one schedule-like side). Two motion automations from
+  different sensors covering the same light are treated as additive coverage, not
+  duplicates.</li>
+<li>Scripts called from automations (<code>script.turn_on</code> indirection) are not unrolled.</li>
+<li>Blueprints are compared by their rendered trigger/action config.</li>
 </ul>
-<h3 id="alternatives-considered">Alternatives considered<a class="headerlink" href="#alternatives-considered" title="Permanent link">&para;</a></h3>
-<ol>
-<li><strong>Stationary proxy network only</strong>: works for room-level, doesn't address warmer/colder ask.</li>
-<li><strong>One-shot scan service</strong> (<code>mobile_app/scan_ble_once</code> — fire-and-return): simpler, but loses the live trend UX users expect from "Find My iPhone."</li>
-<li><strong>Web Bluetooth API in the HA Web UI</strong>: limited platform support (Chrome only, requires HTTPS + user gesture), no background mode. Companion app is the more portable seam.</li>
-</ol>
-<h3 id="reference-implementation">Reference implementation<a class="headerlink" href="#reference-implementation" title="Permanent link">&para;</a></h3>
-<p>HA Insights provides:
-- <code>lib/ble_capability.py</code> — capability matrix for which entities are BLE-trackable
-- <code>home_insights/ble_live_find</code> WS subscription — consumes per-scanner RSSI from stationary proxies today; would extend to consume from Companion when the feature lands
-- Card-side BLE-find modal — already renders per-scanner RSSI + trend arrow; would add "Use phone scanner" toggle when companion advertises this capability</p>
-<p>I'm happy to prototype this in a Companion fork if maintainers signal interest. Posting as a feature request first to make sure the architectural direction is welcomed before investing the implementation time.</p>
-<h3 id="companion-app-capability-advertisement">Companion-app capability advertisement<a class="headerlink" href="#companion-app-capability-advertisement" title="Permanent link">&para;</a></h3>
-<p>Once shipped, the Companion app should advertise the capability via existing config endpoints so HA integrations can detect it. Suggested addition to <code>mobile_app/get_config</code> response:</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>{
-</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>  &quot;bluetooth_active_scan&quot;: {
-</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>    &quot;available&quot;: true,
-</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>    &quot;consent_granted&quot;: false,
-</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>    &quot;max_duration_seconds&quot;: 120
-</span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>  }
-</span><span id="__span-2-7"><a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>}
-</span></code></pre></div>
-<p>This lets HA-side consumers (HA Insights, future HA-core "Find My Device") gracefully degrade when the capability is absent or consent is denied.</p>
-<hr />
-<h2 id="followup-ha-core-service-proposal">Followup: HA core service proposal<a class="headerlink" href="#followup-ha-core-service-proposal" title="Permanent link">&para;</a></h2>
-<p>After Companion lands the feature, file a separate proposal at https://github.com/home-assistant/architecture/discussions/new to add a <code>homeassistant.find_entity_physically</code> service that abstracts:
-- <code>light.*</code> → flash
-- <code>switch.*</code> → toggle
-- <code>media_player.*</code> → chime
-- BLE-trackable entities → use stationary proxies + Companion active scan if available
-- Returns capability fingerprint to UI consumers</p>
-<p>HA Insights' <code>lib/identify_capability.py</code> is the prototype for the dispatch layer.</p>
-<hr />
-<h2 id="related-local-artifacts">Related local artifacts<a class="headerlink" href="#related-local-artifacts" title="Permanent link">&para;</a></h2>
+<h2 id="when-the-scanner-is-wrong">When the scanner is wrong<a class="headerlink" href="#when-the-scanner-is-wrong" title="Permanent link">&para;</a></h2>
 <ul>
-<li><code>lib/identify_capability.py</code> (HA Insights v1.10 Phase A)</li>
-<li><code>lib/ble_capability.py</code> (HA Insights v1.12.0)</li>
-<li>Card v1.10.8 <code>_renderFindDeviceModal</code> (top-level entity picker, room-level only with proxies today)</li>
-<li>Memory roadmap notes:</li>
-<li><code>ha_insights_find_my_device_core_donation.md</code></li>
-<li><code>ha_insights_companion_app_mobile_scanner_request.md</code></li>
+<li><strong>False negative</strong> (covered, but no pill): use <strong>Dismiss</strong> on the insight — that is
+  the manual "I already have this" action today.</li>
+<li><strong>False positive</strong> (pill on something not actually covered): the pill is informational
+  only; the insight remains fully applicable. Apply it as normal.</li>
 </ul>
+<h2 id="for-detector-authors">For detector authors<a class="headerlink" href="#for-detector-authors" title="Permanent link">&para;</a></h2>
+<p>Matches set <code>Insight.conflicts_with</code> (a tuple of automation ids/aliases) during the
+post-detector annotation pass — detectors don't need to do anything. See
+<code>custom_components/ha_insights/apply/conflict_scanner.py</code> and
+<a href="../ARCHITECTURE/">ARCHITECTURE.md</a> for the pipeline position.</p>
 
 
 
@@ -712,10 +785,10 @@
     
       
       
-      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.instant", "navigation.tracking", "navigation.sections", "navigation.top", "search.suggest", "search.highlight", "content.code.copy", "content.action.edit"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.instant", "navigation.tracking", "navigation.sections", "navigation.top", "search.suggest", "search.highlight", "content.code.copy", "content.action.edit"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
     
     
-      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
       
     
   </body>
