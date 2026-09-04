@@ -220,6 +220,137 @@ def test_state_trigger_entity_id_list_detected() -> None:
     assert find_conflicts(_insight(payload), existing) == ["list_match"]
 
 
+def test_motion_automation_shadows_time_insight() -> None:
+    """The #114 case: lights fire at a learned clock time BECAUSE a
+    motion automation turns them on. Schedule-driven insight vs
+    state-triggered automation, same service on the same target =
+    conflict."""
+    payload = _automation(at="17:34:00", entity_id="light.hallway")
+    existing = [{
+        "id": "motion_lights",
+        "trigger": [
+            {"platform": "state", "entity_id": "binary_sensor.hall_motion", "to": "on"}
+        ],
+        "action": [{"service": "light.turn_on", "target": {"entity_id": "light.hallway"}}],
+    }]
+    assert find_conflicts(_insight(payload), existing) == ["motion_lights"]
+
+
+def test_complementary_service_not_flagged() -> None:
+    """Same target, different service = complementary intent, not a
+    duplicate ("motion → on" vs "22:00 → off")."""
+    payload = {
+        "alias": "Insight",
+        "trigger": [{"platform": "time", "at": "22:00:00"}],
+        "action": [{"service": "light.turn_off", "target": {"entity_id": "light.hallway"}}],
+    }
+    existing = [{
+        "id": "motion_lights",
+        "trigger": [
+            {"platform": "state", "entity_id": "binary_sensor.hall_motion", "to": "on"}
+        ],
+        "action": [{"service": "light.turn_on", "target": {"entity_id": "light.hallway"}}],
+    }]
+    assert find_conflicts(_insight(payload), existing) == []
+
+
+def test_numeric_state_automation_shadows_time_insight() -> None:
+    payload = _automation(at="17:34:00", entity_id="light.hallway")
+    existing = [{
+        "id": "lux_lights",
+        "trigger": [
+            {"platform": "numeric_state", "entity_id": "sensor.hall_lux", "below": 20}
+        ],
+        "action": [{"service": "light.turn_on", "target": {"entity_id": "light.hallway"}}],
+    }]
+    assert find_conflicts(_insight(payload), existing) == ["lux_lights"]
+
+
+def test_device_trigger_automation_shadows_time_insight() -> None:
+    """UI-built motion automations use `platform: device`."""
+    payload = _automation(at="17:34:00", entity_id="light.hallway")
+    existing = [{
+        "id": "ui_motion",
+        "trigger": [{
+            "platform": "device",
+            "device_id": "abc123",
+            "domain": "binary_sensor",
+            "type": "motion",
+        }],
+        "action": [{"service": "light.turn_on", "target": {"entity_id": "light.hallway"}}],
+    }]
+    assert find_conflicts(_insight(payload), existing) == ["ui_motion"]
+
+
+def test_event_insight_shadowed_by_sun_automation() -> None:
+    """Reverse direction: state-triggered insight vs sun-triggered
+    existing automation, same service + target."""
+    payload = {
+        "alias": "Insight",
+        "trigger": [
+            {"platform": "state", "entity_id": "binary_sensor.door", "to": "on"}
+        ],
+        "action": [{"service": "light.turn_on", "target": {"entity_id": "light.porch"}}],
+    }
+    existing = [{
+        "id": "sunset_porch",
+        "trigger": [{"platform": "sun", "event": "sunset"}],
+        "action": [{"service": "light.turn_on", "target": {"entity_id": "light.porch"}}],
+    }]
+    assert find_conflicts(_insight(payload), existing) == ["sunset_porch"]
+
+
+def test_two_event_driven_sides_not_cross_matched() -> None:
+    """The cross-trigger branch needs a schedule side. Two automations
+    on different motion sensors turning on the same light are additive
+    coverage, not duplicates — unchanged behavior."""
+    payload = {
+        "alias": "Insight",
+        "trigger": [
+            {"platform": "state", "entity_id": "binary_sensor.hall_motion", "to": "on"}
+        ],
+        "action": [{"service": "light.turn_on", "target": {"entity_id": "light.hallway"}}],
+    }
+    existing = [{
+        "id": "other_motion",
+        "trigger": [
+            {"platform": "state", "entity_id": "binary_sensor.stair_motion", "to": "on"}
+        ],
+        "action": [{"service": "light.turn_on", "target": {"entity_id": "light.hallway"}}],
+    }]
+    assert find_conflicts(_insight(payload), existing) == []
+
+
+def test_modern_action_key_detected() -> None:
+    """2024.8+ YAML uses `action:` instead of `service:` in actions."""
+    payload = _automation(at="17:34:00", entity_id="light.hallway")
+    existing = [{
+        "id": "modern_yaml",
+        "trigger": [
+            {"platform": "state", "entity_id": "binary_sensor.hall_motion", "to": "on"}
+        ],
+        "action": [{"action": "light.turn_on", "target": {"entity_id": "light.hallway"}}],
+    }]
+    assert find_conflicts(_insight(payload), existing) == ["modern_yaml"]
+
+
+def test_cross_trigger_expands_group_members() -> None:
+    """Insight targets a group; motion automation targets a member.
+    members_of expansion applies to the cross-trigger branch too."""
+    payload = _automation(at="17:34:00", entity_id="light.garden_group")
+    existing = [{
+        "id": "motion_member",
+        "trigger": [
+            {"platform": "state", "entity_id": "binary_sensor.garden_motion", "to": "on"}
+        ],
+        "action": [{"service": "light.turn_on", "target": {"entity_id": "light.deck_01"}}],
+    }]
+    members = {"light.garden_group": frozenset({"light.deck_01", "light.deck_02"})}
+    assert find_conflicts(
+        _insight(payload), existing, members_of=members
+    ) == ["motion_member"]
+
+
 def test_malformed_time_does_not_crash() -> None:
     payload = _automation(at="06:47:00")
     existing = [{

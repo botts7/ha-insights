@@ -12,6 +12,20 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
-      - run: pip install homeassistant pytest pytest-asyncio pytest-homeassistant-custom-component ruff aiosqlite hassil home-assistant-intents
+      # No explicit `homeassistant` here: pytest-homeassistant-custom-component
+      # pins the HA version it was built against, and installing latest HA on
+      # top of it breaks test bootstrap when the two drift (red on main since
+      # 2026-07-09: "module 'homeassistant.components' has no attribute
+      # 'conversation'").
+      - run: pip install pytest pytest-asyncio pytest-homeassistant-custom-component ruff aiosqlite
+      # The conversation component's deps (hassil, home-assistant-intents)
+      # must match the pinned HA version too — latest hassil broke older
+      # HA's `from hassil.recognize import ...`. Install exactly what the
+      # installed HA's own manifest asks for, so this self-heals whenever
+      # the plugin's HA pin moves.
+      - run: |
+          python -c "import json, pathlib, homeassistant; m = pathlib.Path(homeassistant.__file__).parent / 'components' / 'conversation' / 'manifest.json'; print('\n'.join(json.loads(m.read_text())['requirements']))" > conversation-reqs.txt
+          cat conversation-reqs.txt
+          pip install -r conversation-reqs.txt
       - run: ruff check .
       - run: pytest -q tests/
