@@ -12,6 +12,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
-      - run: pip install homeassistant pytest pytest-asyncio pytest-homeassistant-custom-component ruff aiosqlite hassil home-assistant-intents
+      # No explicit `homeassistant` here: pytest-homeassistant-custom-component
+      # pins the HA version it was built against, and installing latest HA on
+      # top of it breaks test bootstrap when the two drift (red on main since
+      # 2026-07-09: "module 'homeassistant.components' has no attribute
+      # 'conversation'").
+      - run: pip install pytest pytest-asyncio pytest-homeassistant-custom-component ruff aiosqlite hassil home-assistant-intents
       - run: ruff check .
       - run: pytest -q tests/
