@@ -4,6 +4,30 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+### Fixed — location suggestions no longer proposed for already-located devices (#116)
+
+`LocationProposalDetector` resolved an entity's area from the entity
+registry entry's `area_id` only. But HA users typically assign the
+area on the **device**, in which case every entity of that device
+keeps `area_id=None` on its own registry entry while still belonging
+to the device's area. Those entities looked "unassigned" to the
+detector, so it emitted "Probably in <area>" proposals for the very
+area the device was already in — exactly the #116 report ("the
+device has *always* had the location set"). The detector now uses
+the effective area (`entity.area_id` falling back to the owning
+device's `area_id`), via the per-scan `ctx.hierarchy.area_of`
+snapshot (or the entity + device registries directly when no
+hierarchy is attached). Device-tagged siblings now also count as
+tagged evidence, so proposals on device-assigned rooms still fire
+for genuinely unassigned entities.
+
+Also fixed in the same report ("retired … come back"): the post-scan
+stale sweep (`replace_active_insights_for_detectors`) checked
+applied/dismissed/snoozed but not `retired_at`, so a retired insight
+the detector skipped for one scan was deleted; when re-detected
+later it re-inserted as a fresh `added` event and notified again,
+losing the retire verdict. The sweep now preserves retired rows.
+
 ### Fixed — conflict scanner: event-driven automations now shadow clock-time insights (#114)
 
 Field report #114: a user's lights fired at the same time every

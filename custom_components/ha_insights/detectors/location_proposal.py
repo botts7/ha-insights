@@ -38,7 +38,15 @@ area's already-tagged siblings. Pre-filtering keeps this cheap.
 ## Pre-filtering (per pre-existing detector convention)
 
   - Only entities in `_RELEVANT_DOMAINS` (sensor)
-  - Only entities WITHOUT an area assignment
+  - Only entities WITHOUT an *effective* area assignment — i.e. no
+    area on the entity registry entry AND none inherited from their
+    device. HA users typically assign the area on the DEVICE, in
+    which case every entity of that device has `area_id=None` on its
+    own registry entry but still belongs to the device's area.
+    Reading only the entity-level `area_id` (the v1.11.5 bug, issue
+    #116) made every entity of an already-located device look
+    "unassigned", so the detector proposed the very area the device
+    was already in.
   - Only entities whose `device_class` matches at least 2 siblings
     in already-tagged rooms (otherwise no comparison data)
   - Skip entities flagged by v1.11.0 PhysicalDeviceLinkDetector
@@ -133,15 +141,15 @@ class LocationProposalDetector(Detector):
         start_ts = cutoff.timestamp()
         end_ts = now_utc.timestamp()
 
-        # Pull entity + area data from registries. Lazy to keep
-        # this dict import-free at module load time.
-        try:
-            from homeassistant.helpers import area_registry as ar
-            from homeassistant.helpers import entity_registry as er
-        except ImportError:
-            return []
-        e_reg = er.async_get(ctx.hass)
-        a_reg = ar.async_get(ctx.hass)
+        # Resolve the EFFECTIVE area of every entity (entity-level
+        # area_id, falling back to the owning device's area_id — the
+        # way HA itself computes it, and the way `build_hierarchy`
+        # already snapshots it into `ctx.hierarchy.area_of`). Reading
+        # only the entity registry entry's `area_id` treats every
+        # entity of a device-tagged device as unassigned and produces
+        # location proposals for the area the device is ALREADY in
+        # (issue #116).
+        area_of = _effective_area_map(ctx)
 
         # Map entity_id → (device_class, area_id_or_None)
         entity_meta: dict[str, tuple[str, str | None]] = {}
@@ -159,10 +167,14 @@ class LocationProposalDetector(Detector):
             if state is None:
                 continue
             dc = state.attributes.get("device_class")
+            if not isinstance(dc, str) and ctx.hierarchy is not None:
+                # Fall back to the registry snapshot when the live
+                # state doesn't carry device_class (some integrations
+                # only set it on the registry entry).
+                dc = ctx.hierarchy.device_class_of.get(entity_id)
             if not isinstance(dc, str):
                 continue
-            er_ent = e_reg.async_get(entity_id)
-            area_id = er_ent.area_id if er_ent is not None else None
+            area_id = area_of.get(entity_id)
             entity_meta[entity_id] = (dc.lower(), area_id)
 
         # Collect events per qualifying entity.
@@ -241,15 +253,15 @@ class LocationProposalDetector(Detector):
 
             if best_area is None or best_median_r < _R_THRESHOLD:
                 continue
-            area = a_reg.async_get_area(best_area)
-            if area is None:
+            area_name = _area_name(ctx, best_area)
+            if area_name is None:
                 continue
             insights.append(
                 self._build_insight(
                     entity_id=entity_id,
                     device_class=dc,
                     area_id=best_area,
-                    area_name=area.name,
+                    area_name=area_name,
                     median_r=best_median_r,
                     n_siblings=best_n_siblings,
                     per_area_results=per_area_results,
@@ -372,3 +384,79 @@ def by_entity_keys(ctx: DetectorContext) -> set[str]:
     for ev in ctx.event_buffer.query():
         seen.add(ev.entity_id)
     return seen
+
+
+def _effective_area_map(ctx: DetectorContext) -> dict[str, str | None]:
+    """entity_id → effective area_id, honoring device-level inheritance.
+
+    HA lets users assign an area either on an individual entity OR on
+    the whole device — the device assignment is the common case in the
+    UI, and then every entity of that device inherits the area even
+    though its own registry entry keeps `area_id=None`. The effective
+    area is therefore `entry.area_id or device.area_id`.
+
+    Prefers the per-scan `ctx.hierarchy` snapshot (built once by
+    `run_all_detectors` via `build_hierarchy`, which already applies
+    exactly this fallback). When no hierarchy is attached (unit tests,
+    direct scan calls), builds the same mapping straight from the
+    entity + device registries. Defensive against mock hass objects:
+    bails out with an empty map rather than iterating MagicMock
+    proxies.
+    """
+    if ctx.hierarchy is not None:
+        return dict(ctx.hierarchy.area_of)
+
+    area_of: dict[str, str | None] = {}
+    try:
+        from homeassistant.helpers import device_registry as dr
+        from homeassistant.helpers import entity_registry as er
+    except ImportError:
+        return area_of
+    try:
+        e_reg = er.async_get(ctx.hass)
+        d_reg = dr.async_get(ctx.hass)
+        device_to_area = {
+            dev.id: dev.area_id
+            for dev in d_reg.devices.values()
+            if isinstance(getattr(dev, "id", None), str)
+        }
+        for entry in e_reg.entities.values():
+            eid = getattr(entry, "entity_id", None)
+            if not isinstance(eid, str):
+                # Not a real registry entry (mock) — stop rather than
+                # fabricate mappings from MagicMock attributes.
+                return {}
+            area_id = entry.area_id
+            if area_id is None and entry.device_id:
+                area_id = device_to_area.get(entry.device_id)
+            area_of[eid] = area_id
+    except (AttributeError, TypeError):
+        return {}
+    return area_of
+
+
+def _area_name(ctx: DetectorContext, area_id: str) -> str | None:
+    """Friendly area name for `area_id`, or None if unknown.
+
+    Prefers the hierarchy snapshot's `area_name_by_id`; falls back to
+    the live area registry. Returns None when neither knows the area
+    (callers treat that as "skip the proposal" — a suggestion with a
+    raw id instead of a room name is not actionable).
+    """
+    if ctx.hierarchy is not None:
+        name = ctx.hierarchy.area_name_by_id.get(area_id)
+        if name:
+            return name
+    try:
+        from homeassistant.helpers import area_registry as ar
+    except ImportError:
+        return None
+    try:
+        a_reg = ar.async_get(ctx.hass)
+        area = a_reg.async_get_area(area_id)
+    except (AttributeError, TypeError):
+        return None
+    if area is None:
+        return None
+    name = getattr(area, "name", None)
+    return name if isinstance(name, str) and name else None

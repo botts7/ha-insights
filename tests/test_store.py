@@ -244,3 +244,117 @@ async def test_purge_observations_preserves_pseudonyms(store: InsightStore) -> N
     await store.purge_observations()
     p2 = await store.get_or_create_pseudonym("light.kitchen")
     assert p1 == p2
+
+
+# --- Retire + stale-sweep interaction (issue #116) ---
+#
+# replace_active_insights_for_detectors must NEVER delete a retired row.
+# Pre-fix it checked applied/dismissed/snoozed but not retired_at, so a
+# retired insight the detector skipped for one scan got swept; when the
+# detector re-emitted it later it was a FRESH insert → "added" event →
+# new notification, and the retire verdict was gone ("they come back").
+
+
+async def test_sweep_preserves_retired_rows(store: InsightStore) -> None:
+    retired = _make_insight(
+        insight_id="retired1", detector="location_proposal", fingerprint={"k": "r"}
+    )
+    stale = _make_insight(
+        insight_id="stale1", detector="location_proposal", fingerprint={"k": "s"}
+    )
+    await store.add_insight(retired)
+    await store.add_insight(stale)
+    assert await store.retire_insight("retired1") is True
+
+    # Detector ran but emitted nothing this scan → both rows are stale
+    # candidates; only the NON-retired one may be swept.
+    swept = await store.replace_active_insights_for_detectors(
+        completed_detectors=frozenset({"location_proposal"}),
+        emitted_ids=frozenset(),
+    )
+    assert swept == 1
+
+    gone = await store.get_insight("stale1")
+    assert gone is None
+
+    kept = await store.get_insight("retired1")
+    assert kept is not None
+    assert kept.retired_at is not None
+    # Default listing still hides it; include_retired surfaces it.
+    assert "retired1" not in {i.id for i in await store.list_insights()}
+    assert "retired1" in {
+        i.id for i in await store.list_insights(include_retired=True)
+    }
+
+
+async def test_retired_insight_reemit_stays_retired_and_fires_refreshed(
+    store: InsightStore,
+) -> None:
+    """Full #116 'retire comes back' scenario: retire an insight, run a
+    sweep that doesn't re-emit it, then re-add the same insight id (the
+    detector saw the pattern again). The row must survive the sweep,
+    stay retired, and fire 'refreshed' (notification-suppressed) —
+    never a fresh 'added'."""
+    events: list[tuple[str, str | None]] = []
+    store.add_listener(lambda etype, ins: events.append((etype, ins.id if ins else None)))
+
+    ins = _make_insight(
+        insight_id="loc1", detector="location_proposal", fingerprint={"entity_id": "sensor.x"}
+    )
+    await store.add_insight(ins)
+    assert await store.retire_insight("loc1") is True
+
+    # Scan where the detector did NOT re-emit it (e.g. r dipped below
+    # threshold for a day) — sweep must keep the retired row.
+    swept = await store.replace_active_insights_for_detectors(
+        completed_detectors=frozenset({"location_proposal"}),
+        emitted_ids=frozenset(),
+    )
+    assert swept == 0
+    assert await store.get_insight("loc1") is not None
+
+    # Next scan re-detects the same fingerprint → same id → upsert.
+    await store.add_insight(ins)
+    kept = await store.get_insight("loc1")
+    assert kept is not None
+    assert kept.retired_at is not None, "retire verdict must survive re-emission"
+
+    # Event sequence: added (first insert), retired (user action),
+    # refreshed (re-emit). No second "added" — that's what previously
+    # re-triggered notifications after the sweep deleted the retired row.
+    assert events == [("added", "loc1"), ("retired", "loc1"), ("refreshed", "loc1")]
+    assert "loc1" not in {i.id for i in await store.list_insights()}
+
+
+async def test_sweep_still_removes_stale_active_rows(store: InsightStore) -> None:
+    """Sanity: the sweep still does its job for non-retired rows, and
+    rows from detectors that didn't run are untouched."""
+    a = _make_insight(insight_id="a", detector="location_proposal", fingerprint={"k": 1})
+    b = _make_insight(insight_id="b", detector="other_detector", fingerprint={"k": 2})
+    await store.add_insight(a)
+    await store.add_insight(b)
+
+    swept = await store.replace_active_insights_for_detectors(
+        completed_detectors=frozenset({"location_proposal"}),
+        emitted_ids=frozenset(),
+    )
+    assert swept == 1
+    assert await store.get_insight("a") is None
+    assert await store.get_insight("b") is not None  # other detector didn't run
+
+
+async def test_clear_retired_allows_fresh_notification(store: InsightStore) -> None:
+    """Un-retiring is the explicit user action that legitimately lets
+    the insight notify again as a fresh 'added'."""
+    events: list[str] = []
+    store.add_listener(lambda etype, ins: events.append(etype))
+
+    ins = _make_insight(insight_id="u1", detector="location_proposal")
+    await store.add_insight(ins)
+    await store.retire_insight("u1")
+    assert await store.clear_retired("u1") is True
+
+    # Row survived (retire cleared, not deleted) → re-emit is 'refreshed'.
+    await store.add_insight(ins)
+    assert events == ["added", "retired", "unretired", "refreshed"]
+    assert (await store.get_insight("u1")).retired_at is None
