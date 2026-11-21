@@ -700,9 +700,11 @@ async def run_all_detectors(
         )
 
     # Sweep stale active insights from the detectors that ran. Applied,
-    # dismissed, and unexpired-snoozed insights are preserved (user
-    # actions outweigh staleness). Detectors that didn't run keep their
-    # prior insights untouched (no fresh signal).
+    # dismissed, retired, and unexpired-snoozed insights are preserved
+    # (user actions outweigh staleness — issue #116: a swept retired row
+    # came back as a fresh "added" + notification when re-detected).
+    # Detectors that didn't run keep their prior insights untouched
+    # (no fresh signal).
     #
     # SAFETY: skip the sweep entirely if the buffer was nearly empty
     # during the scan. An empty buffer makes every detector return [],
